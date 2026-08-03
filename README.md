@@ -230,3 +230,177 @@ python webui.py --noautoopen
 <a href="https://github.com/RVC-Project/Retrieval-based-Voice-Conversion-WebUI/graphs/contributors" target="_blank">
   <img src="https://contrib.rocks/image?repo=RVC-Project/Retrieval-based-Voice-Conversion-WebUI" />
 </a>
+
+---
+
+## 会话总结 - 2026-08-01
+
+- **会话主要目的**: 分析当前程序（RVC WebUI）的功能
+- **完成的主要任务**: 梳理入口、模块结构、WebUI 选项卡与核心推理/训练流程，输出功能分析
+- **关键决策与解决方案**: 基于 README、webui.py、infer/、train/、realtime_gui.py 与启动脚本归纳；未改业务代码
+- **使用的技术栈**: Gradio、PyTorch、HuBERT、FAISS、RMVPE、VITS/NSF、pymss、FreeSimpleGUI、sounddevice
+- **修改的文件列表**: README.md（追加本总结）
+
+
+---
+
+## 会话总结 - 2026-08-01 (2)
+
+- **会话主要目的**: 确认项目是否开源及能否修改代码
+- **完成的主要任务**: 查阅 LICENSE（MIT）与相关协议说明，给出开源与修改权限结论
+- **关键决策与解决方案**: 项目主体为 MIT 开源许可，可自由修改；需保留版权声明，并注意依赖库与训练数据版权
+- **使用的技术栈**: 无（仅许可证分析）
+- **修改的文件列表**: README.md（追加本总结）
+
+
+---
+
+## 会话总结 - 2026-08-01 (3)
+
+- **会话主要目的**: 确认是否具备人声+伴奏混音/一键合并导出能力
+- **完成的主要任务**: 检索 webui/infer/tools，确认仅有分离与变声，无轨道混音合并导出
+- **关键决策与解决方案**: 结论为当前不支持；现有流程为「分离→推理人声→外部软件合并」；若用户需要可后续实现自动合并
+- **使用的技术栈**: 无（功能调研）
+- **修改的文件列表**: README.md（追加本总结）
+
+
+---
+
+## 会话总结 - 2026-08-01 (4)
+
+- **会话主要目的**: 实现「分离 → 变声 → 自动叠伴奏」一键翻唱流水线
+- **完成的主要任务**:
+  1. 新增 	ools/song_cover.py：复用 pymss 分离与 VC 推理，混音导出成品
+  2. 在 WebUI「模型推理」下增加「一键翻唱」选项卡
+  3. 补充中英 i18n 文案
+- **关键决策与解决方案**: 采用整曲一键流水线；中间茎干默认清理，可勾选保留；人声/伴奏音量可调；成品输出到指定文件夹
+- **使用的技术栈**: Gradio、pymss/MSST、RVC VC、librosa、soundfile、numpy
+- **修改的文件列表**:
+  - tools/song_cover.py（新增）
+  - webui.py
+  - i18n/locale/zh_CN.json
+  - i18n/locale/en_US.json
+  - README.md（追加本总结）
+
+
+---
+
+## 会话总结 - 2026-08-01 (5)
+
+- **会话主要目的**: 排查一键翻唱点击后界面像卡住的问题
+- **完成的主要任务**:
+  1. 确认并非死锁：PyMSS 子进程仍在运行，但环境为 `torch 2.13.0+cpu`，RTX 3060 未被使用
+  2. 修复 `pymss_separate` 在无 `event_callback` 时丢弃 progress 事件，导致一键翻唱文本框无进度刷新
+  3. 一键翻唱在 CPU 模式下增加慢速提示；补充中英 i18n
+- **关键决策与解决方案**: UI 假死主因是进度未回传；速度慢主因是 CPU 版 PyTorch。建议安装 CUDA 版 Torch 后重启 WebUI
+- **使用的技术栈**: Gradio、pymss、PyTorch、i18n
+- **修改的文件列表**:
+  - tools/pymss_webui.py
+  - tools/song_cover.py
+  - i18n/locale/zh_CN.json
+  - i18n/locale/en_US.json
+  - README.md（追加本总结）
+
+---
+
+## 会话总结 - 2026-08-01 (6)
+
+- **会话主要目的**: 在 conda 环境 rvc312 中安装 CUDA 版 PyTorch
+- **完成的主要任务**:
+  1. 分析上次失败原因：环境为 `torch 2.13.0+cpu`，与官方 cu118 轮子最高 `2.7.1` 版本不匹配；WebUI/PyMSS 进程占用 DLL 也会导致覆盖失败
+  2. 停止 rvc312 相关 Python 进程后卸载 CPU 版 torch/torchaudio/torchvision
+  3. 按项目要求安装 `torch==2.7.1+cu118`、`torchaudio==2.7.1+cu118`（南大镜像）
+  4. 验证：`cuda available=True`，GPU 为 RTX 3060，`config.device=cuda:0`
+- **关键决策与解决方案**: 不追新版 2.13 CUDA（官方 cu118 索引无对应轮子），改用项目锁定的 2.7.1+cu118；安装前必须先停 WebUI
+- **使用的技术栈**: conda rvc312、PyTorch 2.7.1+cu118、pip 镜像
+- **修改的文件列表**:
+  - README.md（追加本总结）
+  - 环境变更：rvc312 中 torch/torchaudio
+
+---
+
+## 会话总结 - 2026-08-03
+
+- **会话主要目的**: 修复一键翻唱只出干声、缺少伴奏背景的问题，并对齐 Replay 式多音轨输出
+- **完成的主要任务**:
+  1. 强化流水线：分离人声/伴奏 → RVC 变声 → 叠伴奏导出成品
+  2. 始终导出四路文件到输出目录：成品、转换后人声、原始人声、伴奏音乐
+  3. WebUI「一键翻唱」改为音轨列表展示，可分别试听/下载
+  4. 补充中英 i18n
+- **关键决策与解决方案**: 以文件路径回传 Gradio Audio，避免只显示干声；成品为变声人声+伴奏混音，三轨对应 Replay 面板
+- **使用的技术栈**: Gradio 3.14、pymss、RVC VC、soundfile、librosa
+- **修改的文件列表**:
+  - tools/song_cover.py
+  - webui.py
+  - i18n/locale/zh_CN.json
+  - i18n/locale/en_US.json
+  - README.md（追加本总结）
+
+---
+
+## 会话总结 - 2026-08-03 (2)
+
+- **会话主要目的**: 确认一键翻唱修改后是否漏加进度条
+- **完成的主要任务**:
+  1. 核对 webui.py「一键翻唱」与 PyMSS 分离页组件
+  2. 确认一键翻唱仅有文本状态框与四路音轨，未挂载 HTML 进度条
+- **关键决策与解决方案**: 结论为漏加；可视化进度条仅存在于 PyMSS 页（`render_pymss_progress` / `pymss_progress`）；一键翻唱分离阶段进度目前只写进 `cover_info` 文本。待用户确认后可复用同一进度条组件接入
+- **使用的技术栈**: Gradio、tools/song_cover.py、webui.py
+- **修改的文件列表**:
+  - README.md（追加本总结）
+
+---
+
+## 会话总结 - 2026-08-03 (3)
+
+- **会话主要目的**: 为一键翻唱补进度条，并排查 CUDA OOM
+- **完成的主要任务**:
+  1. 一键翻唱按钮下方接入 HTML 进度条，分离阶段跟随 PyMSS 事件刷新
+  2. 分析 OOM：RTX 3060 12GB 上 RVC 与 BS-RoFormer 争用显存；默认 chunk=352800 峰值过高
+  3. 修复 `istft_roformer`：CUDA OOM 时原先非 MPS 仍在 GPU 重试（无效），改为 CPU fallback
+  4. 分离前临时把 VC/Hubert 卸到 CPU；12GB 及以下自动降 chunk/overlap/batch
+- **关键决策与解决方案**: 根因是显存争用 + 大 chunk，不是随机 bug；进度条复用 `render_pymss_progress`
+- **使用的技术栈**: Gradio、PyTorch CUDA、PyMSS BS-RoFormer、i18n
+- **修改的文件列表**:
+  - tools/song_cover.py
+  - tools/pymss_webui.py
+  - tools/pymss_core/modules/bs_roformer/common.py
+  - webui.py
+  - i18n/locale/zh_CN.json
+  - i18n/locale/en_US.json
+  - README.md（追加本总结）
+
+## 会话总结 - 2026-08-03 (4)
+
+- **会话主要目的**: 排查「成品」未合并伴奏是系统不支持还是缺依赖
+- **完成的主要任务**:
+  1. 确认系统已支持混音（`mix_vocal_instrumental`），无需额外依赖
+  2. 定位根因：RVC 输出 int16（±32768）与伴奏 float（±1）直接相加，峰值归一化后伴奏被压到几乎听不见
+  3. 修复混音前音量归一化；已用现有分离结果重写本次 `_cover.wav`
+- **关键决策与解决方案**: 在混音前统一把人声/伴奏转到 float [-1,1]（int16 / 32768），不引入新库
+- **使用的技术栈**: soundfile、numpy、librosa、tools/song_cover.py
+- **修改的文件列表**:
+  - tools/song_cover.py
+  - README.md（追加本总结）
+  - opt/*_cover.wav（本地重混修复，未纳入版本库）
+
+---
+
+## 会话总结 - 2026-08-03 (5)
+
+- **会话主要目的**: 将一键翻唱从 webui.py 拆出，降低与官方上游合并冲突
+- **完成的主要任务**:
+  1. 新增 `tools/song_cover_webui.py`：承载一键翻唱 Tab UI 与事件绑定
+  2. 新增 `webui_cover.py`：启动时向官方 webui.py 注入 Tab（不改官方文件内容落盘）
+  3. 从 `webui.py` 移除一键翻唱相关 import/Tab/`infer_change_voice` 改写，恢复官方 `sid0.change(vc.get_vc, ...)`
+  4. `go-webui.bat` 改为启动 `webui_cover.py`
+- **关键决策与解决方案**: 用启动器字符串注入锚点「人声伴奏分离&去混响」前插入 `build_song_cover_tab`；音色切换通过监听 `file_index1`/`protect0` 同步，避免二次 `get_vc`
+- **使用的技术栈**: Gradio、functools.partial、exec 注入启动
+- **修改的文件列表**:
+  - tools/song_cover_webui.py（新增）
+  - webui_cover.py（新增）
+  - webui.py（移除一键翻唱）
+  - go-webui.bat
+  - README.md（追加本总结）
+
+---

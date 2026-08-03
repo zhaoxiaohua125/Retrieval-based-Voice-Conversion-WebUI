@@ -1,4 +1,5 @@
 import gc
+import html
 import json
 import logging
 import os
@@ -28,6 +29,10 @@ weight_pymss_root = Path(os.getenv("weight_pymss_root", "assets/pymss_weights"))
 tools_root = str(Path(__file__).resolve().parent)
 if tools_root not in sys.path:
     sys.path.insert(0, tools_root)
+CUDA_DEFAULT_CHUNK_SIZE = 352800
+CUDA_LOW_VRAM_CHUNK_SIZE = 176400
+CUDA_LOW_VRAM_OVERLAP_SIZE = 88200
+CUDA_LOW_VRAM_FREE_BYTES = int(6.5 * 1024**3)
 
 MODEL_SAMPLE_RATE = 44100
 DML_CHUNK_SIZE = 88200
@@ -194,6 +199,59 @@ def get_model_info(model_name):
     return "%s | %s" % (spec.model_type, spec.model_id)
 
 
+def render_pymss_progress(percent=0, label="等待开始", state="idle"):
+    percent = max(0.0, min(100.0, float(percent or 0)))
+    colors = {
+        "idle": "#64748b",
+        "running": "#2563eb",
+        "done": "#15803d",
+        "stopped": "#b45309",
+        "failed": "#b91c1c",
+    }
+    color = colors.get(state, colors["running"])
+    safe_label = html.escape(str(label or ""))
+    return (
+        '<div style="min-height:52px;padding:6px 0;">'
+        '<div style="display:flex;justify-content:space-between;gap:12px;'
+        'align-items:center;margin-bottom:7px;font-size:14px;line-height:20px;">'
+        '<span style="overflow-wrap:anywhere;">%s</span>'
+        '<strong style="flex:0 0 auto;color:%s;">%.1f%%</strong>'
+        "</div>"
+        '<div role="progressbar" aria-valuemin="0" aria-valuemax="100" '
+        'aria-valuenow="%.1f" style="height:10px;width:100%%;overflow:hidden;'
+        'border-radius:4px;background:#e2e8f0;">'
+        '<div style="height:100%%;width:%.3f%%;background:%s;"></div>'
+        "</div></div>"
+    ) % (safe_label, color, percent, percent, percent, color)
+
+
+def _cuda_chunk_plan(spec):
+    chunk_size = CUDA_DEFAULT_CHUNK_SIZE
+    overlap_size = spec.overlap_size
+    batch_size = spec.batch_size
+    if not torch.cuda.is_available():
+        return chunk_size, overlap_size, batch_size
+    try:
+        free_bytes, total_bytes = torch.cuda.mem_get_info()
+    except Exception:
+        logger.exception("Failed to query CUDA free memory")
+        return chunk_size, overlap_size, batch_size
+    # 12GB 及以下显卡，或空闲不足时，降低 chunk 避免 istft OOM
+    if total_bytes <= 12 * 1024**3 or free_bytes < CUDA_LOW_VRAM_FREE_BYTES:
+        chunk_size = CUDA_LOW_VRAM_CHUNK_SIZE
+        overlap_size = min(overlap_size, CUDA_LOW_VRAM_OVERLAP_SIZE)
+        batch_size = 1
+        logger.warning(
+            "CUDA memory constrained (free=%.2f/%.2f GiB); using chunk=%s overlap=%s batch=%s",
+            free_bytes / (1024**3),
+            total_bytes / (1024**3),
+            chunk_size,
+            overlap_size,
+            batch_size,
+        )
+    return chunk_size, overlap_size, batch_size
+
+
 def clean_path(path):
     path = path or ""
     if path.endswith(("\\", "/")):
@@ -319,9 +377,16 @@ class MSSTBatchSeparator:
         model_dtype = _normalize_dml_model_dtype(model_dtype) if use_dml else "auto"
         device_id = parsed_device.index if use_cuda and parsed_device.index is not None else 0
         pymss_device = str(parsed_device) if use_dml else ("cuda" if use_cuda else "cpu")
-        batch_size = 1 if use_dml else spec.batch_size
-        chunk_size = DML_CHUNK_SIZE if use_dml else 352800
-        overlap_size = DML_OVERLAP_SIZE if use_dml else spec.overlap_size
+        if use_dml:
+            batch_size = 1
+            chunk_size = DML_CHUNK_SIZE
+            overlap_size = DML_OVERLAP_SIZE
+        elif use_cuda:
+            chunk_size, overlap_size, batch_size = _cuda_chunk_plan(spec)
+        else:
+            batch_size = spec.batch_size
+            chunk_size = CUDA_DEFAULT_CHUNK_SIZE
+            overlap_size = spec.overlap_size
         self._load_audio = load_audio
         self.model_load_count = 0
         self.separator = None
@@ -1065,12 +1130,19 @@ def pymss_separate(
                     event_type = event.get("event")
                     notify(event)
                     if event_type == "progress":
-                        if event_callback is not None:
-                            yield "\n".join(infos)
+                        done = max(0.0, float(event.get("done") or 0))
+                        total = max(1.0, float(event.get("total") or 1))
+                        percent = min(100.0, done / total * 100)
+                        progress_line = "进度：%.1f%%（%.0f/%.0f）· %s" % (
+                            percent,
+                            done,
+                            total,
+                            event.get("message") or "正在处理音频",
+                        )
+                        yield "\n".join(list(infos) + [progress_line])
                         continue
                     if event_type == "done":
-                        if event_callback is not None:
-                            yield "\n".join(infos)
+                        yield "\n".join(infos)
                         continue
 
                     message = event.get("message")

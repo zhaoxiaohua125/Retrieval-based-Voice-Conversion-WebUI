@@ -349,11 +349,20 @@ def stft_roformer(module, raw_audio):
     else:
         try:
             stft_repr = torch.stft(stft_audio, **module.stft_kwargs, window=stft_window, return_complex=True)
-        except RuntimeError:
+        except RuntimeError as error:
+            message = str(error).lower()
+            use_cpu_fallback = x_is_mps or "out of memory" in message or "cuda" in message
+            if not use_cpu_fallback:
+                raise
+            if torch.cuda.is_available():
+                try:
+                    torch.cuda.empty_cache()
+                except Exception:
+                    pass
             stft_repr = torch.stft(
-                stft_audio.cpu() if x_is_mps else stft_audio,
+                stft_audio.detach().cpu(),
                 **module.stft_kwargs,
-                window=stft_window.cpu() if x_is_mps else stft_window,
+                window=stft_window.detach().cpu(),
                 return_complex=True,
             ).to(device)
 
@@ -398,11 +407,20 @@ def istft_roformer(module, stft_repr, context, length):
             recon_audio = torch.istft(
                 stft_repr, **module.stft_kwargs, window=context.stft_window, return_complex=False, length=length
             )
-        except RuntimeError:
+        except RuntimeError as error:
+            message = str(error).lower()
+            use_cpu_fallback = context.x_is_mps or "out of memory" in message or "cuda" in message
+            if not use_cpu_fallback:
+                raise
+            if torch.cuda.is_available():
+                try:
+                    torch.cuda.empty_cache()
+                except Exception:
+                    pass
             recon_audio = torch.istft(
-                stft_repr.cpu() if context.x_is_mps else stft_repr,
+                stft_repr.detach().cpu(),
                 **module.stft_kwargs,
-                window=context.stft_window.cpu() if context.x_is_mps else context.stft_window,
+                window=context.stft_window.detach().cpu(),
                 return_complex=False,
                 length=length,
             ).to(context.stft_window.device)
