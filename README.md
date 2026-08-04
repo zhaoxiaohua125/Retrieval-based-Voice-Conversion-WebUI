@@ -571,3 +571,20 @@ python webui.py --noautoopen
   - scripts/test_task4_realtime.py、开发大纲.md、README.md
 
 ---
+
+## 会话总结 - 2026-08-04 (11)
+
+- **会话主要目的**: 完成分段任务 6（歌词同步 & Studio One 时间同步）
+- **完成的主要任务**:
+  1. 新增 `app/lyrics/`：LRC 解析、匹配器、OSC/MTC/仿真时钟、`LyricsService`
+  2. 调度总线推送 `lyric_tick`（索引 + 文本 + 时间）
+  3. `run_ui_skeleton.py` 接入悬浮歌词窗高亮
+  4. 扩展 `config/client.json` → `lyrics.*`；`requirments_client_ui.txt` 增加 python-osc
+  5. 新增 `scripts/test_task6_lyrics.py`（可选 `--osc` mock）
+- **关键决策与解决方案**: 延迟补偿用 `offset_ms` 而非改 LRC 文件；OSC 地址可配置；MTC 为可选骨架
+- **使用的技术栈**: python-osc、AppScheduler、PyQt6 LyricsWindow
+- **修改的文件列表**:
+  - app/lyrics/*.py、scripts/test_task6_lyrics.py（新增）
+  - app/config_store.py、scripts/run_ui_skeleton.py、requirments_client_ui.txt、开发大纲.md、README.md
+
+---

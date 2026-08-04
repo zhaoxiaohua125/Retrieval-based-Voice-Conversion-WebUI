@@ -50,6 +50,18 @@ DEFAULT_CONFIG = {
     'msst': {
         'preset': 'normal',
     },
+    'lyrics': {
+        'clock_source': 'manual',
+        'osc_port': 9000,
+        'osc_addresses': [
+            '/transport/time',
+            '/studioone/transport/time',
+            '/time',
+        ],
+        'offset_ms': 0,
+        'mtc_port': '',
+        'sim_speed': 1.0,
+    },
 }
 
 

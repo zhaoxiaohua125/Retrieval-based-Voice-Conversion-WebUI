@@ -15,6 +15,22 @@ from app.scheduler import AppScheduler
 from app.ui import MainWindow, LyricsWindow, UiBridge, build_tray
 
 
+def _wire_lyrics(scheduler: AppScheduler, lyrics: LyricsWindow):
+    from app.lyrics import LyricsService
+
+    svc = LyricsService(scheduler).attach_scheduler()
+    svc.set_tick_handler(lambda payload: lyrics.set_line(payload.get('text', ''), highlight=True))
+
+    def on_status(msg: BusMessage):
+        if msg.source != ModuleId.LYRICS:
+            return
+        if msg.payload.get('action') == 'lyrics_sync_started':
+            lyrics.show()
+
+    scheduler.subscribe(SignalType.STATUS, on_status)
+    return svc
+
+
 def _wire_scheduler(bridge: UiBridge, scheduler: AppScheduler):
     """UI 操作 → 调度总线；日志 → UI。"""
 
@@ -47,6 +63,7 @@ def main():
     window = MainWindow(bridge, project_root=ROOT)
     lyrics = LyricsWindow()
     lyrics.move(window.x() + 40, window.y() + 80)
+    _wire_lyrics(scheduler, lyrics)
 
     tray = None
     if QSystemTrayIcon.isSystemTrayAvailable():
