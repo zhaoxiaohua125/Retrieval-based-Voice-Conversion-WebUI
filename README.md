@@ -451,3 +451,19 @@ python webui.py --noautoopen
   - README.md（追加本总结）
 
 ---
+
+## 会话总结 - 2026-08-04 (4)
+
+- **会话主要目的**: 完成开发大纲分段任务 1（系统运维工具模块），遵守「新功能写新模块、不改上游已有代码」
+- **完成的主要任务**:
+  1. 新增 `app/ops/`：分级滚动日志、硬件信息采集、异常装饰器、日志打包/HTTP 上报、自动更新（版本/MD5/下载/回滚）
+  2. 新增验收脚本 `scripts/test_task1_ops.py`（本地 mock 更新包 + 内置 HTTP 上传测试）
+  3. 阶段 0 的 `app/` 文件未改动
+- **关键决策与解决方案**: 运维能力全部落在 `app/ops/`；torch/sounddevice/httpx 按需 import，无依赖时降级不崩溃
+- **使用的技术栈**: Python 3.12、RotatingFileHandler、httpx、urllib、zipfile
+- **修改的文件列表**:
+  - app/ops/*.py（新增）
+  - scripts/test_task1_ops.py（新增）
+  - README.md（追加本总结）
+
+---
