@@ -613,3 +613,71 @@ python webui.py --noautoopen
 - **修改文件**: `app/rvc/vc_context.py`、`upstream_imports.py`、`app/msst/pipeline.py`、`scripts/run_ui_skeleton.py`
 
 ---
+
+## 会话总结 - 2026-08-04 (14)
+
+- **会话主要目的**: AI 跟唱实机联调遇循环声；用户决定该项最后再做，并明确下一步方向
+- **完成的主要任务**:
+  1. 核对 `client.json`（input=1 / output=10 合理）与 Voicemeeter 反馈环根因（变声回灌 B1）
+  2. 在 `开发大纲.md` 链路 1 / 任务 7 标注：**AI 跟唱 + Voicemeeter 联调挂起，最后再做**
+  3. 列出任务 0~7 之后的建议顺序：UI 完善 → OSC 真机 → AI 跟唱路由 → 打包
+- **关键决策与解决方案**: 实时跟唱代码保留；实机路由联调延后；离线做歌已可用
+- **修改的文件列表**: 开发大纲.md、README.md
+
+---
+
+## 会话总结 - 2026-08-04 (15)
+
+- **会话主要目的**: UI 完善，优先完成「AI 唱歌」功能（播放离线成品，非实时 RVC）
+- **完成的主要任务**:
+  1. 新增 `app/playback/`：`scan_song_library` 扫描 `opt/` 与 `opt/task4_offline/` 的 `*_cover.wav` / `*_converted_vocal.wav`
+  2. 新增 `WavPlayer`（sounddevice 流式播放，支持暂停/停止/拖动进度）
+  3. 重写 `playback_page.py`：歌库列表、搜索、刷新、大歌词区、进度条、AI 唱歌高亮按钮
+  4. `ClientController` 接入 `playback_ai_sing` / 选歌 / 暂停 / 停止 / 拖动；播放时 manual 时钟驱动歌词
+  5. 离线做歌完成后自动刷新歌库；`run_ui_skeleton.py` 绑定 UI 状态回传
+  6. 扩展 `test_task7_integration.py` 歌库与 AI 唱歌路由验收
+- **关键决策与解决方案**: AI 唱歌优先播放 `cover.wav`（无则 fallback `converted_vocal.wav`）；AI 跟唱保留但标注 Voicemeeter 待联调
+- **使用的技术栈**: sounddevice、soundfile、PyQt6、AppScheduler、LyricsService ManualClock
+- **修改的文件列表**:
+  - app/playback/*.py、app/ui/pages/playback_page.py（新增/重写）
+  - app/integration/controller.py、app/integration/state.py
+  - scripts/run_ui_skeleton.py、scripts/test_task7_integration.py、README.md
+
+---
+
+## 会话总结 - 2026-08-04 (16)
+
+- **会话主要目的**: 排查 MP3（11MB《星星点灯》）离线做歌 RVC 转换失败原因并修复
+- **完成的主要任务**:
+  1. 核对 `opt/task4_offline/`：MSST 四轨已全部生成，仅 RVC 阶段失败 → **非 MP3 格式/文件大小问题**
+  2. 根因：歌曲约 **303 秒**，RMVPE 对整段干声做 F0 时 GPU 显存不足（15s 片段可成功）
+  3. `offline_pipeline.py` 新增 **45 秒分段 RVC 推理**（`_vc_infer`），长歌自动分段再拼接
+  4. 失败时 UI 日志输出完整 `detail` 堆栈，便于后续排查
+- **关键决策与解决方案**: MP3 由 MSST/ffmpeg 正常读取；瓶颈在 RVC 长音频显存；分段推理不改上游 infer/
+- **使用的技术栈**: soundfile、PyTorch/RVC、RMVPE、RTX 3060 12GB
+- **修改的文件列表**:
+  - app/rvc/offline_pipeline.py、app/integration/controller.py、README.md
+
+---
+
+## 会话总结 - 2026-08-04 (17)
+
+- **会话主要目的**: 排查播放页找不到 LRC 歌词的原因
+- **完成的主要任务**:
+  1. 确认命名规则：LRC 须与 WAV **主文件名**一致，如 `星星点灯-郑智化.lrc`；用户误命名为 `*_cover.lrc`
+  2. 扩展 `find_lrc_in_dir`：兼容 `{stem}_cover.lrc` 等同目录变体
+  3. 选歌时重新扫描 LRC 并 `isfile` 校验，避免路径不存在时抛错
+- **修改的文件列表**: app/playback/library.py、app/integration/controller.py、README.md
+
+---
+
+## 会话总结 - 2026-08-04 (18)
+
+- **会话主要目的**: 播放页歌词应显示在中间主区域，而非仅在右侧列表
+- **完成的主要任务**:
+  1. 修复 `lyric_tick` 事件路由：原仅监听 SCHEDULER，歌词模块 LYRICS 发出的 tick 未到达播放页
+  2. 中间区改为 K 歌布局：上一句（灰）/ 当前句（大字蓝）/ 下一句（灰）
+  3. 加载 LRC 后中间立即显示首句；播放时随进度高亮并滚动右侧进度列表
+- **修改的文件列表**: app/ui/pages/playback_page.py、scripts/run_ui_skeleton.py、README.md
+
+---

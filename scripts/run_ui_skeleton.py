@@ -11,6 +11,7 @@ os.chdir(ROOT)
 
 from PyQt6.QtWidgets import QApplication, QMessageBox, QSystemTrayIcon
 
+from app.events import BusMessage, ModuleId, SignalType
 from app.integration import ClientController
 from app.ops.rotating_log import setup_rotating_logging
 from app.scheduler import AppScheduler
@@ -32,7 +33,6 @@ def main():
     controller.start()
 
     def on_user_action(action: str, payload: dict):
-        from app.events import BusMessage, ModuleId, SignalType
         scheduler.publish(BusMessage(SignalType.STATUS, ModuleId.UI, {'action': action, **(payload or {})}))
         if payload.get('log'):
             bridge.log_message.emit(str(payload['log']))
@@ -44,13 +44,39 @@ def main():
     lyrics.move(window.x() + 40, window.y() + 80)
     controller.set_lyrics_window(lyrics)
 
+    def on_scheduler_status(msg: BusMessage):
+        payload = msg.payload or {}
+        action = payload.get('action')
+        page = window.page_playback
+        if action == 'lyric_tick' and msg.source == ModuleId.LYRICS:
+            page.set_lyric_tick(payload)
+            return
+        if msg.source != ModuleId.SCHEDULER:
+            return
+        if action == 'library_updated':
+            page.apply_library(payload.get('songs', []))
+        elif action == 'playback_tick':
+            page.set_playback_state(payload)
+        elif action == 'playback_started':
+            page.set_mode('ai_sing', active=True)
+            page.set_playback_state(payload)
+        elif action in ('playback_stopped', 'playback_finished'):
+            page.set_mode('idle')
+        elif action == 'lyrics_loaded':
+            if payload.get('lines'):
+                page.set_lyrics_lines(payload.get('lines'))
+        elif action == 'lyric_tick':
+            page.set_lyric_tick(payload)
+
+    scheduler.subscribe(SignalType.STATUS, on_scheduler_status)
+
     tray = None
     if QSystemTrayIcon.isSystemTrayAvailable():
         tray = build_tray(bridge, window, lyrics, controller)
         tray.show()
 
     window.show()
-    bridge.log_message.emit('客户端已启动（离线做歌 / AI 跟唱 / 歌词同步已接入调度层）')
+    bridge.log_message.emit('客户端已启动（AI 唱歌 / 离线做歌 / 歌词同步已接入）')
 
     code = app.exec()
     controller.shutdown()

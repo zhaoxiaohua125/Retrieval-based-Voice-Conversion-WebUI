@@ -15,8 +15,8 @@
     "block_ms": 200,
     "channels": 1,
     "dtype": "float32",
-    "input_device": null,
-    "output_device": null,
+    "input_device": 1,
+    "output_device": 10,
     "hostapi": null,
     "wasapi_exclusive": false,
     "ring_ms": 500,
@@ -30,7 +30,7 @@
     "formant": 0.0
   },
   "realtime": {
-    "model_sid": "",
+    "model_sid": "1孙悟空模型.pth",
     "index_path": "",
     "pitch": 0,
     "formant": 0.0,
@@ -58,8 +58,8 @@
   },
   "ui": {
     "geometry": [
-      990,
-      284,
+      1059,
+      247,
       1280,
       784
     ],

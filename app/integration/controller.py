@@ -11,6 +11,8 @@ from app.events import BusMessage, ModuleId, SignalType
 from app.integration.state import ClientState
 from app.lyrics import LyricsService
 from app.ops.exceptions import classify_exception
+from app.playback import WavPlayer, scan_song_library
+from app.playback.library import find_lrc_in_dir
 from app.rvc.types import RvcInferParams
 from app.rvc.vc_context import discover_first_model, resolve_index_for_model
 from app.scheduler import AppScheduler
@@ -34,6 +36,10 @@ class ClientController:
         self._lyrics_window = None
         self._offline_thread = None
         self._offline_pipeline = None
+        self._player = WavPlayer()
+        self._playback_tick = None
+        self._playback_stop = threading.Event()
+        self._library = []
         self._started = False
         self._lock = threading.RLock()
 
@@ -59,11 +65,13 @@ class ClientController:
         self.scheduler.subscribe(SignalType.ERROR, self._on_error)
         self.scheduler.add_shutdown_hook(self.shutdown)
         self._started = True
+        self._refresh_library()
         self._publish_status('controller_ready', log='集成控制器已就绪')
         return self
 
     def shutdown(self):
         with self._lock:
+            self._stop_playback()
             self.stop_realtime()
             self._cancel_offline(wait=True)
             self.lyrics.stop()
@@ -106,10 +114,15 @@ class ClientController:
             return
         handlers = {
             'offline_cover': self._start_offline_cover,
+            'playback_refresh_library': lambda p: self._refresh_library(),
+            'playback_select_song': self._select_song,
+            'playback_ai_sing': self._start_ai_sing,
+            'playback_toggle_pause': self._toggle_playback_pause,
+            'playback_stop': lambda p: self._stop_playback(),
+            'playback_seek': self._seek_playback,
             'playback_ai_follow': self._start_ai_follow,
             'realtime_start': self._start_ai_follow,
             'realtime_stop': self.stop_realtime,
-            'playback_ai_sing': lambda p: self._publish_status('playback_ai_sing', log='AI 唱歌：请使用离线做歌生成人声后播放'),
             'playback_reverb_talk': lambda p: self._start_passthrough('混响说话'),
             'playback_normal_talk': lambda p: self._start_passthrough('普通说话'),
             'ai_toggle': self._toggle_ai,
@@ -139,11 +152,131 @@ class ClientController:
         self._log_ui('错误: %s' % detail)
 
     def _start_passthrough(self, label: str, payload=None):
+        self._stop_playback()
         if self.state.realtime_running:
             self.stop_realtime()
         self.audio.start_stream(passthrough=True)
         self.state.mode = 'passthrough'
         self._publish_status('passthrough_started', log='%s：音频直通已启动（未经 RVC）' % label)
+
+    def _refresh_library(self):
+        opt_dir = self.config_store.get('paths.opt_dir', 'opt')
+        dirs = [opt_dir, str(Path(opt_dir) / 'task4_offline')]
+        self._library = scan_song_library(self.project_root, dirs=dirs)
+        self._publish_status('library_updated', songs=self._library, log='歌库已刷新（%s 首）' % len(self._library))
+
+    def _select_song(self, payload: dict):
+        song = (payload or {}).get('song') or payload or {}
+        if not song.get('play_path'):
+            return
+        self.state.selected_song = dict(song)
+        lrc = song.get('lrc_path') or find_lrc_in_dir(song.get('dir') or Path(song.get('play_path', '')).parent, song.get('title', ''))
+        if lrc and Path(lrc).is_file():
+            self.lyrics.load_lrc(lrc)
+            self.state.loaded_lyrics = True
+            self.state.selected_song['lrc_path'] = lrc
+            doc = self.lyrics.document
+            self._publish_status(
+                'lyrics_loaded',
+                lines=[ln.text for ln in doc.lines],
+                log='已加载歌词：%s（%s 行）' % (doc.title or song.get('title', ''), len(doc.lines)),
+            )
+        else:
+            self.state.loaded_lyrics = False
+            hint = Path(lrc).name if lrc else '%s.lrc' % song.get('title', '')
+            self._publish_status('lyrics_missing', log='未找到歌词文件（期望同名 %s），仅播放音频' % hint)
+
+    def _start_ai_sing(self, payload: dict):
+        if self.state.offline_running:
+            self._publish_status('playback_blocked', log='离线做歌进行中，请稍后再播放')
+            return
+        song = (payload or {}).get('song') or self.state.selected_song or {}
+        play_path = song.get('play_path') or song.get('cover_path') or song.get('vocal_path')
+        if not play_path:
+            self._publish_error('请先在歌库选择已生成的 AI 歌曲（需 cover.wav 或 converted_vocal.wav）')
+            return
+        if self.state.realtime_running:
+            self.stop_realtime()
+        self._select_song({'song': song})
+        self._stop_playback()
+        try:
+            duration = self._player.load(play_path)
+        except Exception as exc:
+            self._publish_error('无法加载音频: %s' % exc, exc)
+            return
+        self.state.playback_running = True
+        self.state.mode = 'ai_sing'
+        self.lyrics.start(source='manual')
+        self.state.lyrics_running = True
+        self._playback_stop.clear()
+        self._playback_tick = threading.Thread(target=self._playback_tick_loop, name='playback-tick', daemon=True)
+        self.scheduler.register_thread('playback-tick', self._playback_tick)
+        self._playback_tick.start()
+        self._player.play(on_finish=self._on_playback_finished)
+        title = song.get('title') or Path(play_path).stem
+        self._publish_status(
+            'playback_started',
+            title=title,
+            play_path=play_path,
+            duration=duration,
+            log='AI 唱歌：正在播放 %s' % title,
+        )
+
+    def _playback_tick_loop(self):
+        while not self._playback_stop.is_set():
+            if self._player.is_active:
+                pos = self._player.position
+                self.lyrics.set_manual_time(pos)
+                self._publish_status(
+                    'playback_tick',
+                    position=pos,
+                    duration=self._player.duration,
+                    playing=self._player.is_playing,
+                    paused=not self._player.is_playing and self._player.is_active,
+                )
+            if self._playback_stop.wait(0.1):
+                break
+
+    def _on_playback_finished(self):
+        self.scheduler.publish(
+            BusMessage(
+                SignalType.STATUS,
+                ModuleId.SCHEDULER,
+                {'action': 'playback_finished', 'log': 'AI 唱歌播放完成'},
+            )
+        )
+        self._stop_playback()
+
+    def _toggle_playback_pause(self, payload=None):
+        if not self.state.playback_running:
+            if self.state.selected_song:
+                self._start_ai_sing({'song': self.state.selected_song})
+            else:
+                self._publish_status('playback_idle', log='请先选择歌曲')
+            return
+        resumed = self._player.toggle_pause()
+        self._publish_status('playback_paused' if not resumed else 'playback_resumed', playing=resumed)
+
+    def _seek_playback(self, payload: dict):
+        ratio = float((payload or {}).get('ratio', 0))
+        if not self._player.is_active or self._player.duration <= 0:
+            return
+        self._player.seek_ratio(ratio)
+        self.lyrics.set_manual_time(self._player.position)
+
+    def _stop_playback(self, payload=None):
+        self._playback_stop.set()
+        self._player.stop()
+        if self._playback_tick and self._playback_tick.is_alive():
+            self._playback_tick.join(timeout=1.0)
+        self._playback_tick = None
+        self.scheduler.unregister_thread('playback-tick')
+        if self.state.mode == 'ai_sing':
+            self.lyrics.stop()
+            self.state.lyrics_running = False
+            self.state.mode = 'idle'
+        self.state.playback_running = False
+        self._publish_status('playback_stopped', log='播放已停止')
 
     def _toggle_ai(self, payload=None):
         if self.state.realtime_running:
@@ -152,6 +285,8 @@ class ClientController:
             self._start_ai_follow(payload or {})
 
     def _start_ai_follow(self, payload: dict):
+        if self.state.playback_running:
+            self._stop_playback()
         if self.state.offline_running:
             self._publish_status('realtime_blocked', log='离线任务进行中，请稍后再启动 AI 跟唱')
             return
@@ -172,7 +307,22 @@ class ClientController:
             clock = self.config_store.get('lyrics.clock_source', 'osc')
             self.lyrics.start(source=clock)
             self.state.lyrics_running = True
-        self._publish_status('realtime_started', model_sid=model_sid, log='AI 跟唱已启动（模型 %s）' % model_sid)
+        self._publish_status(
+            'realtime_started',
+            model_sid=model_sid,
+            log='AI 跟唱已启动（模型 %s）\n音频 IN: %s\n音频 OUT: %s'
+            % (model_sid, self._device_name(self.audio.manager.config.input_device if self.audio.manager else None),
+               self._device_name(self.audio.manager.config.output_device if self.audio.manager else None)),
+        )
+
+    def _device_name(self, index):
+        if index is None:
+            return '未设置'
+        try:
+            import sounddevice as sd
+            return str(sd.query_devices(index).get('name', index))
+        except Exception:
+            return str(index)
 
     def stop_realtime(self, payload=None):
         if self._realtime is not None:
@@ -193,7 +343,12 @@ class ClientController:
         if self._lyrics_window:
             self._lyrics_window.show()
         doc = self.lyrics.document
-        self._publish_status('lyrics_loaded', log='已加载歌词：%s（%s 行）' % (doc.title or Path(path).name, len(doc.lines)))
+        lines = [ln.text for ln in doc.lines]
+        self._publish_status(
+            'lyrics_loaded',
+            lines=lines,
+            log='已加载歌词：%s（%s 行）' % (doc.title or Path(path).name, len(doc.lines)),
+        )
 
     def _start_offline_cover(self, payload: dict):
         if self.state.offline_running:
@@ -257,8 +412,13 @@ class ClientController:
                     self.config_store.set('realtime.model_sid', used_model)
                     self.config_store.save()
                 self._publish_status('offline_finished', log='离线做歌完成：%s' % (cover or output_dir))
+                self._refresh_library()
             elif terminal:
-                self._publish_error(terminal.get('message') or terminal.get('event') or 'offline failed')
+                msg = terminal.get('message') or terminal.get('event') or 'offline failed'
+                detail = (terminal.get('detail') or '').strip()
+                if detail and detail not in msg:
+                    msg = '%s\n%s' % (msg, detail[:2000])
+                self._publish_error(msg)
         except Exception as exc:
             logger.error('offline worker failed:\n%s', traceback.format_exc())
             self._publish_error('离线做歌失败: %s' % exc, exc)

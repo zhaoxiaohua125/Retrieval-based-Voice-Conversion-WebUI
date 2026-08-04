@@ -106,18 +106,31 @@ def list_devices(hostapi: str | None = None) -> list[AudioDeviceInfo]:
 
 
 def pick_voicemeeter_defaults(devices: list[AudioDeviceInfo] | None = None):
-    """推荐 Voicemeeter 输入/输出设备索引（硬件入 → VAIO 出）。"""
+    """RVC 客户端推荐设备：采集 Voicemeeter Out B1，播放到 Voicemeeter Input VAIO。"""
     items = devices if devices is not None else list_devices()
     input_idx = None
     output_idx = None
     for dev in items:
-        if dev.max_input_channels > 0 and dev.voicemeeter_role in ('voicemeeter_hardware_in', 'voicemeeter_vaio_in'):
-            input_idx = dev.index
-            break
+        lower = dev.name.lower()
+        if dev.max_input_channels > 0 and 'voicemeeter' in lower and 'out' in lower:
+            if 'b1' in lower:
+                input_idx = dev.index
+                break
+    if input_idx is None:
+        for dev in items:
+            if dev.max_input_channels > 0 and dev.voicemeeter_role == 'voicemeeter_out':
+                input_idx = dev.index
+                break
     for dev in items:
-        if dev.max_output_channels > 0 and dev.voicemeeter_role == 'voicemeeter_out':
+        lower = dev.name.lower()
+        if dev.max_output_channels > 0 and 'voicemeeter' in lower and 'input' in lower and 'vaio' in lower:
             output_idx = dev.index
             break
+    if output_idx is None:
+        for dev in items:
+            if dev.max_output_channels > 0 and dev.voicemeeter_role == 'voicemeeter_vaio_in':
+                output_idx = dev.index
+                break
     if input_idx is None:
         for dev in items:
             if dev.max_input_channels > 0:

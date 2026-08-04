@@ -71,9 +71,53 @@ def test_shutdown_idle(errors):
     ctrl = ClientController(scheduler, project_root=ROOT)
     ctrl.start()
     ctrl.shutdown()
-    if ctrl.state.realtime_running or ctrl.state.offline_running:
+    if ctrl.state.realtime_running or ctrl.state.offline_running or ctrl.state.playback_running:
         errors.append('shutdown should clear running flags')
     scheduler.shutdown()
+
+
+def test_playback_library(errors):
+    from app.playback import scan_song_library
+
+    songs = scan_song_library(ROOT)
+    if not isinstance(songs, list):
+        errors.append('scan_song_library should return list')
+    for song in songs:
+        if not song.get('play_path'):
+            errors.append('song missing play_path: %s' % song)
+            break
+
+
+def test_ai_sing_route(errors):
+    from app.events import BusMessage, ModuleId, SignalType
+    from app.integration import ClientController
+    from app.playback import scan_song_library
+    from app.scheduler import AppScheduler
+
+    songs = scan_song_library(ROOT)
+    if not songs:
+        return
+    scheduler = AppScheduler.reset_for_test()
+    scheduler = AppScheduler.instance().start()
+    events = []
+    scheduler.subscribe(SignalType.STATUS, lambda m: events.append(m.payload))
+    scheduler.subscribe(SignalType.ERROR, lambda m: events.append(m.payload))
+    ctrl = ClientController(scheduler, project_root=ROOT)
+    ctrl.start()
+    scheduler.publish(
+        BusMessage(
+            SignalType.STATUS,
+            ModuleId.UI,
+            {'action': 'playback_ai_sing', 'song': songs[0]},
+        )
+    )
+    import time
+    time.sleep(0.3)
+    ctrl._stop_playback()
+    ctrl.shutdown()
+    scheduler.shutdown()
+    if not any(isinstance(e, dict) and e.get('action') == 'playback_started' for e in events):
+        errors.append('playback_ai_sing should publish playback_started when song exists')
 
 
 def main():
@@ -81,6 +125,8 @@ def main():
     test_controller_basics(errors)
     test_lyrics_route(errors)
     test_shutdown_idle(errors)
+    test_playback_library(errors)
+    test_ai_sing_route(errors)
     if errors:
         print('TASK7 FAILED:')
         for item in errors:

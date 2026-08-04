@@ -9,6 +9,7 @@ import os
 import traceback
 from pathlib import Path
 
+import numpy as np
 import soundfile as sf
 
 from app.msst.pipeline import MsstSongSeparator
@@ -17,6 +18,75 @@ from app.rvc.upstream_imports import pymss_write_audio, song_cover_tools
 
 
 logger = logging.getLogger('rvc_client')
+
+VC_CHUNK_SEC = 45
+
+
+def _audio_duration_sec(path):
+    try:
+        return float(sf.info(path).duration)
+    except Exception:
+        return 0.0
+
+
+def _vc_infer(vc, vocal_path, params):
+    """长音频分段 RVC，避免 RMVPE/F0 整段推理 OOM。"""
+    duration = _audio_duration_sec(vocal_path)
+    if duration <= VC_CHUNK_SEC:
+        return vc.vc_single(
+            int(params.speaker_id),
+            vocal_path,
+            int(params.f0_up_key),
+            params.f0_method,
+            params.file_index,
+            float(params.index_rate),
+            int(params.resample_sr),
+            float(params.rms_mix_rate),
+            float(params.protect),
+        )
+
+    data, sr = sf.read(vocal_path, dtype='float32', always_2d=False)
+    if getattr(data, 'ndim', 1) > 1:
+        data = data.mean(axis=1)
+    chunk_n = int(VC_CHUNK_SEC * sr)
+    temp_root = Path(os.environ.get('TEMP', 'TEMP'))
+    temp_root.mkdir(parents=True, exist_ok=True)
+    outputs = []
+    tgt_sr = None
+    last_info = ''
+    total = max(1, (len(data) + chunk_n - 1) // chunk_n)
+    for i in range(total):
+        start = i * chunk_n
+        end = min(start + chunk_n, len(data))
+        chunk_path = temp_root / ('offline_rvc_%s_%d.wav' % (Path(vocal_path).stem, i))
+        sf.write(str(chunk_path), data[start:end], sr)
+        try:
+            _clear_cuda_cache()
+            info, opt = vc.vc_single(
+                int(params.speaker_id),
+                str(chunk_path),
+                int(params.f0_up_key),
+                params.f0_method,
+                params.file_index,
+                float(params.index_rate),
+                int(params.resample_sr),
+                float(params.rms_mix_rate),
+                float(params.protect),
+            )
+            last_info = str(info)
+            if not opt or opt[0] is None or opt[1] is None:
+                return info, (None, None)
+            cs, audio = opt
+            tgt_sr = cs
+            outputs.append(np.asarray(audio, dtype=np.float32))
+        finally:
+            try:
+                chunk_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+    if not outputs:
+        return last_info, (None, None)
+    return last_info, (tgt_sr, np.concatenate(outputs))
 
 
 def _clear_cuda_cache():
@@ -141,6 +211,10 @@ class OfflineSongPipeline:
 
             emit({'event': 'phase', 'phase': 'rvc', 'percent': 78, 'message': '正在进行 RVC 音色转换…'})
             _clear_cuda_cache()
+            vocal_dur = _audio_duration_sec(separation_result.vocals_noreverb_path)
+            if vocal_dur > VC_CHUNK_SEC:
+                emit({'event': 'progress', 'phase': 'rvc', 'message': '长歌曲（%.0fs）将分段推理…' % vocal_dur})
+                lines.append('长歌曲分段推理：%.1fs / %ds 每段' % (vocal_dur, VC_CHUNK_SEC))
             if vc is None or vc.net_g is None:
                 from app.rvc.vc_context import create_vc, load_voice_model
                 vc, _ = create_vc()
@@ -150,19 +224,13 @@ class OfflineSongPipeline:
                 restore_vc_gpu(vc, moved)
                 moved = []
 
-            info, opt = vc.vc_single(
-                int(params.speaker_id),
-                separation_result.vocals_noreverb_path,
-                int(params.f0_up_key),
-                params.f0_method,
-                params.file_index,
-                float(params.index_rate),
-                int(params.resample_sr),
-                float(params.rms_mix_rate),
-                float(params.protect),
-            )
+            info, opt = _vc_infer(vc, separation_result.vocals_noreverb_path, params)
             if not opt or opt[0] is None or opt[1] is None:
-                yield {'event': 'failed', 'message': 'RVC 转换失败', 'detail': str(info)}
+                detail = str(info)
+                if vocal_dur > VC_CHUNK_SEC and 'CUDA out of memory' not in detail:
+                    detail = '%s\n（歌曲时长 %.0fs，若仍失败可尝试降低 index_rate 或换 pm 算法）' % (detail, vocal_dur)
+                logger.error('RVC failed: %s', detail)
+                yield {'event': 'failed', 'message': 'RVC 转换失败', 'detail': detail}
                 return
 
             tgt_sr, vocal_audio = opt
