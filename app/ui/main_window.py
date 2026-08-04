@@ -108,6 +108,7 @@ class MainWindow(QMainWindow):
         form.addRow('日志目录', self.set_log_dir)
         layout.addLayout(form)
         btn_import = QPushButton('导入 RVC 模型…')
+        btn_import.setToolTip('导入 .pth 与 .index（与制作页相同）')
         btn_import.clicked.connect(self.page_song_make.import_models)
         btn_save = QPushButton('保存设置')
         btn_save.clicked.connect(lambda: (self._save_settings(), dlg.accept()))

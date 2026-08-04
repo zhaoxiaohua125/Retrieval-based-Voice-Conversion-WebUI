@@ -705,3 +705,18 @@ python webui.py --noautoopen
 - **修改的文件列表**: app/ui/waveform_widget.py、app/ui/pages/playback_page.py、README.md
 
 ---
+
+## 会话总结 - 2026-08-04 (21)
+
+- **会话主要目的**: 禁用「服务器制作」占位功能；制作页增加 RVC 模型/Index 导入
+- **完成的主要任务**:
+  1. 「服务器制作」勾选框禁用并标注「暂未开放」；提交任务时不再携带 `server_mode`
+  2. 制作页「基础参数」区新增 **RVC 模型** 下拉 + **导入…** 按钮（不再藏在折叠的高级参数里）
+  3. 导入逻辑修正：`.pth` → `assets/weights/`，`.index` → `assets/indices/`；支持多选与导入完成提示
+  4. 选中模型后自动检测并显示 Index 匹配状态（绿/灰提示）
+  5. 设置对话框「导入 RVC 模型…」复用同一入口
+- **关键决策与解决方案**: 沿用 `resolve_index_for_model` 匹配规则；设置与制作页共用 `import_models()`
+- **使用的技术栈**: PyQt6、RVC vc_context
+- **修改的文件列表**: app/ui/pages/song_make_page.py、app/ui/main_window.py、README.md
+
+---

@@ -228,8 +228,26 @@ class SongMakePage(QWidget):
         self.chk_separate = QCheckBox('是否分离伴奏')
         self.chk_separate.setChecked(True)
         self.chk_server = QCheckBox('服务器制作')
+        self.chk_server.setEnabled(False)
+        self.chk_server.setToolTip('暂未开放，后期接入')
         basic_form.addRow(self.chk_separate)
         basic_form.addRow(self.chk_server)
+        self.offline_model = QComboBox()
+        self.offline_model.setToolTip('选择 assets/weights 下的 .pth 模型')
+        self._reload_model_combo()
+        self.btn_import_model = QPushButton('导入…')
+        self.btn_import_model.setToolTip('导入 .pth 到 assets/weights，.index 到 assets/indices')
+        self.btn_import_model.clicked.connect(self.import_models)
+        model_row = QHBoxLayout()
+        model_row.addWidget(self.offline_model, stretch=1)
+        model_row.addWidget(self.btn_import_model)
+        model_wrap = QWidget()
+        model_wrap.setLayout(model_row)
+        self.lbl_index_status = QLabel('')
+        self.lbl_index_status.setWordWrap(True)
+        self.offline_model.currentTextChanged.connect(lambda _: self._update_index_hint())
+        basic_form.addRow('RVC 模型', model_wrap)
+        basic_form.addRow('', self.lbl_index_status)
         layout.addWidget(basic)
 
         mode_box = QGroupBox('做歌方式')
@@ -278,13 +296,10 @@ class SongMakePage(QWidget):
         self.p_protect.setRange(0, 0.5)
         self.p_protect.setSingleStep(0.01)
         self.p_protect.setValue(0.33)
-        self.offline_model = QComboBox()
-        self._reload_model_combo()
         self.offline_output = QLineEdit('opt/task4_offline')
         adv_form.addRow('F0 算法', self.p_f0_method)
         adv_form.addRow('Index 占比', self.p_index_rate)
         adv_form.addRow('Protect', self.p_protect)
-        adv_form.addRow('RVC 模型', self.offline_model)
         adv_form.addRow('输出目录', self.offline_output)
         layout.addWidget(adv)
 
@@ -308,10 +323,14 @@ class SongMakePage(QWidget):
         layout.addStretch()
         self._adv_group = adv
         adv.setVisible(False)
+        self._update_index_hint()
         return panel
 
     def _weights_dir(self):
         return self.project_root / 'assets' / 'weights'
+
+    def _indices_dir(self):
+        return self.project_root / 'assets' / 'indices'
 
     def _reload_model_combo(self):
         self.offline_model.clear()
@@ -319,6 +338,25 @@ class SongMakePage(QWidget):
         if root.is_dir():
             for path in sorted(root.glob('*.pth')):
                 self.offline_model.addItem(path.name)
+
+    def _update_index_hint(self):
+        model = self.offline_model.currentText()
+        if not model:
+            self.lbl_index_status.setText('暂无模型，请点击「导入…」添加 .pth')
+            self.lbl_index_status.setStyleSheet('color:#64748b;font-size:12px;')
+            return
+        try:
+            from app.rvc.vc_context import resolve_index_for_model
+            index_path = resolve_index_for_model(model, project_root=self.project_root)
+            if index_path:
+                self.lbl_index_status.setText('已匹配 Index：%s' % Path(index_path).name)
+                self.lbl_index_status.setStyleSheet('color:#16a34a;font-size:12px;')
+            else:
+                self.lbl_index_status.setText('未匹配 Index（可选；建议导入与模型同名的 .index）')
+                self.lbl_index_status.setStyleSheet('color:#94a3b8;font-size:12px;')
+        except Exception:
+            self.lbl_index_status.setText('Index 状态检测失败')
+            self.lbl_index_status.setStyleSheet('color:#94a3b8;font-size:12px;')
 
     def _set_input_mode(self, index: int):
         self.input_stack.setCurrentIndex(0)
@@ -431,7 +469,7 @@ class SongMakePage(QWidget):
             return
         model = self.offline_model.currentText()
         if not model:
-            QMessageBox.information(self, '提示', '请先导入 RVC 模型到 assets/weights')
+            QMessageBox.information(self, '提示', '请先点击「导入…」添加 RVC 模型（.pth）')
             return
         preset = 'powerful' if self.btn_preset_powerful.isChecked() else 'normal'
         payload = {
@@ -444,7 +482,6 @@ class SongMakePage(QWidget):
             'index_rate': self.p_index_rate.value(),
             'protect': self.p_protect.value(),
             'separate_accompaniment': self.chk_separate.isChecked(),
-            'server_mode': self.chk_server.isChecked(),
         }
         if self._lrc_path:
             payload['lrc_path'] = self._lrc_path
@@ -524,16 +561,46 @@ class SongMakePage(QWidget):
 
     def import_models(self):
         paths, _ = QFileDialog.getOpenFileNames(
-            self, '导入模型', str(self.project_root), 'RVC Model (*.pth *.index)'
+            self,
+            '导入 RVC 模型',
+            str(self.project_root),
+            'RVC 模型 (*.pth);;Index 索引 (*.index);;全部 (*.pth *.index)',
         )
         if not paths:
             return
-        dest = self._weights_dir()
-        dest.mkdir(parents=True, exist_ok=True)
-        copied = []
+        self._weights_dir().mkdir(parents=True, exist_ok=True)
+        self._indices_dir().mkdir(parents=True, exist_ok=True)
+        prev = self.offline_model.currentText()
+        copied_pth, copied_idx, skipped = [], [], []
         for src in paths:
-            target = dest / Path(src).name
+            name = Path(src).name
+            suffix = Path(src).suffix.lower()
+            if suffix == '.pth':
+                target = self._weights_dir() / name
+                copied_pth.append(name)
+            elif suffix == '.index':
+                target = self._indices_dir() / name
+                copied_idx.append(name)
+            else:
+                skipped.append(name)
+                continue
             shutil.copy2(src, target)
-            copied.append(target.name)
         self._reload_model_combo()
-        self.bridge.emit_action('model_import', files=copied, log='已导入模型: %s' % ', '.join(copied))
+        pick = copied_pth[-1] if copied_pth else prev
+        if pick:
+            idx = self.offline_model.findText(pick)
+            if idx >= 0:
+                self.offline_model.setCurrentIndex(idx)
+        self._update_index_hint()
+        parts = []
+        if copied_pth:
+            parts.append('模型：%s' % '、'.join(copied_pth))
+        if copied_idx:
+            parts.append('Index：%s' % '、'.join(copied_idx))
+        if skipped:
+            parts.append('已跳过：%s' % '、'.join(skipped))
+        msg = '\n'.join(parts) if parts else '未导入任何文件'
+        QMessageBox.information(self, '导入完成', msg)
+        all_files = copied_pth + copied_idx
+        if all_files:
+            self.bridge.emit_action('model_import', files=all_files, log='已导入: %s' % ', '.join(all_files))
