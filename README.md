@@ -502,3 +502,20 @@ python webui.py --noautoopen
   - README.md（追加本总结）
 
 ---
+
+## 会话总结 - 2026-08-04 (7)
+
+- **会话主要目的**: 完成分段任务 2（PyQt6 UI 骨架），对标 SoundTrail 布局并接入调度总线
+- **完成的主要任务**:
+  1. 新增 `app/ui/`：主窗口、悬浮歌词、系统托盘、UiBridge、布局持久化
+  2. 四 Tab + 左资源栏 + 右参数面板 + 底日志与 GPU 状态
+  3. `scripts/run_ui_skeleton.py` 交互启动；`scripts/test_task2_ui.py` 无头验收
+  4. 新增 `requirments_client_ui.txt`（PyQt6）
+- **关键决策与解决方案**: UI 仅 emit_action 至 AppScheduler；离线/实时按钮占位，集成阶段再接 MSST/RVC
+- **使用的技术栈**: PyQt6、AppScheduler、ConfigStore
+- **修改的文件列表**:
+  - app/ui/*.py、requirments_client_ui.txt（新增）
+  - scripts/run_ui_skeleton.py、scripts/test_task2_ui.py（新增）
+  - README.md（追加本总结）
+
+---
