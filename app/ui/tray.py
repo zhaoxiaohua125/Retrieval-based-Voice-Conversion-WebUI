@@ -4,7 +4,7 @@ from PyQt6.QtGui import QAction, QIcon
 from PyQt6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 
-def build_tray(bridge, main_window, lyrics_window=None):
+def build_tray(bridge, main_window, lyrics_window=None, controller=None):
     """创建托盘图标与菜单；无可用图标时使用系统默认样式。"""
     tray = QSystemTrayIcon(main_window)
     icon = QIcon.fromTheme('audio-headphones')
@@ -30,12 +30,12 @@ def build_tray(bridge, main_window, lyrics_window=None):
         act_lyrics.triggered.connect(toggle_lyrics)
         menu.addAction(act_lyrics)
 
-    act_ai = QAction('启停 AI（占位）', main_window)
-    act_ai.triggered.connect(lambda: bridge.emit_action('ai_toggle', log='AI 启停：音频模块未接入'))
+    act_ai = QAction('启停 AI 跟唱', main_window)
+    act_ai.triggered.connect(lambda: bridge.emit_action('ai_toggle'))
     menu.addAction(act_ai)
 
-    act_update = QAction('检查更新（占位）', main_window)
-    act_update.triggered.connect(lambda: bridge.emit_action('check_update', log='检查更新：运维模块待集成'))
+    act_update = QAction('检查更新', main_window)
+    act_update.triggered.connect(lambda: bridge.emit_action('check_update'))
     menu.addAction(act_update)
 
     menu.addSeparator()

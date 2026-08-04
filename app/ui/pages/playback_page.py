@@ -46,9 +46,7 @@ class PlaybackPage(QWidget):
             ('普通说话', 'playback_normal_talk'),
         ):
             btn = QPushButton(label)
-            btn.clicked.connect(
-                lambda _, a=action, t=label: self.bridge.emit_action(a, log='%s：音频模块未接入' % t)
-            )
+            btn.clicked.connect(lambda _, a=action: self.bridge.emit_action(a))
             ctrl.addWidget(btn)
         center_layout.addLayout(ctrl)
         splitter.addWidget(center)

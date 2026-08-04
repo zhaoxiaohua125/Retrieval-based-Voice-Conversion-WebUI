@@ -588,3 +588,19 @@ python webui.py --noautoopen
   - app/config_store.py、scripts/run_ui_skeleton.py、requirments_client_ui.txt、开发大纲.md、README.md
 
 ---
+
+## 会话总结 - 2026-08-04 (12)
+
+- **会话主要目的**: 完成分段任务 7（全量集成），串联 UI → 调度层 → 各内核模块
+- **完成的主要任务**:
+  1. 新增 `app/integration/ClientController` 统一路由 UI action
+  2. 接入离线做歌、AI 跟唱（音频+RVC）、歌词加载、更新检查
+  3. `run_ui_skeleton.py` 改为集成入口；托盘/播放 Tab 去掉占位提示
+  4. 新增 `scripts/test_task7_integration.py`
+- **关键决策与解决方案**: 控制器只做路由与生命周期；Studio One OSC 联调留待人工整体测试
+- **使用的技术栈**: AppScheduler、ClientController、PyQt6 UiBridge
+- **修改的文件列表**:
+  - app/integration/*.py、scripts/test_task7_integration.py（新增）
+  - scripts/run_ui_skeleton.py、app/ui/tray.py、app/ui/pages/playback_page.py、开发大纲.md、README.md
+
+---

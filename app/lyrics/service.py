@@ -61,6 +61,10 @@ class LyricsService:
         self.config_store.set('lyrics.offset_ms', int(offset_ms))
         self.config_store.save()
 
+    @property
+    def running(self):
+        return self._running
+
     def set_tick_handler(self, callback):
         """UI 层可选注册：callback(match_dict)。"""
         self._tick_handler = callback

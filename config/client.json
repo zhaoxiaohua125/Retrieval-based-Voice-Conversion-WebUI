@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "paths": {
+    "log_dir": "logs/client",
+    "opt_dir": "opt",
+    "model_dir": "assets/weights",
+    "index_dir": "assets/indices"
+  },
+  "update": {
+    "check_url": "",
+    "auto_check": true
+  },
+  "audio": {
+    "sample_rate": 48000,
+    "block_ms": 200,
+    "channels": 1,
+    "dtype": "float32",
+    "input_device": null,
+    "output_device": null,
+    "hostapi": null,
+    "wasapi_exclusive": false,
+    "ring_ms": 500,
+    "passthrough": false
+  },
+  "rvc": {
+    "f0_method": "rmvpe",
+    "index_rate": 0.75,
+    "protect": 0.33,
+    "f0_up_key": 0,
+    "formant": 0.0
+  },
+  "realtime": {
+    "model_sid": "",
+    "index_path": "",
+    "pitch": 0,
+    "formant": 0.0,
+    "index_rate": 0.0,
+    "f0_method": "rmvpe",
+    "block_time": 0.25,
+    "crossfade_time": 0.05,
+    "extra_time": 2.5,
+    "sr_type": "sr_model"
+  },
+  "msst": {
+    "preset": "normal"
+  },
+  "lyrics": {
+    "clock_source": "manual",
+    "osc_port": 9000,
+    "osc_addresses": [
+      "/transport/time",
+      "/studioone/transport/time",
+      "/time"
+    ],
+    "offset_ms": 0,
+    "mtc_port": "",
+    "sim_speed": 1.0
+  },
+  "ui": {
+    "geometry": [
+      487,
+      442,
+      1280,
+      800
+    ],
+    "active_tab": 3,
+    "active_nav_tab": 0
+  }
+}
