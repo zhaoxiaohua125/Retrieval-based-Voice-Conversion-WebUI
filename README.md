@@ -536,3 +536,20 @@ python webui.py --noautoopen
   - scripts/test_task2_ui.py、开发大纲.md、README.md
 
 ---
+
+## 会话总结 - 2026-08-04 (9)
+
+- **会话主要目的**: 完成分段任务 3（音频硬件 IO 调度模块）
+- **完成的主要任务**:
+  1. 新增 `app/audio/`：`devices.py`、`ring_buffer.py`、`stream_manager.py`、`service.py`
+  2. Voicemeeter/VB-Cable/WASAPI 设备标记与默认设备推荐
+  3. duplex 流 + 500ms 环形缓冲 + watchdog 热插拔重连 + 欠载 fade 平滑
+  4. `AudioService` 对接 `AppScheduler`；扩展 `config/client.json` 的 `audio.*` 配置
+  5. 新增 `scripts/test_task3_audio.py`（可选 `--live 3` passthrough 验收）
+- **关键决策与解决方案**: PCM 热路径在 `AudioStreamManager` 内核直连环形缓冲；控制消息经调度层；WASAPI 独占仅可选开启并 fallback
+- **使用的技术栈**: sounddevice、numpy、AppScheduler、ConfigStore
+- **修改的文件列表**:
+  - app/audio/*.py（新增）
+  - app/config_store.py、scripts/test_task3_audio.py、开发大纲.md、README.md
+
+---

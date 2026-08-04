@@ -19,6 +19,14 @@ DEFAULT_CONFIG = {
     'audio': {
         'sample_rate': 48000,
         'block_ms': 200,
+        'channels': 1,
+        'dtype': 'float32',
+        'input_device': None,
+        'output_device': None,
+        'hostapi': None,
+        'wasapi_exclusive': False,
+        'ring_ms': 500,
+        'passthrough': False,
     },
     'rvc': {
         'f0_method': 'rmvpe',
