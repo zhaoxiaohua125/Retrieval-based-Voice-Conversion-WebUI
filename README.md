@@ -404,3 +404,50 @@ python webui.py --noautoopen
   - README.md（追加本总结）
 
 ---
+
+## 会话总结 - 2026-08-04
+
+- **会话主要目的**: 根据 `ai制作歌曲过程.docx` 中 SoundTrail 声迹 AI 的界面与日志，推断其开源技术栈，并对照本仓库 RVC-webui 评估 AI 跟唱实现路径
+- **完成的主要任务**:
+  1. 解析 docx 内 15 张截图：UI 参数、模型目录、处理日志与输出 JSON
+  2. 推断 SoundTrail 离线做歌链路为 MSST 多阶段分离（伴奏/和声/去混响）+ RVC（HuBERT + RMVPE）+ FFmpeg
+  3. 对照本仓库已有 `tools/song_cover.py`（一键翻唱）、`tools/pymss_webui.py`（MSST/pymss）、`RVCRealtimeVST`（实时变声）
+  4. 给出基于 RVC-webui 补齐多轨/去混响/实时跟唱的实现建议
+- **关键决策与解决方案**: SoundTrail 核心开源栈与 RVC 生态高度重合；`.model` 为封装格式，日志中 `infer.modules.vc.*` 与 `msst\separator.py` 为直接证据；实时修音/四轨播放为其自研层
+- **使用的技术栈**: MSST/pymss、RVC、HuBERT、RMVPE、PyWorld、FFmpeg、PyTorch
+- **修改的文件列表**:
+  - README.md（追加本总结）
+
+---
+
+## 会话总结 - 2026-08-04 (2)
+
+- **会话主要目的**: 审查并修订 `开发大纲.md`，对齐 SoundTrail 实际链路与本仓库现有代码
+- **完成的主要任务**:
+  1. 指出原稿 10 处关键问题：离线缺去混响、`other` 误当和声、任务顺序与优先级矛盾、MSST/RVC 依赖错误、采样率/缓冲参数不合理等
+  2. 补充对标范围表：实时 RVC 与声迹预渲染+修音路径差异
+  3. 重写离线链路为 Stage1~3 + 四轨导出，映射 pymss 现有模型
+  4. 调整任务顺序（0 调度骨架 → 离线优先 → 实时），拆分 RVC 4A/4B，补充代码复用表与打包风险
+- **关键决策与解决方案**: 首版在 `tools/song_cover.py` 扩展而非重写；音频热路径允许内核直连；字级 F0 约束标为 Phase 2 自研
+- **使用的技术栈**: PyQt6、MSST/pymss、RVC、sounddevice、OSC/MTC、Nuitka
+- **修改的文件列表**:
+  - 开发大纲.md
+  - README.md（追加本总结）
+
+---
+
+## 会话总结 - 2026-08-04 (3)
+
+- **会话主要目的**: 按开发大纲阶段 0 实现调度骨架 + 配置/日志基座
+- **完成的主要任务**:
+  1. 新增 `app/` 包：`events.py` 信号协议、`config_store.py` JSON 配置、`log_setup.py` 分级日志、`scheduler.py` 单例调度总线
+  2. 新增验收脚本 `scripts/test_task0_scheduler.py`（调度启停、配置读写、信号转发、shutdown hook）
+  3. 日志模块独立实现，避免 import pymss 连带加载 torch
+- **关键决策与解决方案**: 控制消息走 `AppScheduler.publish/subscribe`；配置默认写 `config/client.json`；阶段 0 零 UI/零音频依赖
+- **使用的技术栈**: Python 3.12、stdlib logging/threading/json
+- **修改的文件列表**:
+  - app/__init__.py、events.py、config_store.py、log_setup.py、scheduler.py（新增）
+  - scripts/test_task0_scheduler.py（新增）
+  - README.md（追加本总结）
+
+---
