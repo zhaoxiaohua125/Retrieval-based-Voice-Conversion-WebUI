@@ -1,6 +1,7 @@
 """任务 7：全模块集成控制器（仅路由与生命周期，不含业务实现）。"""
 
 import logging
+import shutil
 import threading
 import traceback
 from pathlib import Path
@@ -438,16 +439,34 @@ class ClientController:
                     self.state.current_model = used_model
                     self.config_store.set('realtime.model_sid', used_model)
                     self.config_store.save()
-                self._publish_status('offline_finished', log='离线做歌完成：%s' % (cover or output_dir))
+                result_dict = result.as_dict() if hasattr(result, 'as_dict') else {}
+                stem = Path(payload.get('input', '')).stem
+                lrc_src = (payload.get('lrc_path') or '').strip()
+                if lrc_src and Path(lrc_src).is_file() and stem:
+                    out_lrc = Path(output_dir) / ('%s.lrc' % stem)
+                    try:
+                        shutil.copy2(lrc_src, out_lrc)
+                        result_dict['lrc_path'] = str(out_lrc.resolve())
+                    except Exception as exc:
+                        logger.warning('copy lrc failed: %s', exc)
+                self._publish_status(
+                    'offline_finished',
+                    log='离线做歌完成：%s' % (cover or output_dir),
+                    title=stem,
+                    cover_path=cover,
+                    result=result_dict,
+                )
                 self._refresh_library()
             elif terminal:
                 msg = terminal.get('message') or terminal.get('event') or 'offline failed'
                 detail = (terminal.get('detail') or '').strip()
                 if detail and detail not in msg:
                     msg = '%s\n%s' % (msg, detail[:2000])
+                self._publish_status('offline_failed', message=msg)
                 self._publish_error(msg)
         except Exception as exc:
             logger.error('offline worker failed:\n%s', traceback.format_exc())
+            self._publish_status('offline_failed', message=str(exc))
             self._publish_error('离线做歌失败: %s' % exc, exc)
         finally:
             with self._lock:

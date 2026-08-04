@@ -48,12 +48,25 @@ def main():
         payload = msg.payload or {}
         action = payload.get('action')
         page = window.page_playback
+        make = window.page_song_make
         if action == 'lyric_tick' and msg.source == ModuleId.LYRICS:
             page.set_lyric_tick(payload)
             return
         if msg.source != ModuleId.SCHEDULER:
             return
-        if action == 'library_updated':
+        if action == 'offline_started':
+            make.set_offline_running(True)
+        elif action == 'offline_finished':
+            make.show_offline_result(payload.get('result') or {})
+            page.apply_library(controller.library)
+            title = payload.get('title') or ''
+            if title:
+                window.switch_to_playback(title)
+            else:
+                window.switch_to_playback()
+        elif action == 'offline_failed':
+            make.show_offline_failed(payload.get('message', ''))
+        elif action == 'library_updated':
             page.apply_library(payload.get('songs', []))
         elif action == 'playback_tick':
             page.set_playback_state(payload)
@@ -71,6 +84,13 @@ def main():
             page.set_lyric_tick(payload)
 
     scheduler.subscribe(SignalType.STATUS, on_scheduler_status)
+
+    def on_scheduler_progress(msg: BusMessage):
+        if msg.source != ModuleId.SCHEDULER or not controller.state.offline_running:
+            return
+        window.page_song_make.apply_offline_progress(msg.payload or {})
+
+    scheduler.subscribe(SignalType.PROGRESS, on_scheduler_progress)
     window.page_playback.apply_library(controller.library)
 
     tray = None

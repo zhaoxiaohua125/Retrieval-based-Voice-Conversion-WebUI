@@ -243,3 +243,16 @@ class PlaybackPage(QWidget):
 
     def selected_song(self):
         return self._selected
+
+    def select_song_by_title(self, title: str):
+        title = (title or '').strip()
+        if not title:
+            return
+        for i in range(self.song_list.count()):
+            item = self.song_list.item(i)
+            if not item:
+                continue
+            song = item.data(Qt.ItemDataRole.UserRole) or {}
+            if song.get('title') == title or item.text() == title:
+                self.song_list.setCurrentRow(i)
+                return

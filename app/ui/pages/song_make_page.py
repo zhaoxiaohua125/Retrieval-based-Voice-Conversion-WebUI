@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QSlider,
     QSplitter,
@@ -40,6 +41,7 @@ class SongMakePage(QWidget):
         super().__init__(parent)
         self.bridge = bridge
         self.project_root = Path(project_root or Path(__file__).resolve().parents[2])
+        self._lrc_path = ''
         self._build_ui()
         self._set_input_mode(0)
         self._set_preset('normal')
@@ -61,9 +63,12 @@ class SongMakePage(QWidget):
         for i, (label, action) in enumerate(self.RESOURCE_ITEMS):
             btn = QPushButton(label)
             btn.setMinimumHeight(56)
-            btn.clicked.connect(
-                lambda _, a=action, t=label: self.bridge.emit_action(a, log='资源栏「%s」：后续接入' % t)
-            )
+            if action == 'resource_lyrics':
+                btn.clicked.connect(self._pick_lrc)
+            else:
+                btn.clicked.connect(
+                    lambda _, t=label: self.bridge.emit_action('resource_stub', log='资源栏「%s」：后续接入' % t)
+                )
             grid.addWidget(btn, i // 2, i % 2)
         layout.addLayout(grid)
         layout.addWidget(QLabel('已加载文件:'))
@@ -113,6 +118,33 @@ class SongMakePage(QWidget):
         self.input_stack.addWidget(self.file_list)
         self.input_stack.addWidget(self.link_input)
         layout.addWidget(self.input_stack, stretch=1)
+
+        prog_box = QGroupBox('制作进度')
+        prog_layout = QVBoxLayout(prog_box)
+        phase_row = QHBoxLayout()
+        self.lbl_phase_msst = QLabel('① 分离')
+        self.lbl_phase_rvc = QLabel('② 变声')
+        self.lbl_phase_mix = QLabel('③ 混音')
+        for lb in (self.lbl_phase_msst, self.lbl_phase_rvc, self.lbl_phase_mix):
+            lb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lb.setStyleSheet('padding:4px 8px;border-radius:6px;color:#64748b;background:#f1f5f9;')
+            phase_row.addWidget(lb)
+        prog_layout.addLayout(phase_row)
+        self.offline_progress = QProgressBar()
+        self.offline_progress.setRange(0, 100)
+        self.offline_progress.setValue(0)
+        self.offline_status = QLabel('等待开始…')
+        self.offline_status.setStyleSheet('color:#64748b;')
+        prog_layout.addWidget(self.offline_progress)
+        prog_layout.addWidget(self.offline_status)
+        layout.addWidget(prog_box)
+
+        result_box = QGroupBox('输出结果')
+        result_layout = QVBoxLayout(result_box)
+        self.result_list = QListWidget()
+        self.result_list.setMaximumHeight(120)
+        result_layout.addWidget(self.result_list)
+        layout.addWidget(result_box)
         return panel
 
     def _build_right_panel(self):
@@ -191,6 +223,7 @@ class SongMakePage(QWidget):
         btn_run = QPushButton('开始处理')
         btn_run.setStyleSheet('padding: 10px; font-weight: bold;')
         btn_run.clicked.connect(self._request_offline_cover)
+        self.btn_run = btn_run
         layout.addWidget(btn_adv)
         layout.addWidget(btn_open)
         layout.addWidget(btn_run)
@@ -242,9 +275,20 @@ class SongMakePage(QWidget):
                 self.file_list.addItem(path)
         self._sync_loaded_files()
 
+    def _pick_lrc(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, '选择歌词', str(self.project_root), 'Lyrics (*.lrc *.LRC)'
+        )
+        if not path:
+            return
+        self._lrc_path = path
+        self._sync_loaded_files()
+        self.bridge.emit_action('resource_lyrics', path=path, log='已选歌词：%s（制作完成后复制到输出目录）' % Path(path).name)
+
     def _clear_input_list(self):
         self.file_list.clear()
         self.loaded_files.clear()
+        self._lrc_path = ''
 
     def _clear_selected_input(self):
         for item in self.file_list.selectedItems():
@@ -254,11 +298,14 @@ class SongMakePage(QWidget):
     def _clear_loaded_files(self):
         self.loaded_files.clear()
         self.file_list.clear()
+        self._lrc_path = ''
 
     def _sync_loaded_files(self):
         self.loaded_files.clear()
         for i in range(self.file_list.count()):
             self.loaded_files.addItem(Path(self.file_list.item(i).text()).name)
+        if self._lrc_path:
+            self.loaded_files.addItem('[歌词] %s' % Path(self._lrc_path).name)
 
     def _open_output_dir(self):
         out = self.project_root / self.offline_output.text().strip()
@@ -288,7 +335,69 @@ class SongMakePage(QWidget):
             'separate_accompaniment': self.chk_separate.isChecked(),
             'server_mode': self.chk_server.isChecked(),
         }
-        self.bridge.emit_action('offline_cover', **payload, log='已提交离线制作任务（集成阶段执行）')
+        if self._lrc_path:
+            payload['lrc_path'] = self._lrc_path
+        self.bridge.emit_action('offline_cover', **payload, log='已提交离线制作任务')
+
+    def set_offline_running(self, running: bool):
+        self.btn_run.setEnabled(not running)
+        self.btn_run.setText('处理中…' if running else '开始处理')
+        if running:
+            self.offline_progress.setValue(0)
+            self.offline_status.setText('任务已启动…')
+            self._set_phase('')
+            self.result_list.clear()
+
+    def apply_offline_progress(self, payload: dict):
+        payload = payload or {}
+        event = payload.get('event') or payload.get('action')
+        if event == 'phase':
+            pct = int(payload.get('percent', 0))
+            self.offline_progress.setValue(max(0, min(100, pct)))
+            msg = payload.get('message') or ''
+            if msg:
+                self.offline_status.setText(msg)
+            self._set_phase(payload.get('phase') or '')
+        elif event in ('progress', 'msst'):
+            msg = payload.get('message') or (payload.get('payload') or {}).get('message') or ''
+            if msg:
+                self.offline_status.setText(str(msg))
+            if payload.get('percent') is not None:
+                self.offline_progress.setValue(int(payload.get('percent')))
+
+    def _set_phase(self, phase: str):
+        phases = {'msst': 0, 'rvc': 1, 'mix': 2, 'done': 3}
+        active_idx = phases.get(phase, -1)
+        for i, lb in enumerate((self.lbl_phase_msst, self.lbl_phase_rvc, self.lbl_phase_mix)):
+            if i < active_idx:
+                style = 'padding:4px 8px;border-radius:6px;color:#fff;background:#16a34a;'
+            elif i == active_idx:
+                style = 'padding:4px 8px;border-radius:6px;color:#fff;background:#2563eb;'
+            else:
+                style = 'padding:4px 8px;border-radius:6px;color:#64748b;background:#f1f5f9;'
+            lb.setStyleSheet(style)
+
+    def show_offline_result(self, result: dict):
+        self.offline_progress.setValue(100)
+        self.offline_status.setText('制作完成')
+        self._set_phase('done')
+        self.result_list.clear()
+        labels = (
+            ('cover_path', '成品'),
+            ('converted_vocal_path', 'AI 人声'),
+            ('vocals_noreverb_path', '干声'),
+            ('instrumental_path', '伴奏'),
+            ('lrc_path', '歌词'),
+        )
+        for key, label in labels:
+            path = (result or {}).get(key)
+            if path:
+                self.result_list.addItem('%s：%s' % (label, path))
+        self.set_offline_running(False)
+
+    def show_offline_failed(self, message: str):
+        self.offline_status.setText('失败：%s' % (message or '未知错误'))
+        self.set_offline_running(False)
 
     def import_models(self):
         paths, _ = QFileDialog.getOpenFileNames(

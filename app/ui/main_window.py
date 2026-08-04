@@ -88,6 +88,11 @@ class MainWindow(QMainWindow):
         self.status.showMessage('切换到%s页面' % name)
         self.bridge.emit_action('nav_tab', index=index, name=name)
 
+    def switch_to_playback(self, song_title: str | None = None):
+        self.header.set_active_tab(HeaderBar.TAB_PLAYBACK)
+        if song_title:
+            self.page_playback.select_song_by_title(song_title)
+
     def _open_settings_dialog(self):
         dlg = QDialog(self)
         dlg.setWindowTitle('系统设置')
