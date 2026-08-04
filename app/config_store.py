@@ -35,6 +35,18 @@ DEFAULT_CONFIG = {
         'f0_up_key': 0,
         'formant': 0.0,
     },
+    'realtime': {
+        'model_sid': '',
+        'index_path': '',
+        'pitch': 0,
+        'formant': 0.0,
+        'index_rate': 0.0,
+        'f0_method': 'rmvpe',
+        'block_time': 0.25,
+        'crossfade_time': 0.05,
+        'extra_time': 2.5,
+        'sr_type': 'sr_model',
+    },
     'msst': {
         'preset': 'normal',
     },

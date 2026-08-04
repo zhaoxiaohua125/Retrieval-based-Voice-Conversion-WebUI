@@ -553,3 +553,21 @@ python webui.py --noautoopen
   - app/config_store.py、scripts/test_task3_audio.py、开发大纲.md、README.md
 
 ---
+
+## 会话总结 - 2026-08-04 (10)
+
+- **会话主要目的**: 完成分段任务 4B（实时 RVC 流式推理）
+- **完成的主要任务**:
+  1. 新增 `app/rvc/realtime_config.py`、`realtime_engine.py`、`realtime_service.py`
+  2. 封装 `infer.rtrvc.RVC` + SOLA/crossfade（逻辑对齐 `realtime_gui.py`）
+  3. `RealtimeModelPool` 支持多模型预加载与热切换（共享 HuBERT）
+  4. `RealtimeRvcService` 推理线程对接 `AudioStreamManager` 环形缓冲
+  5. 新增 `scripts/test_task4_realtime.py`（块级推理 + 可选 `--live`）
+  6. 扩展 `config/client.json` → `realtime.*`
+- **关键决策与解决方案**: 不改上游 rtrvc；PCM 热路径 input_ring→推理→output_ring；index_rate 默认 0 便于无 index 验收
+- **使用的技术栈**: PyTorch、infer.rtrvc、sounddevice 环形缓冲、AppScheduler
+- **修改的文件列表**:
+  - app/rvc/realtime_*.py、app/rvc/__init__.py、app/config_store.py（新增/更新）
+  - scripts/test_task4_realtime.py、开发大纲.md、README.md
+
+---
