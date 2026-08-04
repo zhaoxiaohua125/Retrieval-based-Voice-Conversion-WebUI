@@ -519,3 +519,20 @@ python webui.py --noautoopen
   - README.md（追加本总结）
 
 ---
+
+## 会话总结 - 2026-08-04 (8)
+
+- **会话主要目的**: 修正 UI 主界面结构，对齐 SoundTrail 一级三 Tab（播放 / 制作歌曲 / 公告），并更新开发大纲
+- **完成的主要任务**:
+  1. 重构 `app/ui/main_window.py` 为 Shell：顶栏 `HeaderBar` + `QStackedWidget` + 底状态栏/日志
+  2. 新增 `app/ui/pages/`：`playback_page.py`、`song_make_page.py`（三栏离线做歌骨架）、`announce_page.py`
+  3. 原「实时/离线/模型/设置」四 Tab 逻辑迁移：离线做歌 → 制作歌曲页；设置/模型导入 → 顶栏设置对话框
+  4. 更新 `开发大纲.md` 分段任务 2 的 UI 结构与验收说明；`test_task2_ui.py` 改为校验 3 个顶层页
+- **关键决策与解决方案**: 播放 Tab 承载 AI 跟唱/改词；制作歌曲 Tab 仅负责离线做歌三栏；公告 Tab 列表+详情占位；先骨架后功能
+- **使用的技术栈**: PyQt6、QStackedWidget、UiBridge、AppScheduler
+- **修改的文件列表**:
+  - app/ui/main_window.py、app/ui/header_bar.py（新增/重构）
+  - app/ui/pages/*.py（新增）
+  - scripts/test_task2_ui.py、开发大纲.md、README.md
+
+---

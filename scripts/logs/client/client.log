@@ -3,3 +3,6 @@
 11:13:13 | INFO | rvc_client | scheduler started
 11:14:12 | INFO | rvc_client | scheduler started
 11:15:11 | INFO | rvc_client | scheduler started
+11:23:08 | INFO | rvc_client | scheduler stopped
+11:23:31 | INFO | rvc_client | scheduler started
+11:24:28 | INFO | rvc_client | scheduler stopped

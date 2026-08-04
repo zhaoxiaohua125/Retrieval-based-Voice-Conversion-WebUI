@@ -30,10 +30,12 @@ def test_headless(errors):
     scheduler = AppScheduler.instance().start()
     bridge = UiBridge()
     window = MainWindow(bridge, project_root=ROOT)
-    if window.tabs.count() < 4:
-        errors.append('expected 4 tabs')
-    if window.resource_list.count() < 4:
-        errors.append('expected resource list items')
+    if window.stack.count() != 3:
+        errors.append('expected 3 top-level pages (播放/制作歌曲/公告)')
+    if len(window.header.TAB_NAMES) != 3:
+        errors.append('expected 3 nav tabs')
+    if window.page_song_make.file_list is None:
+        errors.append('song make page missing file list')
     window.close()
     scheduler.shutdown()
     app.quit()
