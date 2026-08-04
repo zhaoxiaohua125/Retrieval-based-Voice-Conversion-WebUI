@@ -97,6 +97,7 @@ def test_live(input_path, preset_id, errors):
         if work_root.exists() and any(work_root.rglob('*')):
             errors.append('live test work dir should be cleaned')
         print('live preset=%s outputs in %s' % (preset_id, out_dir))
+        print('注意：--live 使用系统临时目录，脚本结束后会自动删除；正式使用请调用 OfflineSongPipeline 并指定 output_dir=opt/...')
 
 
 def main():

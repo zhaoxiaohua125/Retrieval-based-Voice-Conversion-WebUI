@@ -484,3 +484,21 @@ python webui.py --noautoopen
   - README.md（追加本总结）
 
 ---
+
+## 会话总结 - 2026-08-04 (6)
+
+- **会话主要目的**: 完成分段任务 4A（离线 RVC 翻唱流水线），串联 MSST 与 RVC 四轨导出
+- **完成的主要任务**:
+  1. 说明 task5 `--live` 输出在系统临时目录，脚本结束即删除（不影响功能验收）
+  2. 新增 `app/rvc/`：`types.py`、`vc_context.py`、`offline_pipeline.py`
+  3. 复用 `app/msst` 多阶段分离 + `tools/song_cover` GPU 释放/混音 + `infer.vc.modules.VC`
+  4. 新增 `scripts/test_task4_offline.py`；`--live` 默认输出到 `opt/task4_offline/` 可持久查看
+- **关键决策与解决方案**: 不改上游 song_cover/pymss；Config/VC 加载与 pymss 同样清理 sys.argv；formant 离线暂沿用 WebUI vc_single 能力
+- **使用的技术栈**: RVC VC、MSST、pymss、soundfile
+- **修改的文件列表**:
+  - app/rvc/*.py（新增）
+  - scripts/test_task4_offline.py（新增）
+  - scripts/test_task5_msst.py（补充临时目录说明）
+  - README.md（追加本总结）
+
+---
