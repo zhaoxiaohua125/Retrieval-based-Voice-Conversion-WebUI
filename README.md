@@ -467,3 +467,20 @@ python webui.py --noautoopen
   - README.md（追加本总结）
 
 ---
+
+## 会话总结 - 2026-08-04 (5)
+
+- **会话主要目的**: 完成分段任务 5（MSST 人声分离内核），封装 pymss 实现普通/强力两套预设
+- **完成的主要任务**:
+  1. 新增 `app/msst/`：`presets.py` 预设、`types.py` 结果结构、`pipeline.py` 多阶段流水线
+  2. 普通做歌：去伴奏 + 去混响；强力做歌：激进分离 + 激进去混响 + 提主旋律（和声轨）
+  3. 支持进度回调、取消（`stop_pymss_separation`）、临时目录自动清理
+  4. 新增 `scripts/test_task5_msst.py`（默认结构验收；`--live` 可选真实分离）
+- **关键决策与解决方案**: 仅封装调用 `tools.pymss_webui`，不改上游；输出统一命名为 `*_vocals.wav` / `*_instrumental.wav` / `*_vocals_noreverb.wav` / `*_harmony.wav`
+- **使用的技术栈**: pymss/MSST、Python dataclass
+- **修改的文件列表**:
+  - app/msst/*.py（新增）
+  - scripts/test_task5_msst.py（新增）
+  - README.md（追加本总结）
+
+---
