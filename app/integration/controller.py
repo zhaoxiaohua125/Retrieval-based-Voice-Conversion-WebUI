@@ -57,6 +57,10 @@ class ClientController:
         self._lyrics_window = window
         self.lyrics.set_tick_handler(lambda payload: window.set_line(payload.get('text', ''), highlight=True))
 
+    @property
+    def library(self):
+        return list(self._library)
+
     def start(self):
         if self._started:
             return self
@@ -219,7 +223,17 @@ class ClientController:
             title=title,
             play_path=play_path,
             duration=duration,
+            position=0.0,
+            playing=True,
+            paused=False,
             log='AI 唱歌：正在播放 %s' % title,
+        )
+        self._publish_status(
+            'playback_tick',
+            position=0.0,
+            duration=duration,
+            playing=True,
+            paused=False,
         )
 
     def _playback_tick_loop(self):
@@ -255,7 +269,20 @@ class ClientController:
                 self._publish_status('playback_idle', log='请先选择歌曲')
             return
         resumed = self._player.toggle_pause()
-        self._publish_status('playback_paused' if not resumed else 'playback_resumed', playing=resumed)
+        self._publish_status(
+            'playback_paused' if not resumed else 'playback_resumed',
+            playing=resumed,
+            paused=not resumed,
+            position=self._player.position,
+            duration=self._player.duration,
+        )
+        self._publish_status(
+            'playback_tick',
+            position=self._player.position,
+            duration=self._player.duration,
+            playing=resumed,
+            paused=not resumed,
+        )
 
     def _seek_playback(self, payload: dict):
         ratio = float((payload or {}).get('ratio', 0))

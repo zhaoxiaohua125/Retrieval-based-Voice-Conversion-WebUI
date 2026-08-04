@@ -14,6 +14,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from app.ui.waveform_widget import WaveformWidget
+
 
 def _fmt_time(sec: float) -> str:
     sec = max(0.0, float(sec or 0))
@@ -92,10 +94,9 @@ class PlaybackPage(QWidget):
         lyric_layout.addStretch()
         self.lyric_panel.setStyleSheet('background:#fff;border-radius:12px;')
         center_layout.addWidget(self.lyric_panel, stretch=1)
-        self.wave_label = QLabel('▁▂▃▅▇ 波形占位 ▇▅▃▂▁')
-        self.wave_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.wave_label.setStyleSheet('background:#f1f5f9;padding:32px;border-radius:8px;color:#64748b;')
-        center_layout.addWidget(self.wave_label)
+        self.waveform = WaveformWidget()
+        self.waveform.seek_requested.connect(self._on_wave_seek)
+        center_layout.addWidget(self.waveform)
         progress_row = QHBoxLayout()
         self.time_label = QLabel('00:00 / 00:00')
         self.progress = QSlider(Qt.Orientation.Horizontal)
@@ -168,7 +169,13 @@ class PlaybackPage(QWidget):
         song = item.data(Qt.ItemDataRole.UserRole) or {}
         self._selected = song
         self.title_label.setText(song.get('title', '未命名'))
+        play_path = song.get('play_path') or song.get('cover_path') or song.get('vocal_path')
+        self.waveform.load_file(play_path or '')
+        self.waveform.set_position_ratio(0.0)
         self.bridge.emit_action('playback_select_song', song=song)
+
+    def _on_wave_seek(self, ratio: float):
+        self.bridge.emit_action('playback_seek', ratio=ratio)
 
     def _on_ai_sing(self):
         if self._selected:
@@ -183,13 +190,14 @@ class PlaybackPage(QWidget):
     def set_playback_state(self, payload: dict):
         pos = float(payload.get('position', 0))
         dur = float(payload.get('duration', 0))
+        playing = bool(payload.get('playing'))
+        paused = bool(payload.get('paused'))
         self.time_label.setText('%s / %s' % (_fmt_time(pos), _fmt_time(dur)))
         if dur > 0:
             self.progress.blockSignals(True)
             self.progress.setValue(int(min(1.0, pos / dur) * 1000))
             self.progress.blockSignals(False)
-        playing = bool(payload.get('playing'))
-        paused = bool(payload.get('paused'))
+            self.waveform.set_playback(pos, dur, playing and not paused)
         self.btn_play.setText('▶ 播放' if paused or not playing else '⏸ 暂停')
 
     def set_current_line(self, text: str):
@@ -230,6 +238,8 @@ class PlaybackPage(QWidget):
         self._mode = mode
         self.btn_ai_sing.setChecked(mode == 'ai_sing' and active)
         self.btn_ai_follow.setEnabled(mode != 'ai_sing' or not active)
+        if mode == 'idle':
+            self.waveform.reset_position()
 
     def selected_song(self):
         return self._selected

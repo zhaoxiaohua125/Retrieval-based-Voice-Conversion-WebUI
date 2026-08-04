@@ -681,3 +681,27 @@ python webui.py --noautoopen
 - **修改的文件列表**: app/ui/pages/playback_page.py、scripts/run_ui_skeleton.py、README.md
 
 ---
+
+## 会话总结 - 2026-08-04 (19)
+
+- **会话主要目的**: 播放页波形可视化（替换占位符）
+- **完成的主要任务**:
+  1. 新增 `app/ui/waveform_widget.py`：soundfile 分块峰值采样 + QPainter 绘制
+  2. 后台 QThread 加载长音频，避免阻塞 UI
+  3. 已播放区域深蓝 / 未播放浅蓝，竖线指示播放头
+  4. 点击波形可 seek；选歌自动加载 `cover.wav` 波形
+- **使用的技术栈**: PyQt6、numpy、soundfile
+- **修改的文件列表**: app/ui/waveform_widget.py、app/ui/pages/playback_page.py、README.md
+
+---
+
+## 会话总结 - 2026-08-04 (20)
+
+- **会话主要目的**: 波形可视化随歌曲「动起来」，避免静态假波形感
+- **完成的主要任务**:
+  1. 改为**滚动视窗**：播放头固定在左侧 36%，波形向左滚动
+  2. **33ms 帧动画**：播放时在两次 tick 之间线性插值，播放头连续移动
+  3. 播放头附近柱条脉冲提亮；已播/未播分色；点击仍可 seek
+- **修改的文件列表**: app/ui/waveform_widget.py、app/ui/pages/playback_page.py、README.md
+
+---

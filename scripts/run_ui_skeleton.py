@@ -60,6 +60,8 @@ def main():
         elif action == 'playback_started':
             page.set_mode('ai_sing', active=True)
             page.set_playback_state(payload)
+        elif action in ('playback_paused', 'playback_resumed'):
+            page.set_playback_state(payload)
         elif action in ('playback_stopped', 'playback_finished'):
             page.set_mode('idle')
         elif action == 'lyrics_loaded':
@@ -69,6 +71,7 @@ def main():
             page.set_lyric_tick(payload)
 
     scheduler.subscribe(SignalType.STATUS, on_scheduler_status)
+    window.page_playback.apply_library(controller.library)
 
     tray = None
     if QSystemTrayIcon.isSystemTrayAvailable():
