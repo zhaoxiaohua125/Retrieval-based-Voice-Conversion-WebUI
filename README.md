@@ -604,3 +604,12 @@ python webui.py --noautoopen
   - scripts/run_ui_skeleton.py、app/ui/tray.py、app/ui/pages/playback_page.py、开发大纲.md、README.md
 
 ---
+
+## 会话总结 - 2026-08-04 (13)
+
+- **问题**: 点击「开始处理」报 `FileNotFoundError: ./i18n/locale/en_US.json`
+- **原因**: 从 IDE/`scripts/` 启动时 cwd 不在项目根，上游 `I18nAuto` 用相对路径读 i18n
+- **修复**: 新增 `upstream_import_context()`（env + chdir 项目根 + 清理 argv）；`song_cover`/`pymss` 导入前调用；`run_ui_skeleton.py` 启动时 `os.chdir(ROOT)`
+- **修改文件**: `app/rvc/vc_context.py`、`upstream_imports.py`、`app/msst/pipeline.py`、`scripts/run_ui_skeleton.py`
+
+---

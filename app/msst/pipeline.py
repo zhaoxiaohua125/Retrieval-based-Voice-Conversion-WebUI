@@ -27,18 +27,12 @@ def _clean_path(path):
 
 
 def _pymss_tools():
-    """按需导入 pymss WebUI 封装；缺少依赖时抛出 ImportError。
+    """按需导入 pymss WebUI 封装；缺少依赖时抛出 ImportError。"""
+    from app.rvc.vc_context import upstream_import_context
 
-    pymss_webui 导入时会执行 ``Config()`` 并解析 ``sys.argv``（webui 参数）。
-    客户端脚本自带 CLI 参数，因此导入前需临时还原 argv，避免与 --live 等冲突。
-    """
-    argv_backup = sys.argv[:]
-    try:
-        sys.argv = [argv_backup[0]]
+    with upstream_import_context():
         from tools.pymss_webui import clean_path, pymss_separate, resolve_model, stop_pymss_separation
         return clean_path, pymss_separate, resolve_model, stop_pymss_separation
-    finally:
-        sys.argv = argv_backup
 
 
 class MsstSongSeparator:

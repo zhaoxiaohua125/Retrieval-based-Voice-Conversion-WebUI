@@ -8,3 +8,35 @@
 11:24:28 | INFO | rvc_client | scheduler stopped
 13:47:21 | INFO | rvc_client | scheduler started
 13:50:21 | INFO | rvc_client | scheduler stopped
+14:09:24 | INFO | rvc_client | scheduler started
+14:12:13 | DEBUG | rvc_client | thread registered: offline-cover
+14:12:18 | ERROR | rvc_client.integration | offline worker failed:
+Traceback (most recent call last):
+  File "F:\zxh\workspace\Retrieval-based-Voice-Conversion-WebUI-Self\app\integration\controller.py", line 233, in _offline_worker
+    for event in pipeline.run(
+                 ^^^^^^^^^^^^^
+  File "F:\zxh\workspace\Retrieval-based-Voice-Conversion-WebUI-Self\app\rvc\offline_pipeline.py", line 98, in run
+    release_vc_gpu, restore_vc_gpu, to_float_audio, mix_vocal_instrumental = song_cover_tools()
+                                                                             ^^^^^^^^^^^^^^^^^^
+  File "F:\zxh\workspace\Retrieval-based-Voice-Conversion-WebUI-Self\app\rvc\upstream_imports.py", line 27, in song_cover_tools
+    return _with_clean_argv(_import)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "F:\zxh\workspace\Retrieval-based-Voice-Conversion-WebUI-Self\app\rvc\upstream_imports.py", line 10, in _with_clean_argv
+    return callback()
+           ^^^^^^^^^^
+  File "F:\zxh\workspace\Retrieval-based-Voice-Conversion-WebUI-Self\app\rvc\upstream_imports.py", line 19, in _import
+    from tools.song_cover import (
+  File "F:\zxh\workspace\Retrieval-based-Voice-Conversion-WebUI-Self\tools\song_cover.py", line 25, in <module>
+    i18n = I18nAuto()
+           ^^^^^^^^^^
+  File "F:\zxh\workspace\Retrieval-based-Voice-Conversion-WebUI-Self\i18n\i18n.py", line 20, in __init__
+    self.language_map = load_language_list(language)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "F:\zxh\workspace\Retrieval-based-Voice-Conversion-WebUI-Self\i18n\i18n.py", line 8, in load_language_list
+    return json.loads(read_text(f"./i18n/locale/{language}.json"))
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "F:\zxh\workspace\Retrieval-based-Voice-Conversion-WebUI-Self\tools\file_io.py", line 8, in read_text
+    with open(path, "r", **kwargs) as file:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: './i18n/locale/en_US.json'
+

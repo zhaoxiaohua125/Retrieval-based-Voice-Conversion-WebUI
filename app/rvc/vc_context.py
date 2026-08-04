@@ -2,6 +2,7 @@
 
 import os
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -27,16 +28,28 @@ def ensure_rvc_runtime_env(project_root=None):
     return defaults
 
 
+@contextmanager
+def upstream_import_context(project_root=None):
+    """导入 tools/infer 上游模块前：env + 项目根 cwd + 清理 argv（i18n 等依赖 ./ 相对路径）。"""
+    root = Path(project_root or PROJECT_ROOT)
+    ensure_rvc_runtime_env(root)
+    argv_backup = sys.argv[:]
+    cwd_backup = os.getcwd()
+    try:
+        sys.argv = [argv_backup[0]]
+        os.chdir(root)
+        yield root
+    finally:
+        os.chdir(cwd_backup)
+        sys.argv = argv_backup
+
+
 def _with_clean_argv(func):
     """临时清空 sys.argv，避免 Config() 解析客户端 CLI 参数。"""
 
     def wrapper(*args, **kwargs):
-        argv_backup = sys.argv[:]
-        try:
-            sys.argv = [argv_backup[0]]
+        with upstream_import_context(kwargs.get('project_root')):
             return func(*args, **kwargs)
-        finally:
-            sys.argv = argv_backup
 
     return wrapper
 
@@ -70,7 +83,7 @@ def load_voice_model(vc, model_sid, project_root=None):
 def discover_first_model(weight_root=None, project_root=None):
     """在 assets/weights 中查找第一个 .pth 模型文件名。"""
     env = ensure_rvc_runtime_env(project_root)
-    root = Path(weight_root or env['weight_root'])
+    root = Path(weight_root) if weight_root else Path(env['weight_root'])
     if not root.is_dir():
         return None
     for path in sorted(root.glob('*.pth')):

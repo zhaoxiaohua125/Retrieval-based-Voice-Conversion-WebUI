@@ -1,11 +1,13 @@
 """启动 PyQt6 客户端（任务 7 全量集成）。"""
 
+import os
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+os.chdir(ROOT)
 
 from PyQt6.QtWidgets import QApplication, QMessageBox, QSystemTrayIcon
 

@@ -155,7 +155,12 @@ class ClientController:
         if self.state.offline_running:
             self._publish_status('realtime_blocked', log='离线任务进行中，请稍后再启动 AI 跟唱')
             return
-        model_sid = (payload or {}).get('model_sid') or self.config_store.get('realtime.model_sid') or discover_first_model(self.project_root)
+        model_sid = (
+            (payload or {}).get('model_sid')
+            or self.state.current_model
+            or self.config_store.get('realtime.model_sid')
+            or discover_first_model(project_root=self.project_root)
+        )
         if not model_sid:
             self._publish_error('未找到 RVC 模型，请将 .pth 放入 assets/weights')
             return
@@ -246,6 +251,11 @@ class ClientController:
             if terminal and terminal.get('event') == 'result':
                 result = terminal.get('result')
                 cover = getattr(result, 'cover_path', None) or terminal.get('cover_path')
+                used_model = payload.get('model', '')
+                if used_model:
+                    self.state.current_model = used_model
+                    self.config_store.set('realtime.model_sid', used_model)
+                    self.config_store.save()
                 self._publish_status('offline_finished', log='离线做歌完成：%s' % (cover or output_dir))
             elif terminal:
                 self._publish_error(terminal.get('message') or terminal.get('event') or 'offline failed')
