@@ -58,12 +58,12 @@
   },
   "ui": {
     "geometry": [
-      445,
-      262,
+      547,
+      384,
       1280,
       784
     ],
     "active_tab": 3,
-    "active_nav_tab": 1
+    "active_nav_tab": 0
   }
 }

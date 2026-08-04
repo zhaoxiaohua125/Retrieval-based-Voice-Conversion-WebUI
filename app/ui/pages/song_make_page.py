@@ -7,7 +7,6 @@ from pathlib import Path
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QDragEnterEvent, QDropEvent
 from PyQt6.QtWidgets import (
-    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFileDialog,
@@ -179,15 +178,32 @@ class SongMakePage(QWidget):
             action_row.addWidget(btn)
         layout.addLayout(action_row)
 
-        self.input_stack = QStackedWidget()
+        self.file_drop_zone = QWidget()
+        drop_layout = QGridLayout(self.file_drop_zone)
+        drop_layout.setContentsMargins(0, 0, 0, 0)
         self.file_list = AudioDropListWidget()
+        self.file_list.setStyleSheet(
+            'QListWidget{border:1px dashed #cbd5e1;border-radius:8px;background:#fafafa;padding:8px;}'
+        )
         self.file_list.files_dropped.connect(self._add_audio_paths)
         self.file_list.itemSelectionChanged.connect(self._sync_loaded_files)
+        self.file_list.model().rowsInserted.connect(lambda *_: self._update_file_drop_hint())
+        self.file_list.model().rowsRemoved.connect(lambda *_: self._update_file_drop_hint())
+        self.file_drop_hint = QLabel('点击上方「选择文件」按钮，或直接拖拽音频文件到此处\n支持 wav / flac / mp3 / m4a 等格式')
+        self.file_drop_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.file_drop_hint.setWordWrap(True)
+        self.file_drop_hint.setStyleSheet('color:#94a3b8;font-size:14px;padding:24px;background:transparent;')
+        self.file_drop_hint.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        drop_layout.addWidget(self.file_list, 0, 0)
+        drop_layout.addWidget(self.file_drop_hint, 0, 0, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        self.input_stack = QStackedWidget()
         self.link_input = QLineEdit()
         self.link_input.setPlaceholderText('曲库链接（后续接入）')
-        self.input_stack.addWidget(self.file_list)
+        self.input_stack.addWidget(self.file_drop_zone)
         self.input_stack.addWidget(self.link_input)
         layout.addWidget(self.input_stack, stretch=1)
+        self._update_file_drop_hint()
 
         prog_box = QGroupBox('制作进度')
         prog_layout = QVBoxLayout(prog_box)
@@ -225,13 +241,6 @@ class SongMakePage(QWidget):
         layout = QVBoxLayout(panel)
         basic = QGroupBox('基础参数设置')
         basic_form = QFormLayout(basic)
-        self.chk_separate = QCheckBox('是否分离伴奏')
-        self.chk_separate.setChecked(True)
-        self.chk_server = QCheckBox('服务器制作')
-        self.chk_server.setEnabled(False)
-        self.chk_server.setToolTip('暂未开放，后期接入')
-        basic_form.addRow(self.chk_separate)
-        basic_form.addRow(self.chk_server)
         self.offline_model = QComboBox()
         self.offline_model.setToolTip('选择 assets/weights 下的 .pth 模型')
         self._reload_model_combo()
@@ -272,17 +281,6 @@ class SongMakePage(QWidget):
         f0_row.addWidget(self.lbl_f0_key)
         layout.addWidget(QLabel('音高调整(半音)'))
         layout.addLayout(f0_row)
-
-        self.p_formant = QSlider(Qt.Orientation.Horizontal)
-        self.p_formant.setRange(-100, 100)
-        self.p_formant.setValue(0)
-        self.lbl_formant = QLabel('0.0')
-        self.p_formant.valueChanged.connect(lambda v: self.lbl_formant.setText('%.1f' % (v / 10.0)))
-        formant_row = QHBoxLayout()
-        formant_row.addWidget(self.p_formant)
-        formant_row.addWidget(self.lbl_formant)
-        layout.addWidget(QLabel('声音粗细'))
-        layout.addLayout(formant_row)
 
         adv = QGroupBox('高级参数（骨架）')
         adv_form = QFormLayout(adv)
@@ -357,6 +355,10 @@ class SongMakePage(QWidget):
         except Exception:
             self.lbl_index_status.setText('Index 状态检测失败')
             self.lbl_index_status.setStyleSheet('color:#94a3b8;font-size:12px;')
+
+    def _update_file_drop_hint(self):
+        if hasattr(self, 'file_drop_hint'):
+            self.file_drop_hint.setVisible(self.file_list.count() == 0)
 
     def _set_input_mode(self, index: int):
         self.input_stack.setCurrentIndex(0)
@@ -481,7 +483,6 @@ class SongMakePage(QWidget):
             'f0_method': self.p_f0_method.currentText(),
             'index_rate': self.p_index_rate.value(),
             'protect': self.p_protect.value(),
-            'separate_accompaniment': self.chk_separate.isChecked(),
         }
         if self._lrc_path:
             payload['lrc_path'] = self._lrc_path
