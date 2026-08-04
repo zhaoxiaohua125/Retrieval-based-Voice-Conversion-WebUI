@@ -32,6 +32,15 @@ from PyQt6.QtWidgets import (
 class SongMakePage(QWidget):
     """「制作歌曲」页：离线做歌入口，后续接 OfflineSongPipeline。"""
 
+    RESOURCE_STUB_TIP = '当前为一键做歌，自动分离，无需手动导入'
+    RESOURCE_STUB_STYLE = (
+        'padding:8px;color:#94a3b8;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;'
+    )
+    RESOURCE_LYRICS_STYLE = (
+        'padding:8px;color:#334155;background:#fff;border:1px solid #cbd5e1;border-radius:6px;'
+        'QPushButton:hover{background:#f8fafc;}'
+    )
+
     RESOURCE_ITEMS = (
         ('伴奏', 'resource_accompaniment'),
         ('人声', 'resource_vocal'),
@@ -66,11 +75,13 @@ class SongMakePage(QWidget):
             btn = QPushButton(label)
             btn.setMinimumHeight(56)
             if action == 'resource_lyrics':
+                btn.setStyleSheet(self.RESOURCE_LYRICS_STYLE)
+                btn.setToolTip('选择 LRC 歌词，制作完成后复制到输出目录')
                 btn.clicked.connect(self._pick_lrc)
             else:
-                btn.clicked.connect(
-                    lambda _, t=label: self.bridge.emit_action('resource_stub', log='资源栏「%s」：后续接入' % t)
-                )
+                btn.setEnabled(False)
+                btn.setStyleSheet(self.RESOURCE_STUB_STYLE)
+                btn.setToolTip(self.RESOURCE_STUB_TIP)
             grid.addWidget(btn, i // 2, i % 2)
         layout.addLayout(grid)
         layout.addWidget(QLabel('已加载文件:'))
