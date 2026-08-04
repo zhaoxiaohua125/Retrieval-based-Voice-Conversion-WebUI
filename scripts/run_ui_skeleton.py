@@ -66,6 +66,8 @@ def main():
                 window.switch_to_playback()
         elif action == 'offline_failed':
             make.show_offline_failed(payload.get('message', ''))
+        elif action == 'offline_cancelled':
+            make.show_offline_cancelled(payload.get('message', ''))
         elif action == 'library_updated':
             page.apply_library(payload.get('songs', []))
         elif action == 'playback_tick':

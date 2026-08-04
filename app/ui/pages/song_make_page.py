@@ -1,5 +1,6 @@
 """制作歌曲 Tab 骨架：左资源栏 + 中文件输入 + 右参数（对标 SoundTrail）。"""
 
+import os
 import shutil
 from pathlib import Path
 
@@ -16,6 +17,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QListWidget,
+    QListWidgetItem,
     QMessageBox,
     QProgressBar,
     QPushButton,
@@ -143,6 +145,8 @@ class SongMakePage(QWidget):
         result_layout = QVBoxLayout(result_box)
         self.result_list = QListWidget()
         self.result_list.setMaximumHeight(120)
+        self.result_list.setToolTip('双击打开文件')
+        self.result_list.itemDoubleClicked.connect(self._open_result_item)
         result_layout.addWidget(self.result_list)
         layout.addWidget(result_box)
         return panel
@@ -224,9 +228,15 @@ class SongMakePage(QWidget):
         btn_run.setStyleSheet('padding: 10px; font-weight: bold;')
         btn_run.clicked.connect(self._request_offline_cover)
         self.btn_run = btn_run
+        self.btn_cancel = QPushButton('取消制作')
+        self.btn_cancel.setEnabled(False)
+        self.btn_cancel.clicked.connect(self._cancel_offline)
+        run_row = QHBoxLayout()
+        run_row.addWidget(self.btn_run)
+        run_row.addWidget(self.btn_cancel)
         layout.addWidget(btn_adv)
         layout.addWidget(btn_open)
-        layout.addWidget(btn_run)
+        layout.addLayout(run_row)
         layout.addStretch()
         self._adv_group = adv
         adv.setVisible(False)
@@ -310,9 +320,25 @@ class SongMakePage(QWidget):
     def _open_output_dir(self):
         out = self.project_root / self.offline_output.text().strip()
         out.mkdir(parents=True, exist_ok=True)
-        import os
         os.startfile(str(out))
         self.bridge.emit_action('open_output_dir', path=str(out), log='已打开输出目录')
+
+    def _open_result_item(self, item):
+        if not item:
+            return
+        path = item.data(Qt.ItemDataRole.UserRole) or ''
+        if not path:
+            text = item.text()
+            if '：' in text:
+                path = text.split('：', 1)[1].strip()
+            elif ':' in text:
+                path = text.split(':', 1)[1].strip()
+        p = Path(path)
+        if not p.is_file():
+            QMessageBox.information(self, '提示', '文件不存在：\n%s' % path)
+            return
+        os.startfile(str(p.resolve()))
+        self.bridge.emit_action('open_result_file', path=str(p.resolve()), log='已打开：%s' % p.name)
 
     def _request_offline_cover(self):
         if self.file_list.count() == 0:
@@ -339,8 +365,12 @@ class SongMakePage(QWidget):
             payload['lrc_path'] = self._lrc_path
         self.bridge.emit_action('offline_cover', **payload, log='已提交离线制作任务')
 
+    def _cancel_offline(self):
+        self.bridge.emit_action('offline_cancel', log='已请求取消制作')
+
     def set_offline_running(self, running: bool):
         self.btn_run.setEnabled(not running)
+        self.btn_cancel.setEnabled(running)
         self.btn_run.setText('处理中…' if running else '开始处理')
         if running:
             self.offline_progress.setValue(0)
@@ -392,11 +422,19 @@ class SongMakePage(QWidget):
         for key, label in labels:
             path = (result or {}).get(key)
             if path:
-                self.result_list.addItem('%s：%s' % (label, path))
+                item = QListWidgetItem('%s：%s' % (label, path))
+                item.setData(Qt.ItemDataRole.UserRole, path)
+                self.result_list.addItem(item)
         self.set_offline_running(False)
 
     def show_offline_failed(self, message: str):
         self.offline_status.setText('失败：%s' % (message or '未知错误'))
+        self.set_offline_running(False)
+
+    def show_offline_cancelled(self, message: str = ''):
+        self.offline_status.setText(message or '制作已取消')
+        self.offline_progress.setValue(0)
+        self._set_phase('')
         self.set_offline_running(False)
 
     def import_models(self):

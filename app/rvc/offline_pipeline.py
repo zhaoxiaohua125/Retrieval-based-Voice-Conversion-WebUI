@@ -29,8 +29,10 @@ def _audio_duration_sec(path):
         return 0.0
 
 
-def _vc_infer(vc, vocal_path, params):
+def _vc_infer(vc, vocal_path, params, cancel_check=None):
     """长音频分段 RVC，避免 RMVPE/F0 整段推理 OOM。"""
+    if cancel_check and cancel_check():
+        return '用户取消', (None, None)
     duration = _audio_duration_sec(vocal_path)
     if duration <= VC_CHUNK_SEC:
         return vc.vc_single(
@@ -56,6 +58,8 @@ def _vc_infer(vc, vocal_path, params):
     last_info = ''
     total = max(1, (len(data) + chunk_n - 1) // chunk_n)
     for i in range(total):
+        if cancel_check and cancel_check():
+            return '用户取消', (None, None)
         start = i * chunk_n
         end = min(start + chunk_n, len(data))
         chunk_path = temp_root / ('offline_rvc_%s_%d.wav' % (Path(vocal_path).stem, i))
@@ -108,10 +112,15 @@ class OfflineSongPipeline:
 
     def __init__(self, work_root=None, msst_keep_work=False):
         self.msst = MsstSongSeparator(work_root=work_root, keep_work=msst_keep_work)
+        self._cancel_requested = False
 
     def cancel(self):
-        """取消 MSST 分离（RVC 推理阶段暂不支持中途取消）。"""
+        """取消 MSST 分离与 RVC 分段推理。"""
+        self._cancel_requested = True
         return self.msst.cancel()
+
+    def _is_cancelled(self):
+        return self._cancel_requested or self.msst._cancel_requested
 
     def run(
         self,
@@ -164,6 +173,8 @@ class OfflineSongPipeline:
 
         stem = Path(input_audio_path).stem
         os.makedirs(output_dir, exist_ok=True)
+        self._cancel_requested = False
+        self.msst._cancel_requested = False
         separation_result = None
         release_vc_gpu, restore_vc_gpu, to_float_audio, mix_vocal_instrumental = song_cover_tools()
 
@@ -209,6 +220,10 @@ class OfflineSongPipeline:
             if separation_result.harmony_path:
                 lines.append('和声：%s' % separation_result.harmony_path)
 
+            if self._is_cancelled():
+                yield {'event': 'cancelled', 'message': '用户已取消制作'}
+                return
+
             emit({'event': 'phase', 'phase': 'rvc', 'percent': 78, 'message': '正在进行 RVC 音色转换…'})
             _clear_cuda_cache()
             vocal_dur = _audio_duration_sec(separation_result.vocals_noreverb_path)
@@ -224,7 +239,10 @@ class OfflineSongPipeline:
                 restore_vc_gpu(vc, moved)
                 moved = []
 
-            info, opt = _vc_infer(vc, separation_result.vocals_noreverb_path, params)
+            info, opt = _vc_infer(vc, separation_result.vocals_noreverb_path, params, cancel_check=self._is_cancelled)
+            if self._is_cancelled():
+                yield {'event': 'cancelled', 'message': '用户已取消制作'}
+                return
             if not opt or opt[0] is None or opt[1] is None:
                 detail = str(info)
                 if vocal_dur > VC_CHUNK_SEC and 'CUDA out of memory' not in detail:
@@ -241,6 +259,9 @@ class OfflineSongPipeline:
 
             cover_path = None
             if mix_cover:
+                if self._is_cancelled():
+                    yield {'event': 'cancelled', 'message': '用户已取消制作'}
+                    return
                 emit({'event': 'phase', 'phase': 'mix', 'percent': 92, 'message': '正在合并人声与伴奏…'})
                 write_audio = pymss_write_audio()
 

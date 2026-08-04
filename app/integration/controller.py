@@ -119,6 +119,7 @@ class ClientController:
             return
         handlers = {
             'offline_cover': self._start_offline_cover,
+            'offline_cancel': lambda p: self._cancel_offline_user(),
             'playback_refresh_library': lambda p: self._refresh_library(),
             'playback_select_song': self._select_song,
             'playback_ai_sing': self._start_ai_sing,
@@ -402,6 +403,13 @@ class ClientController:
         thread.start()
         self._publish_status('offline_started', log='离线做歌已开始…')
 
+    def _cancel_offline_user(self, payload=None):
+        if not self.state.offline_running:
+            self._publish_status('offline_idle', log='当前没有进行中的制作任务')
+            return
+        self._publish_status('offline_cancelling', log='正在取消制作…')
+        self._cancel_offline(wait=False)
+
     def _offline_worker(self, payload: dict):
         from app.rvc import OfflineSongPipeline
 
@@ -457,6 +465,12 @@ class ClientController:
                     result=result_dict,
                 )
                 self._refresh_library()
+            elif terminal and terminal.get('event') == 'cancelled':
+                self._publish_status(
+                    'offline_cancelled',
+                    message=terminal.get('message') or '制作已取消',
+                    log='制作已取消',
+                )
             elif terminal:
                 msg = terminal.get('message') or terminal.get('event') or 'offline failed'
                 detail = (terminal.get('detail') or '').strip()
