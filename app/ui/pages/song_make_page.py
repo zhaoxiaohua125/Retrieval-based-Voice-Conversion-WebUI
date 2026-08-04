@@ -4,7 +4,8 @@ import os
 import shutil
 from pathlib import Path
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QDragEnterEvent, QDropEvent
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -27,6 +28,59 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+
+AUDIO_SUFFIXES = {'.wav', '.flac', '.mp3', '.m4a', '.ogg', '.aac', '.wma'}
+
+
+class AudioDropListWidget(QListWidget):
+    """支持拖拽导入音频的文件列表。"""
+
+    files_dropped = pyqtSignal(list)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+        self.setDragDropMode(QListWidget.DragDropMode.DropOnly)
+        self.setDefaultDropAction(Qt.DropAction.CopyAction)
+        self.setToolTip('拖拽音频文件到此处（wav / flac / mp3 / m4a 等）')
+
+    def dragEnterEvent(self, event: QDragEnterEvent):
+        if event.mimeData().hasUrls() and self._urls_have_audio(event.mimeData().urls()):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasUrls() and self._urls_have_audio(event.mimeData().urls()):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event: QDropEvent):
+        paths = self._collect_audio_paths(event.mimeData().urls())
+        if paths:
+            self.files_dropped.emit(paths)
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    @staticmethod
+    def _collect_audio_paths(urls):
+        paths = []
+        for url in urls or []:
+            path = url.toLocalFile()
+            if path and Path(path).suffix.lower() in AUDIO_SUFFIXES and Path(path).is_file():
+                paths.append(str(Path(path).resolve()))
+        return paths
+
+    @staticmethod
+    def _urls_have_audio(urls):
+        for url in urls or []:
+            path = url.toLocalFile()
+            if path and Path(path).suffix.lower() in AUDIO_SUFFIXES:
+                return True
+        return False
 
 
 class SongMakePage(QWidget):
@@ -103,12 +157,14 @@ class SongMakePage(QWidget):
         mode_row = QHBoxLayout()
         self.btn_mode_file = QPushButton('输入文件做歌')
         self.btn_mode_link = QPushButton('输入曲库链接做歌')
-        for btn in (self.btn_mode_file, self.btn_mode_link):
-            btn.setCheckable(True)
-            mode_row.addWidget(btn)
+        self.btn_mode_file.setCheckable(True)
+        mode_row.addWidget(self.btn_mode_file)
+        mode_row.addWidget(self.btn_mode_link)
         self.btn_mode_file.setChecked(True)
         self.btn_mode_file.clicked.connect(lambda: self._set_input_mode(0))
-        self.btn_mode_link.clicked.connect(lambda: self._set_input_mode(1))
+        self.btn_mode_link.setStyleSheet(self.RESOURCE_STUB_STYLE)
+        self.btn_mode_link.setToolTip('暂未开放')
+        self.btn_mode_link.clicked.connect(self._on_link_mode_stub)
         layout.addLayout(mode_row)
 
         action_row = QHBoxLayout()
@@ -124,7 +180,8 @@ class SongMakePage(QWidget):
         layout.addLayout(action_row)
 
         self.input_stack = QStackedWidget()
-        self.file_list = QListWidget()
+        self.file_list = AudioDropListWidget()
+        self.file_list.files_dropped.connect(self._add_audio_paths)
         self.file_list.itemSelectionChanged.connect(self._sync_loaded_files)
         self.link_input = QLineEdit()
         self.link_input.setPlaceholderText('曲库链接（后续接入）')
@@ -264,15 +321,17 @@ class SongMakePage(QWidget):
                 self.offline_model.addItem(path.name)
 
     def _set_input_mode(self, index: int):
-        self.input_stack.setCurrentIndex(index)
-        self.btn_mode_file.setChecked(index == 0)
-        self.btn_mode_link.setChecked(index == 1)
-        for btn, active in ((self.btn_mode_file, index == 0), (self.btn_mode_link, index == 1)):
-            btn.setStyleSheet(
-                'padding: 6px 12px; border-radius: 8px;'
-                + ('background:#2563eb;color:white;' if active else 'background:#eef2ff;')
-            )
+        self.input_stack.setCurrentIndex(0)
+        self.btn_mode_file.setChecked(True)
+        self.btn_mode_file.setStyleSheet(
+            'padding: 6px 12px; border-radius: 8px;background:#2563eb;color:white;'
+        )
+        self.btn_mode_link.setStyleSheet(self.RESOURCE_STUB_STYLE)
         self._style_preset_buttons()
+
+    def _on_link_mode_stub(self):
+        QMessageBox.information(self, '提示', '输入曲库链接做歌暂未开放')
+        self._set_input_mode(0)
 
     def _set_preset(self, preset: str):
         normal = preset == 'normal'
@@ -289,12 +348,27 @@ class SongMakePage(QWidget):
 
     def _pick_files(self):
         paths, _ = QFileDialog.getOpenFileNames(
-            self, '选择音频', str(self.project_root), 'Audio (*.wav *.flac *.mp3 *.m4a)'
+            self, '选择音频', str(self.project_root), 'Audio (*.wav *.flac *.mp3 *.m4a *.ogg *.aac)'
         )
-        for path in paths:
-            if not self.file_list.findItems(path, Qt.MatchFlag.MatchExactly):
-                self.file_list.addItem(path)
-        self._sync_loaded_files()
+        self._add_audio_paths(paths)
+
+    def _add_audio_paths(self, paths):
+        added = 0
+        for path in paths or []:
+            p = str(Path(path).resolve()) if Path(path).is_file() else str(path)
+            if Path(p).suffix.lower() not in AUDIO_SUFFIXES:
+                continue
+            if self.file_list.findItems(p, Qt.MatchFlag.MatchExactly):
+                continue
+            self.file_list.addItem(p)
+            added += 1
+        if added:
+            self._set_input_mode(0)
+            self._sync_loaded_files()
+            self.bridge.emit_action('audio_files_added', count=added, log='已添加 %s 个音频文件' % added)
+        elif paths:
+            QMessageBox.information(self, '提示', '未识别到支持的音频格式（wav / flac / mp3 / m4a 等）')
+        return added
 
     def _pick_lrc(self):
         path, _ = QFileDialog.getOpenFileName(
