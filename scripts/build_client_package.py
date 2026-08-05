@@ -122,7 +122,7 @@ def write_launcher(out_dir: Path):
         (out_dir / name).write_bytes(content.encode('ascii'))
 
 
-def build(version: str, output_root: Path, lite: bool) -> Path:
+def build(version: str, output_root: Path, lite: bool, cuda_variant: str = '') -> Path:
     manifest = load_manifest()
     if version:
         manifest['version'] = version
@@ -169,6 +169,7 @@ def build(version: str, output_root: Path, lite: bool) -> Path:
         'built_from': str(ROOT),
         'stats': stats,
         'lite': lite,
+        'cuda_variant': cuda_variant or None,
     }
     (out_dir / 'packaging' / 'build-info.json').write_text(
         json.dumps(meta, ensure_ascii=False, indent=2), encoding='utf-8'
@@ -188,10 +189,11 @@ def main():
     parser.add_argument('--output', default=str(ROOT / 'dist'))
     parser.add_argument('--lite', action='store_true', help='不复制 assets 大文件，仅目录占位')
     parser.add_argument('--zip', action='store_true')
+    parser.add_argument('--cuda-variant', default='', choices=('', 'cu118', 'cu128'))
     args = parser.parse_args()
     manifest = load_manifest()
     ver = args.version or manifest.get('version', '0.1.0-demo')
-    out_dir = build(ver, Path(args.output), args.lite)
+    out_dir = build(ver, Path(args.output), args.lite, args.cuda_variant)
     if args.zip:
         zip_path = out_dir.parent / ('%s.zip' % out_dir.name)
         if zip_path.exists():

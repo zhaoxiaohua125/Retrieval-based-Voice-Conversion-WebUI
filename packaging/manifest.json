@@ -1,0 +1,47 @@
+{
+  "product": "RVC声迹客户端",
+  "version": "0.1.0-demo",
+  "entry": "scripts/run_ui_skeleton.py",
+  "demo_features": ["离线做歌", "AI唱歌", "普通说话", "歌词显示"],
+  "exclude_dirs": [
+    ".git",
+    ".idea",
+    "__pycache__",
+    "TEMP",
+    "opt",
+    "logs",
+    "dist",
+    "RVCRealtimeVST",
+    "agent-transcripts",
+    ".cursor"
+  ],
+  "exclude_globs": [
+    "*.pyc",
+    "*.pyo",
+    "*.log",
+    "*.wav",
+    "*.WAV",
+    "*.mp3",
+    "*.docx",
+    "ai制作歌曲过程.docx"
+  ],
+  "include_dirs": [
+    "app",
+    "config",
+    "scripts",
+    "infer",
+    "tools",
+    "i18n",
+    "configs",
+    "train",
+    "assets",
+    "packaging/demo_assets"
+  ],
+  "include_files": [
+    "packaging/DEMO_README.md",
+    "packaging/version.json",
+    "requirments_client_ui.txt",
+    "requirments_cu118_py312.txt",
+    "requirments_cpu_py312.txt"
+  ]
+}

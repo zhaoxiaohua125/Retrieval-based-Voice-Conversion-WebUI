@@ -850,3 +850,28 @@ python webui.py --noautoopen
 - **修改的文件列表**: scripts/run_ui_skeleton.py、app/ui/main_window.py、scripts/resolve_launch_python.ps1、scripts/build_client_package.py
 
 ---
+
+## 会话总结 - 2026-08-05 (8)
+
+- **会话主要目的**: 双包打包脚本，按显卡选择 cu118 / cu128
+- **完成的主要任务**:
+  1. `build_client_package.ps1` 增加 `-CudaVariant cu118|cu128`，自动映射 conda 环境与版本号
+  2. 新增 `build_demo_package_menu.bat`、`build_demo_package_cu118.bat`、`build_demo_package_cu128.bat`
+  3. 新增 `setup_conda_cu128.ps1` / `setup_conda_cu128.bat` 创建 50 系环境
+  4. 打包产物含 `GPU_VARIANT.txt`；更新 INSTALL_RUNTIME.md、DEMO_README.md
+- **修改的文件列表**: scripts/build_client_package.ps1、scripts/build_client_package.py、scripts/setup_conda_cu128.ps1、build_demo_package*.bat、packaging/*
+
+---
+
+## 会话总结 - 2026-08-05 (8)
+
+- **会话主要目的**: 修复 GitHub push 因大文件被拒（ffprobe.exe > 100MB）
+- **完成的主要任务**:
+  1. 新增根目录 `.gitignore`（忽略 ffmpeg exe、`__pycache__`、大模型权重、本地构建目录等）
+  2. 用 `git filter-branch` 从 3 个未推送本地提交中移除 `tools/ffmpeg/ffmpeg.exe`、`ffprobe.exe`（工作区 exe 已恢复并被 ignore）
+  3. 取消已 staged 的全部 `__pycache__/*.pyc`
+- **关键决策**: 不把 FFmpeg 二进制进仓库/LFS，本地保留 + 打包时拷贝；仅重写未推送提交
+- **技术栈**: Git filter-branch、.gitignore
+- **修改的文件列表**: .gitignore、README.md（本总结）；历史重写涉及 `eaf4ccc` 等 3 个本地提交（现哈希已变）
+
+---

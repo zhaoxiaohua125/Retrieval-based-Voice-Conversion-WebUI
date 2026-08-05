@@ -1,14 +1,32 @@
 param(
-    [string]$Version = "0.1.0-demo",
+    [string]$Version = "",
+    [ValidateSet("cu118", "cu128", "")]
+    [string]$CudaVariant = "",
     [switch]$Lite,
     [switch]$CondaPack,
-    [string]$CondaEnv = "rvc312",
+    [string]$CondaEnv = "",
     [string]$CondaBase = "F:\zxh\anaconda3"
 )
 
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
+
+$VariantMap = @{
+    cu118 = @{ Env = "rvc312"; Label = "RTX 50 series and earlier (CUDA 11.8)"; Torch = "2.7.1+cu118" }
+    cu128 = @{ Env = "rvc312_cu128"; Label = "RTX 50 series and later (CUDA 12.8)"; Torch = "2.7.1+cu128" }
+}
+
+if ($CudaVariant -and -not $VariantMap.ContainsKey($CudaVariant)) {
+    Write-Error "Unknown -CudaVariant: $CudaVariant (use cu118 or cu128)"
+}
+if (-not $CudaVariant -and $CondaEnv -eq "rvc312_cu128") { $CudaVariant = "cu128" }
+if (-not $CudaVariant -and $CondaEnv -eq "rvc312") { $CudaVariant = "cu118" }
+if (-not $CudaVariant) { $CudaVariant = "cu118" }
+
+$info = $VariantMap[$CudaVariant]
+if (-not $CondaEnv) { $CondaEnv = $info.Env }
+if (-not $Version) { $Version = "0.1.0-demo-$CudaVariant" }
 
 function Invoke-CondaPack {
     param([string]$PackExe, [string[]]$PackArgs)
@@ -21,16 +39,26 @@ $CondaBase = $CondaBase.TrimEnd('\')
 $CondaExe = Join-Path $CondaBase "Scripts\conda.exe"
 $PackExe = Join-Path $CondaBase "python.exe"
 $PackScript = Join-Path $CondaBase "Scripts\conda-pack-script.py"
-if (-not (Test-Path $CondaExe)) { Write-Error "conda not found: $CondaExe" }
+if (-not (Test-Path $CondaExe)) { Write-Error "conda not found: $CondaBase" }
 
 $EnvPrefix = Join-Path $CondaBase "envs\$CondaEnv"
 $EnvPython = Join-Path $EnvPrefix "python.exe"
-if (-not (Test-Path $EnvPython)) { Write-Error "env not found: $EnvPython" }
+if (-not (Test-Path $EnvPython)) {
+    Write-Host ""
+    Write-Host "ERROR: env not found: $EnvPrefix"
+    if ($CudaVariant -eq "cu128") {
+        Write-Host "Create it first: scripts\setup_conda_cu128.ps1"
+        Write-Host "Or see packaging/INSTALL_RUNTIME.md"
+    }
+    exit 1
+}
 
-Write-Host "Conda: $CondaExe"
-Write-Host "Pack env: $EnvPrefix"
+Write-Host "Variant: $CudaVariant ($($info.Label))"
+Write-Host "Conda env: $CondaEnv"
+Write-Host "Version: $Version"
+Write-Host "Output: dist\RVC-Client-$Version"
 
-$pyArgs = @("scripts/build_client_package.py", "--version", $Version, "--output", "dist")
+$pyArgs = @("scripts/build_client_package.py", "--version", $Version, "--output", "dist", "--cuda-variant", $CudaVariant)
 if ($Lite) { $pyArgs += "--lite" }
 
 & $EnvPython @pyArgs
@@ -48,7 +76,7 @@ if ($CondaPack) {
     } else {
         Write-Host "conda-pack ready, skip install"
     }
-    $packTar = Join-Path $Root "dist\python-env.tar.gz"
+    $packTar = Join-Path $Root "dist\python-env-$CudaVariant.tar.gz"
     if (Test-Path $packTar) { Remove-Item $packTar -Force }
     Invoke-CondaPack $PackExe @($PackScript, "--prefix", $EnvPrefix, "-o", $packTar, "--ignore-missing-files", "--force")
     if (-not (Test-Path $packTar)) { throw "conda pack did not create $packTar" }
@@ -73,6 +101,13 @@ if ($CondaPack) {
     & $bundledPy -c "import torch; print(torch.__version__)"
     if ($LASTEXITCODE -ne 0) { throw "bundled python missing torch" }
     Write-Host "Python runtime OK: $bundledPy"
+    $variantFile = Join-Path $OutDir "GPU_VARIANT.txt"
+    @(
+        "cuda_variant=$CudaVariant",
+        "conda_env=$CondaEnv",
+        "target_gpu=$($info.Label)",
+        "expected_torch=$($info.Torch)"
+    ) | Set-Content -Path $variantFile -Encoding UTF8
 }
 
 Write-Host ""
@@ -82,4 +117,4 @@ if (Test-Path (Join-Path $OutDir "python\python.exe")) {
 } else {
     Write-Host "WARNING: no python/ folder. Rebuild with -CondaPack."
 }
-Write-Host "Readme: $OutDir\DEMO_README.md"
+Write-Host "GPU variant: $CudaVariant - $($info.Label)"
