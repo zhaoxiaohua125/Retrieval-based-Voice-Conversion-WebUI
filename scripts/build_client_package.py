@@ -31,6 +31,8 @@ def should_skip(rel: str, manifest: dict) -> bool:
         'run_ui_skeleton.py',
         'list_audio_devices.py',
         'resolve_launch_python.ps1',
+        'repair_bundled_torch.ps1',
+        'verify_client_package.py',
     ):
         return True
     return False
@@ -71,6 +73,12 @@ def write_launcher(out_dir: Path):
         dst = out_dir / 'scripts' / 'resolve_launch_python.ps1'
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(resolve_ps1, dst)
+    for script_name in ('repair_bundled_torch.ps1', 'verify_client_package.py'):
+        src = ROOT / 'scripts' / script_name
+        if src.is_file():
+            dst = out_dir / 'scripts' / script_name
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
     bat = (
         '@echo off\r\n'
         'cd /d "%~dp0"\r\n'
@@ -114,10 +122,14 @@ def write_launcher(out_dir: Path):
         'pause\r\n'
     )
     wrapper = '@echo off\r\ncall "%~dp0StartClient.bat"\r\n'
+    repair_bat = '@echo off\r\ncd /d "%~dp0"\r\npowershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\\repair_bundled_torch.ps1" -PackageDir "%~dp0"\r\npause\r\n'
+    verify_bat = '@echo off\r\ncd /d "%~dp0"\r\n"%~dp0python\\python.exe" "%~dp0scripts\\verify_client_package.py" "%~dp0"\r\npause\r\n'
     for name, content in (
         ('StartClient.bat', bat),
         ('StartClient_Debug.bat', debug_bat),
         ('启动声迹客户端.bat', wrapper),
+        ('repair_bundled_torch.bat', repair_bat),
+        ('verify_client_package.bat', verify_bat),
     ):
         (out_dir / name).write_bytes(content.encode('ascii'))
 

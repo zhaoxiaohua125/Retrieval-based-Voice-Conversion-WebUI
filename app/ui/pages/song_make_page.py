@@ -220,6 +220,12 @@ class SongMakePage(QWidget):
         self.offline_progress = QProgressBar()
         self.offline_progress.setRange(0, 100)
         self.offline_progress.setValue(0)
+        self.offline_progress.setTextVisible(True)
+        self.offline_progress.setMinimumHeight(20)
+        self.offline_progress.setStyleSheet(
+            'QProgressBar{border:1px solid #cbd5e1;border-radius:4px;background:#f1f5f9;text-align:center;}'
+            'QProgressBar::chunk{background:#2563eb;border-radius:3px;}'
+        )
         self.offline_status = QLabel('等待开始…')
         self.offline_status.setStyleSheet('color:#64748b;')
         prog_layout.addWidget(self.offline_progress)
@@ -497,14 +503,19 @@ class SongMakePage(QWidget):
         self.btn_cancel.setEnabled(running)
         self.btn_run.setText('处理中…' if running else '开始处理')
         if running:
-            self.offline_progress.setValue(0)
-            self.offline_status.setText('任务已启动…')
-            self._set_phase('')
-            self.result_list.clear()
+            if not getattr(self, '_offline_ui_active', False):
+                self.offline_progress.setValue(0)
+                self.offline_status.setText('任务已启动…')
+                self._set_phase('')
+                self.result_list.clear()
+            self._offline_ui_active = True
+        else:
+            self._offline_ui_active = False
 
     def apply_offline_progress(self, payload: dict):
         payload = payload or {}
         event = payload.get('event') or payload.get('action')
+        nested = payload.get('payload') or {}
         if event == 'phase':
             pct = int(payload.get('percent', 0))
             self.offline_progress.setValue(max(0, min(100, pct)))
@@ -512,12 +523,19 @@ class SongMakePage(QWidget):
             if msg:
                 self.offline_status.setText(msg)
             self._set_phase(payload.get('phase') or '')
-        elif event in ('progress', 'msst'):
-            msg = payload.get('message') or (payload.get('payload') or {}).get('message') or ''
+        elif event in ('progress', 'msst', 'stage_start'):
+            msg = payload.get('message') or nested.get('message') or nested.get('model_label') or ''
             if msg:
                 self.offline_status.setText(str(msg))
-            if payload.get('percent') is not None:
-                self.offline_progress.setValue(int(payload.get('percent')))
+            pct = payload.get('percent')
+            if pct is None and event == 'stage_start':
+                idx = int(nested.get('stage_index') or 1)
+                total = int(nested.get('stage_total') or 1)
+                pct = 5.0 + (idx - 1) / max(total, 1) * 65.0
+            if pct is not None:
+                self.offline_progress.setValue(max(0, min(100, int(pct))))
+            if payload.get('phase'):
+                self._set_phase(str(payload.get('phase')))
 
     def _set_phase(self, phase: str):
         phases = {'msst': 0, 'rvc': 1, 'mix': 2, 'done': 3}

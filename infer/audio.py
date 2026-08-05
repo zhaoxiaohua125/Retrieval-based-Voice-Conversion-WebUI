@@ -4,6 +4,7 @@ import numpy as np
 import av
 from io import BytesIO
 import threading
+from pathlib import Path
 
 
 _USE_TORCHAUDIO_GPU = False
@@ -16,11 +17,19 @@ _RESAMPLE_TRANSFORMS = {}
 _RESAMPLE_LOCK = threading.Lock()
 _FORCE_CPU_AUDIO = os.environ.get("RVC_AUDIO_FORCE_CPU", "0") == "1"
 
-# Select the accelerated loader once, when this module is imported.  The CUDA
-# device and dtype come from the project's shared automatic selection rules.
-# CPU and DirectML keep the original FFmpeg path.  Import failures (including
-# missing torchaudio DLLs) also leave FFmpeg selected.
-if not _FORCE_CPU_AUDIO:
+
+def _is_packaged_client():
+    root = Path(__file__).resolve().parents[1]
+    return (
+        (root / 'VERSION').is_file()
+        or (root / 'GPU_VARIANT.txt').is_file()
+        or (root / 'python' / 'python.exe').is_file()
+    )
+
+
+# Packaged client: conda-pack may break libtorchaudio.pyd — use FFmpeg only.
+# Dev WebUI can opt in GPU loader via RVC_USE_TORCHAUDIO=1.
+if not _FORCE_CPU_AUDIO and not _is_packaged_client():
     try:
         import torch as _TORCH
         import torchaudio as _TORCHAUDIO
@@ -35,6 +44,13 @@ if not _FORCE_CPU_AUDIO:
         )
     except Exception:
         _USE_TORCHAUDIO_GPU = False
+elif not _FORCE_CPU_AUDIO:
+    try:
+        import torch as _TORCH
+        from configs.config import infer_device as _AUDIO_DEVICE
+        from configs.config import infer_dtype as _AUDIO_DTYPE
+    except Exception:
+        pass
 
 AUDIO_LOAD_BACKEND = "torchaudio_cuda" if _USE_TORCHAUDIO_GPU else "ffmpeg"
 TORCHAUDIO_GPU_ENABLED = _USE_TORCHAUDIO_GPU

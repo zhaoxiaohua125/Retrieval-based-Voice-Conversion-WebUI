@@ -6,7 +6,6 @@ import parselmouth
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torchaudio.transforms import Resample
 
 from infer.hubert import extract_hubert_features, load_hubert_model
 from i18n.i18n import I18nAuto
@@ -95,8 +94,6 @@ class RVC:
                 1024, device=self.device, dtype=torch.float32
             )
             self.infer_count = 0
-
-            self.resample_kernel = {}
 
             if last_rvc is None:
                 self.model = load_hubert_model(self.device, self.is_half)
@@ -343,16 +340,11 @@ class RVC:
                 )
         infered_audio = infered_audio.squeeze(1).float()
         upp_res = int(np.floor(factor * self.tgt_sr // 100))
-        if upp_res != self.tgt_sr // 100:
-            if upp_res not in self.resample_kernel:
-                self.resample_kernel[upp_res] = Resample(
-                    orig_freq=upp_res,
-                    new_freq=self.tgt_sr // 100,
-                    dtype=torch.float32,
-                ).to(self.device)
-            infered_audio = self.resample_kernel[upp_res](
-                infered_audio[:, : return_length * upp_res]
-            )
+        target_freq = self.tgt_sr // 100
+        if upp_res != target_freq:
+            chunk = infered_audio[:, : return_length * upp_res].unsqueeze(1)
+            new_len = max(1, int(chunk.shape[-1] * target_freq / upp_res))
+            infered_audio = F.interpolate(chunk, size=new_len, mode='linear', align_corners=False).squeeze(1)
         t5 = ttime()
         if report_status:
             printt(

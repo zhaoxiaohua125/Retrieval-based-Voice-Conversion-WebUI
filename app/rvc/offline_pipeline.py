@@ -180,6 +180,7 @@ class OfflineSongPipeline:
 
         try:
             emit({'event': 'phase', 'phase': 'msst', 'percent': 5, 'message': '正在 MSST 多阶段分离…'})
+            logger.info('offline msst start preset=%s input=%s', preset_id, input_audio_path)
             lines.append('MSST 预设：%s' % preset_id)
             if vc is not None and vc.net_g is not None:
                 moved = release_vc_gpu(vc)
@@ -213,6 +214,7 @@ class OfflineSongPipeline:
             if separation_result is None:
                 yield {'event': 'failed', 'message': 'MSST 分离未返回结果'}
                 return
+            logger.info('offline msst done vocals=%s', separation_result.vocals_noreverb_path)
 
             lines.append('原唱人声：%s' % separation_result.vocals_path)
             lines.append('伴奏：%s' % separation_result.instrumental_path)
@@ -225,6 +227,7 @@ class OfflineSongPipeline:
                 return
 
             emit({'event': 'phase', 'phase': 'rvc', 'percent': 78, 'message': '正在进行 RVC 音色转换…'})
+            logger.info('offline rvc start model=%s', model_sid)
             _clear_cuda_cache()
             vocal_dur = _audio_duration_sec(separation_result.vocals_noreverb_path)
             if vocal_dur > VC_CHUNK_SEC:
@@ -256,6 +259,7 @@ class OfflineSongPipeline:
             sf.write(converted_vocal_path, to_float_audio(vocal_audio), tgt_sr)
             lines.append(str(info))
             lines.append('AI 人声：%s' % converted_vocal_path)
+            logger.info('offline rvc done vocal=%s', converted_vocal_path)
 
             cover_path = None
             if mix_cover:

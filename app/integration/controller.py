@@ -464,8 +464,8 @@ class ClientController:
         self.state.offline_running = True
         self.state.mode = 'offline'
         self.scheduler.register_thread('offline-cover', thread)
-        thread.start()
         self._publish_status('offline_started', log='离线做歌已开始…')
+        thread.start()
 
     def _cancel_offline_user(self, payload=None):
         if not self.state.offline_running:

@@ -42,10 +42,35 @@ from app.scheduler import AppScheduler
 from app.ui import MainWindow, LyricsWindow, UiBridge, build_tray
 
 
+def _install_crash_diagnostics():
+    import faulthandler
+    import logging
+    import threading
+    import traceback
+
+    log_dir = ROOT / 'logs' / 'client'
+    log_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        faulthandler.enable(file=open(log_dir / 'crash.log', 'a', encoding='utf-8'), all_threads=True)
+    except OSError:
+        faulthandler.enable()
+    logger = logging.getLogger('rvc_client')
+
+    def _thread_hook(args):
+        logger.error(
+            'uncaught thread exception in %s:\n%s',
+            args.thread,
+            ''.join(traceback.format_exception(args.exc_type, args.exc_value, args.exc_traceback)),
+        )
+
+    threading.excepthook = _thread_hook
+
+
 def main():
     import logging
     console_level = logging.WARNING if (ROOT / 'VERSION').is_file() else logging.INFO
     setup_rotating_logging(console_level=console_level)
+    _install_crash_diagnostics()
     scheduler = AppScheduler.instance().start()
     app = QApplication(sys.argv)
     app.setApplicationName('RVC 声迹客户端')
@@ -71,15 +96,16 @@ def main():
     lyrics.move(window.x() + 40, window.y() + 80)
     controller.set_lyrics_window(lyrics)
 
-    def on_scheduler_status(msg: BusMessage):
-        payload = msg.payload or {}
+    def _apply_scheduler_status(envelope: dict):
+        source = envelope.get('source')
+        payload = envelope.get('payload') or {}
         action = payload.get('action')
         page = window.page_playback
         make = window.page_song_make
-        if action == 'lyric_tick' and msg.source == ModuleId.LYRICS:
+        if action == 'lyric_tick' and source == ModuleId.LYRICS:
             page.set_lyric_tick(payload)
             return
-        if msg.source != ModuleId.SCHEDULER:
+        if source != ModuleId.SCHEDULER:
             return
         if action == 'offline_started':
             make.set_offline_running(True)
@@ -120,13 +146,19 @@ def main():
         elif action == 'lyric_tick':
             page.set_lyric_tick(payload)
 
+    bridge.ui_status.connect(_apply_scheduler_status)
+
+    def on_scheduler_status(msg: BusMessage):
+        bridge.ui_status.emit({'source': msg.source, 'payload': msg.payload or {}})
+
     scheduler.subscribe(SignalType.STATUS, on_scheduler_status)
 
     def on_scheduler_progress(msg: BusMessage):
         if msg.source != ModuleId.SCHEDULER or not controller.state.offline_running:
             return
-        window.page_song_make.apply_offline_progress(msg.payload or {})
+        bridge.ui_progress.emit(msg.payload or {})
 
+    bridge.ui_progress.connect(window.page_song_make.apply_offline_progress)
     scheduler.subscribe(SignalType.PROGRESS, on_scheduler_progress)
     window.page_playback.apply_library(controller.library)
 

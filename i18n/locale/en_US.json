@@ -282,7 +282,6 @@
     "音频设备": "Audio device",
     "音高全部为0，该音频无意义，跳过：%s": "All pitch values are zero; this audio is unusable and will be skipped: %s",
     "音高算法": "pitch detection algorithm",
-    "额外推理时长": "Extra inference time"
     "额外推理时长": "Extra inference time",
     "数据切分没有生成有效训练音频，请检查训练集和数据切分日志": "Dataset preprocessing produced no valid training audio. Check the dataset and preprocessing log.",
     "数据切分没有生成16k音频，已停止后续特征提取和训练": "Dataset preprocessing produced no 16 kHz audio. Feature extraction and training have been stopped.",

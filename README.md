@@ -875,3 +875,28 @@ python webui.py --noautoopen
 - **修改的文件列表**: .gitignore、README.md（本总结）；历史重写涉及 `eaf4ccc` 等 3 个本地提交（现哈希已变）
 
 ---
+
+## 会话总结 - 2026-08-05 (9)
+
+- **会话主要目的**: 排查客户端「运行一段时间后崩溃」问题
+- **完成的主要任务**:
+  1. 分析 `logs/client/client.log`：16:20 JSON 语法错误（`zh_CN.json` 已修复）；16:52/16:56 做歌完成后 `QListWidgetItem` 未导入导致 UI 回调失败（源码已含 import）；16:25 离线任务约 3 分钟无 traceback 即退出，疑为后台线程直接更新 PyQt 控件
+  2. `run_ui_skeleton.py`：STATUS/PROGRESS 回调经 `QTimer.singleShot(0, …)` 切回主线程；增加 `faulthandler` + `threading.excepthook` 写入 `logs/client/crash.log`
+  3. `offline_pipeline.py`：MSST/RVC 各阶段增加 INFO 日志便于定位卡点
+- **关键决策**: 离线 worker 经 scheduler 回调 UI 必须在 Qt 主线程执行，避免随机闪退
+- **技术栈**: PyQt6 QTimer、Python faulthandler、RotatingFileHandler
+- **修改的文件列表**: scripts/run_ui_skeleton.py、app/rvc/offline_pipeline.py、README.md
+
+---
+
+## 会话总结 - 2026-08-05 (10)
+
+- **会话主要目的**: 修复上次主线程改动后制作进度条不更新
+- **完成的主要任务**:
+  1. 根因：工作线程里 `QTimer.singleShot` 无法可靠把 UI 更新投递到 Qt 主线程，进度条停在 0%
+  2. `UiBridge` 新增 `ui_status` / `ui_progress` 信号，经 `pyqtSignal` 跨线程安全更新 UI
+  3. 进度条增加高度、百分比文字与蓝色 chunk 样式；`apply_offline_progress` 兼容 `stage_start` 事件
+- **关键决策**: 后台线程更新 PyQt 控件必须用 Signal，不能用裸 QTimer
+- **修改的文件列表**: app/ui/bridge.py、scripts/run_ui_skeleton.py、app/ui/pages/song_make_page.py、README.md
+
+---

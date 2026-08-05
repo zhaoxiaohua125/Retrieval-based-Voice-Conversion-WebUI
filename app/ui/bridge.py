@@ -8,6 +8,8 @@ class UiBridge(QObject):
 
     user_action = pyqtSignal(str, dict)
     log_message = pyqtSignal(str)
+    ui_status = pyqtSignal(dict)
+    ui_progress = pyqtSignal(dict)
 
     def emit_action(self, action: str, **payload):
         self.user_action.emit(action, payload)

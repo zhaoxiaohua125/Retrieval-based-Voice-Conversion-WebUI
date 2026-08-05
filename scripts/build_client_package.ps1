@@ -98,8 +98,13 @@ if ($CondaPack) {
     if ($LASTEXITCODE -ne 0) { throw "conda-unpack failed" }
     $bundledPy = Join-Path $pyDir "python.exe"
     if (-not (Test-Path $bundledPy)) { throw "python.exe not found: $bundledPy" }
-    & $bundledPy -c "import torch; print(torch.__version__)"
-    if ($LASTEXITCODE -ne 0) { throw "bundled python missing torch" }
+    Write-Host "Repair torch/torchaudio..."
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Root "scripts\repair_bundled_torch.ps1") `
+        -PackageDir $OutDir -CudaVariant $CudaVariant -CondaBase $CondaBase -CondaEnv $CondaEnv
+    if ($LASTEXITCODE -ne 0) { throw "torch/torchaudio repair failed" }
+    Write-Host "Verify package..."
+    & $bundledPy (Join-Path $Root "scripts\verify_client_package.py") $OutDir
+    if ($LASTEXITCODE -ne 0) { throw "package verify failed" }
     Write-Host "Python runtime OK: $bundledPy"
     $variantFile = Join-Path $OutDir "GPU_VARIANT.txt"
     @(
