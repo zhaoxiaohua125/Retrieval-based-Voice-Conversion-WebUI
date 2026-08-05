@@ -542,6 +542,11 @@ class ClientController:
                     msg = '%s\n%s' % (msg, detail[:2000])
                 self._publish_status('offline_failed', message=msg)
                 self._publish_error(msg)
+        except ModuleNotFoundError as exc:
+            msg = '未检测到 PyTorch，无法做歌。请使用 build_demo_package.bat 重新打包（含 CondaPack），或安装 conda 环境 rvc312 后重启。' if exc.name == 'torch' else str(exc)
+            logger.error('offline worker failed:\n%s', traceback.format_exc())
+            self._publish_status('offline_failed', message=msg)
+            self._publish_error(msg, exc)
         except Exception as exc:
             logger.error('offline worker failed:\n%s', traceback.format_exc())
             self._publish_status('offline_failed', message=str(exc))

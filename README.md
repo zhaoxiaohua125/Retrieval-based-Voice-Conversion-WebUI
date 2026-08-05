@@ -740,14 +740,100 @@ python webui.py --noautoopen
 
 ---
 
-## 会话总结 - 2026-08-04 (27)
+## 会话总结 - 2026-08-04 (28)
 
-- **会话主要目的**: 系统设置增加 RVC 高级设置弹窗（对标 realtime_gui），含模型选择与推理参数
+- **会话主要目的**: 完成阶段性演示打包，便于客户体验 AI 唱歌
 - **完成的主要任务**:
-  1. 新增 `app/ui/rvc_advanced_dialog.py`：模型 .pth/.index、常规（音调/Index/响度/F0 算法）、性能（采样/淡入淡出/降噪）
-  2. 系统设置页改为显示「当前模型」+ **RVC 高级设置…** 按钮（独立弹窗，不挤占主设置页）
-  3. 保存时写入 `realtime.*` 并同步 `rvc.f0_up_key/formant/index_rate/f0_method`
-  4. `config_store` 扩展 threhold / rms_mix_rate / 降噪开关字段
-- **修改的文件列表**: app/ui/rvc_advanced_dialog.py、app/ui/settings_dialog.py、app/integration/controller.py、app/config_store.py、app/ui/main_window.py、README.md
+  1. 新增 `scripts/build_client_package.py` + `build_client_package.ps1`：staging、启动 bat、VERSION、可选 zip/lite/conda-pack
+  2. `packaging/DEMO_README.md` 客户演示说明（做歌 → AI 唱歌流程）
+  3. `packaging/manifest.json` / `version.json` / `INSTALL_RUNTIME.md`
+  4. 窗口标题显示版本号（`app/ops/version.py` 读 VERSION 文件）
+- **打包命令**: `.\scripts\build_client_package.ps1 -Zip`（含 assets）；`-Lite` 精简；`-CondaPack` 内置 Python
+- **修改的文件列表**: scripts/build_client_package.py、scripts/build_client_package.ps1、packaging/*、app/ops/version.py、app/ui/main_window.py、scripts/run_ui_skeleton.py、README.md
+
+---
+
+## 会话总结 - 2026-08-04 (29)
+
+- **会话主要目的**: 内置 FFmpeg 到 `tools/ffmpeg`，客户无需配置 PATH
+- **完成的主要任务**:
+  1. 新增 `app/runtime_env.py`：启动时 prepend `tools/ffmpeg` 到 PATH
+  2. `run_ui_skeleton.py` / 启动 bat / `pymss_webui.py` 统一走内置路径
+- **修改的文件列表**: app/runtime_env.py、scripts/run_ui_skeleton.py、tools/pymss_webui.py、scripts/build_client_package.py、packaging/DEMO_README.md、tools/ffmpeg/README.txt
+
+---
+
+## 会话总结 - 2026-08-05 (1)
+
+- **会话主要目的**: 修复打包后启动客户端时的 Qt 日志过滤器崩溃
+- **完成的主要任务**:
+  1. 修复 `scripts/run_ui_skeleton.py` 中 `QtMsgType` 不支持 `>=` 比较导致的 `TypeError`
+  2. 最终改为枚举白名单 `mode in (Warning, Critical, Fatal)`：`>=` 与 `int()` 在该 PyQt6 版本均不可用
+  3. 同步更新 `dist/RVC-Client-0.1.0-demo/scripts/run_ui_skeleton.py`，无需重新打包即可验证
+- **关键决策与解决方案**: 用 `in` 判断 Qt 日志级别，跨版本最稳妥
+- **使用的技术栈**: PyQt6
+- **修改的文件列表**: scripts/run_ui_skeleton.py、dist/RVC-Client-0.1.0-demo/scripts/run_ui_skeleton.py、README.md
+
+---
+
+## 会话总结 - 2026-08-05 (2)
+
+- **会话主要目的**: 修复打包后「开始处理」报 `No module named 'torch'`
+- **完成的主要任务**:
+  1. 确认 dist 包未含 `python/`（打包时未执行 CondaPack），启动器误用无 torch 的系统 Python
+  2. 新增 `scripts/resolve_launch_python.ps1`：自动查找内置或 conda 中带 PyTorch 的 Python
+  3. 重写 `StartClient.bat` / `StartClient_Debug.bat`，启动前校验 torch
+  4. 启动与做歌失败时增加中文提示；打包脚本无 `python/` 时输出 WARNING
+  5. 更新 `DEMO_README.md`：发客户必须用 `build_demo_package.bat`
+- **关键决策与解决方案**: 做歌依赖 PyTorch，演示包必须 CondaPack 打入 `python/` 或本机有 rvc312
+- **使用的技术栈**: PowerShell、conda-pack、PyTorch
+- **修改的文件列表**: scripts/resolve_launch_python.ps1、scripts/build_client_package.py、scripts/run_ui_skeleton.py、app/integration/controller.py、packaging/DEMO_README.md、dist/RVC-Client-0.1.0-demo/*
+
+---
+
+## 会话总结 - 2026-08-05 (3)
+
+- **会话主要目的**: 将用户 conda 路径 `F:\zxh\anaconda3\envs\rvc312` 纳入启动器自动查找
+- **完成的主要任务**:
+  1. `resolve_launch_python.ps1` 增加 `F:\zxh\anaconda3`，并优先尝试 `rvc312`
+  2. 优化查找顺序，避免扫描全部 env 导致启动等待 ~90s
+  3. 已验证可解析到 `F:\zxh\anaconda3\envs\rvc312\python.exe`
+- **修改的文件列表**: scripts/resolve_launch_python.ps1、dist/RVC-Client-0.1.0-demo/scripts/resolve_launch_python.ps1、README.md
+
+---
+
+## 会话总结 - 2026-08-05 (4)
+
+- **会话主要目的**: 客户开箱即用，将 rvc312 conda 环境打入演示包
+- **完成的主要任务**:
+  1. 重写 `build_client_package.ps1`：自动找 `F:\zxh\anaconda3`、安装 conda-pack、解压后 conda-unpack、验证 torch
+  2. 修复大 zip 用 Python `make_archive` 替代 `Compress-Archive`（避免 2GB 限制）
+  3. 更新 `build_demo_package.bat`、`INSTALL_RUNTIME.md`、`DEMO_README.md` 客户/开发者说明
+- **客户侧流程**: 解压 zip → 双击启动，优先用包内 `python\python.exe`，无需装 conda
+- **开发者操作**: 双击 `build_demo_package.bat`（约 10~30 分钟，4~8GB）
+- **修改的文件列表**: scripts/build_client_package.ps1、build_demo_package.bat、packaging/INSTALL_RUNTIME.md、packaging/DEMO_README.md、README.md
+
+---
+
+## 会话总结 - 2026-08-05 (5)
+
+- **会话主要目的**: 修复 CondaPack 打包失败（tar 打不开、python.exe 不存在）
+- **根因**:
+  1. `conda pack -n rvc312` 找不到环境（conda 不在 PATH）→ 改 `--prefix F:\zxh\anaconda3\envs\rvc312`
+  2. rvc312 有 pip/conda 冲突（torchvision/torchaudio）→ 加 `--ignore-missing-files --force`
+- **完成的主要任务**: 重写 build_client_package.ps1，每步校验产物；实测 pack 成功约 6.24GB
+- **修改的文件列表**: scripts/build_client_package.ps1、packaging/INSTALL_RUNTIME.md、README.md
+
+---
+
+## 会话总结 - 2026-08-05 (6)
+
+- **会话主要目的**: 修复 CondaPack 打包失败；去掉自动 zip
+- **根因**: `Invoke-Conda` 参数名 `$Args` 与 PowerShell 内置变量冲突，导致 conda 无参运行只打印 help
+- **完成的主要任务**:
+  1. 参数改为 `$CondaArgs`，conda install/pack 可正常执行
+  2. 移除 `-Zip` 及自动压缩逻辑，打包完成后手动压缩文件夹
+  3. 更新 `build_demo_package.bat`、`INSTALL_RUNTIME.md`
+- **修改的文件列表**: scripts/build_client_package.ps1、build_demo_package.bat、packaging/INSTALL_RUNTIME.md、README.md
 
 ---

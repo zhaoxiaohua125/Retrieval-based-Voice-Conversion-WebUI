@@ -9,8 +9,32 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 os.chdir(ROOT)
 
+from app.runtime_env import bootstrap_runtime
+
+bootstrap_runtime(ROOT)
+
+
+def _install_qt_log_filter():
+    import sys
+    from PyQt6.QtCore import QtMsgType, qInstallMessageHandler
+
+    _warn = (QtMsgType.QtWarningMsg, QtMsgType.QtCriticalMsg, QtMsgType.QtFatalMsg)
+
+    def _handler(mode, context, message):
+        text = str(message)
+        if 'Could not parse stylesheet' in text:
+            return
+        if mode in _warn:
+            sys.stderr.write(text + '\n')
+
+    qInstallMessageHandler(_handler)
+
+
+_install_qt_log_filter()
+
 from PyQt6.QtWidgets import QApplication, QMessageBox, QSystemTrayIcon
 
+from app.ops.version import CLIENT_VERSION
 from app.events import BusMessage, ModuleId, SignalType
 from app.integration import ClientController
 from app.ops.rotating_log import setup_rotating_logging
@@ -19,10 +43,24 @@ from app.ui import MainWindow, LyricsWindow, UiBridge, build_tray
 
 
 def main():
-    setup_rotating_logging()
+    import logging
+    console_level = logging.WARNING if (ROOT / 'VERSION').is_file() else logging.INFO
+    setup_rotating_logging(console_level=console_level)
     scheduler = AppScheduler.instance().start()
     app = QApplication(sys.argv)
     app.setApplicationName('RVC 声迹客户端')
+    app.setApplicationVersion(CLIENT_VERSION)
+
+    try:
+        import torch  # noqa: F401
+    except ImportError:
+        QMessageBox.warning(
+            None,
+            '环境提示',
+            '当前 Python 未安装 PyTorch，离线做歌 / AI 唱歌不可用。\n\n'
+            '请双击 build_demo_package.bat 重新打包（内置 python 运行时），\n'
+            '或在本机安装 conda 环境 rvc312 后重新启动客户端。',
+        )
 
     if not QSystemTrayIcon.isSystemTrayAvailable():
         QMessageBox.warning(None, '提示', '当前系统托盘不可用，托盘菜单将跳过')

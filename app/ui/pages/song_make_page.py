@@ -87,11 +87,12 @@ class SongMakePage(QWidget):
 
     RESOURCE_STUB_TIP = '当前为一键做歌，自动分离，无需手动导入'
     RESOURCE_STUB_STYLE = (
-        'padding:8px;color:#94a3b8;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;'
+        'QPushButton{padding:8px;color:#94a3b8;background-color:#f1f5f9;'
+        'border:1px solid #e2e8f0;border-radius:6px;}'
     )
     RESOURCE_LYRICS_STYLE = (
-        'padding:8px;color:#334155;background:#fff;border:1px solid #cbd5e1;border-radius:6px;'
-        'QPushButton:hover{background:#f8fafc;}'
+        'QPushButton{padding:8px;color:#334155;background-color:#fff;border:1px solid #cbd5e1;border-radius:6px;}'
+        'QPushButton:hover{background-color:#f8fafc;}'
     )
 
     RESOURCE_ITEMS = (
@@ -306,7 +307,7 @@ class SongMakePage(QWidget):
         btn_open = QPushButton('打开输出文件夹')
         btn_open.clicked.connect(self._open_output_dir)
         btn_run = QPushButton('开始处理')
-        btn_run.setStyleSheet('padding: 10px; font-weight: bold;')
+        btn_run.setStyleSheet('QPushButton{padding:10px;font-weight:bold;}')
         btn_run.clicked.connect(self._request_offline_cover)
         self.btn_run = btn_run
         self.btn_cancel = QPushButton('取消制作')

@@ -39,7 +39,9 @@ DML_CHUNK_SIZE = 88200
 DML_OVERLAP_SIZE = 22050
 DML_MODEL_DTYPE_ENV = "PYMSS_DML_MODEL_DTYPE"
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-FFMPEG_PATH = PROJECT_ROOT / "ffmpeg.exe"
+FFMPEG_PATH = PROJECT_ROOT / "tools" / "ffmpeg" / "ffmpeg.exe"
+if not FFMPEG_PATH.is_file():
+    FFMPEG_PATH = PROJECT_ROOT / "ffmpeg.exe"
 AUDIO_PARAMS = {
     "wav_bit_depth": "FLOAT",
     "flac_bit_depth": "PCM_24",

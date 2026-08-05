@@ -33,7 +33,7 @@ class MainWindow(QMainWindow):
             from app.config_store import ConfigStore
             config_store = ConfigStore().load()
         self.config_store = config_store
-        self.setWindowTitle('RVC 声迹客户端')
+        self.setWindowTitle('RVC 声迹客户端 v%s' % self._client_version())
         self.resize(1280, 800)
         self._build_ui()
         self._restore_layout()
@@ -41,6 +41,14 @@ class MainWindow(QMainWindow):
         self._gpu_timer.timeout.connect(self._refresh_gpu_status)
         self._gpu_timer.start(8000)
         self._refresh_gpu_status()
+
+    @staticmethod
+    def _client_version():
+        try:
+            from app.ops.version import CLIENT_VERSION
+            return CLIENT_VERSION
+        except Exception:
+            return 'dev'
 
     def _build_ui(self):
         root = QWidget()

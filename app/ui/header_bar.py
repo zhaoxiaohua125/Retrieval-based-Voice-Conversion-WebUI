@@ -41,7 +41,8 @@ class HeaderBar(QWidget):
             active = i == index
             btn.setChecked(active)
             btn.setStyleSheet(
-                'padding: 8px 20px; border-radius: 16px;'
-                + ('background:#2563eb;color:white;' if active else 'background:#eef2ff;color:#334155;')
+                'QPushButton{padding:8px 20px;border-radius:16px;border:none;'
+                + ('background-color:#2563eb;color:white;' if active else 'background-color:#eef2ff;color:#334155;')
+                + '}'
             )
         self.tab_changed.emit(index)
