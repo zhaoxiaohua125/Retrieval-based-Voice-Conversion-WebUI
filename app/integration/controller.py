@@ -77,6 +77,7 @@ class ClientController:
     def shutdown(self):
         with self._lock:
             self._stop_playback()
+            self.stop_passthrough()
             self.stop_realtime()
             self._cancel_offline(wait=True)
             self.lyrics.stop()
@@ -124,19 +125,21 @@ class ClientController:
             'playback_select_song': self._select_song,
             'playback_ai_sing': self._start_ai_sing,
             'playback_toggle_pause': self._toggle_playback_pause,
-            'playback_stop': lambda p: self._stop_playback(),
+            'playback_stop': self._stop_playback_all,
             'playback_seek': self._seek_playback,
-            'playback_ai_follow': self._start_ai_follow,
+            'playback_ai_follow': self._toggle_ai_follow,
             'realtime_start': self._start_ai_follow,
             'realtime_stop': self.stop_realtime,
+            'playback_normal_talk': self._toggle_normal_talk,
             'playback_reverb_talk': lambda p: self._start_passthrough('混响说话'),
-            'playback_normal_talk': lambda p: self._start_passthrough('普通说话'),
             'ai_toggle': self._toggle_ai,
             'lyrics_load': self._load_lyrics,
             'lyrics_start': lambda p: self.lyrics.start(source=(p or {}).get('clock_source')),
             'lyrics_stop': lambda p: self.lyrics.stop(),
             'lyrics_set_offset': lambda p: self.lyrics.set_offset_ms(int((p or {}).get('offset_ms', 0))),
             'check_update': self._check_update,
+            'settings_save': self._save_settings,
+            'audio_test_mic': self._test_mic,
         }
         handler = handlers.get(action)
         if handler is None:
@@ -158,12 +161,62 @@ class ClientController:
         self._log_ui('错误: %s' % detail)
 
     def _start_passthrough(self, label: str, payload=None):
+        """混响说话等占位：暂与普通说话相同（直通）。"""
+        if self.state.mode == 'passthrough':
+            self.stop_passthrough()
+            return
+        self._start_normal_talk(payload, label=label)
+
+    def _toggle_normal_talk(self, payload=None):
+        if self.state.mode == 'passthrough':
+            self.stop_passthrough()
+            return
+        self._start_normal_talk(payload)
+
+    def _start_normal_talk(self, payload=None, label: str = '普通说话'):
         self._stop_playback()
         if self.state.realtime_running:
             self.stop_realtime()
-        self.audio.start_stream(passthrough=True)
+        if self.state.offline_running:
+            self._publish_status('passthrough_blocked', log='离线做歌进行中，请稍后再试')
+            return
+        audio_cfg = self.config_store.get('audio', {}) or {}
+        if audio_cfg.get('input_device') is None or audio_cfg.get('output_device') is None:
+            self._publish_error('请先在 config/client.json 配置 audio.input_device 与 output_device')
+            self._publish_status('passthrough_blocked', log='普通说话：未配置音频设备')
+            return
+        try:
+            self.audio.start_stream(passthrough=True)
+        except Exception as exc:
+            self._publish_error('音频流启动失败: %s' % exc, exc)
+            self._publish_status('passthrough_blocked', log='普通说话启动失败')
+            return
         self.state.mode = 'passthrough'
-        self._publish_status('passthrough_started', log='%s：音频直通已启动（未经 RVC）' % label)
+        self.state.passthrough_running = True
+        in_dev = self.audio.manager.config.input_device if self.audio.manager else None
+        out_dev = self.audio.manager.config.output_device if self.audio.manager else None
+        self._publish_status(
+            'passthrough_started',
+            mode='normal_talk',
+            input_device=in_dev,
+            output_device=out_dev,
+            log='%s：干声直通已启动（未经 RVC）\nIN: %s\nOUT: %s\nVoicemeeter：仅麦克风进采集轨，输出轨勿勾 B1 防反馈'
+            % (label, self._device_name(in_dev), self._device_name(out_dev)),
+        )
+
+    def stop_passthrough(self, payload=None):
+        if not self.state.passthrough_running and not (self.audio.manager and self.audio.manager.running):
+            return
+        self.audio.stop_stream()
+        self.state.passthrough_running = False
+        if self.state.mode == 'passthrough':
+            self.state.mode = 'idle'
+        self._publish_status('passthrough_stopped', log='普通说话已停止')
+
+    def _stop_playback_all(self, payload=None):
+        if self.state.mode == 'passthrough':
+            self.stop_passthrough()
+        self._stop_playback(payload)
 
     def _refresh_library(self):
         opt_dir = self.config_store.get('paths.opt_dir', 'opt')
@@ -196,6 +249,8 @@ class ClientController:
         if self.state.offline_running:
             self._publish_status('playback_blocked', log='离线做歌进行中，请稍后再播放')
             return
+        if self.state.passthrough_running:
+            self.stop_passthrough()
         song = (payload or {}).get('song') or self.state.selected_song or {}
         play_path = song.get('play_path') or song.get('cover_path') or song.get('vocal_path')
         if not play_path:
@@ -313,7 +368,15 @@ class ClientController:
         else:
             self._start_ai_follow(payload or {})
 
+    def _toggle_ai_follow(self, payload=None):
+        if self.state.realtime_running:
+            self.stop_realtime()
+        else:
+            self._start_ai_follow(payload or {})
+
     def _start_ai_follow(self, payload: dict):
+        if self.state.passthrough_running:
+            self.stop_passthrough()
         if self.state.playback_running:
             self._stop_playback()
         if self.state.offline_running:
@@ -356,11 +419,12 @@ class ClientController:
     def stop_realtime(self, payload=None):
         if self._realtime is not None:
             self._realtime.stop()
-        self.audio.stop_stream()
+        if self.state.realtime_running:
+            self.audio.stop_stream()
         self.state.realtime_running = False
-        if self.state.mode in ('realtime', 'passthrough'):
+        if self.state.mode == 'realtime':
             self.state.mode = 'idle'
-        self._publish_status('realtime_stopped', log='AI 跟唱/直通已停止')
+        self._publish_status('realtime_stopped', log='AI 跟唱已停止')
 
     def _load_lyrics(self, payload: dict):
         path = (payload or {}).get('path', '')
@@ -510,3 +574,46 @@ class ClientController:
             return
         info = check_update(url)
         self._publish_status('update_checked', log='更新检查：%s' % (info.get('message') or info.get('latest_version')))
+
+    def _save_settings(self, payload: dict):
+        payload = payload or {}
+        audio = payload.get('audio') or {}
+        for key in ('hostapi', 'wasapi_exclusive', 'input_device', 'output_device', 'sample_rate'):
+            if key in audio:
+                self.config_store.set('audio.%s' % key, audio[key])
+        realtime = payload.get('realtime') or {}
+        for key, val in realtime.items():
+            self.config_store.set('realtime.%s' % key, val)
+        if realtime.get('model_sid'):
+            self.state.current_model = str(realtime['model_sid'])
+        if realtime.get('f0_method'):
+            self.config_store.set('rvc.f0_method', str(realtime['f0_method']))
+        if 'pitch' in realtime:
+            self.config_store.set('rvc.f0_up_key', int(realtime['pitch']))
+        if 'formant' in realtime:
+            self.config_store.set('rvc.formant', float(realtime['formant']))
+        if 'index_rate' in realtime:
+            self.config_store.set('rvc.index_rate', float(realtime['index_rate']))
+        if payload.get('osc_port') is not None:
+            self.config_store.set('lyrics.osc_port', int(payload['osc_port']))
+        if payload.get('update_url') is not None:
+            self.config_store.set('update.check_url', str(payload['update_url']).strip())
+        if payload.get('log_dir'):
+            self.config_store.set('paths.log_dir', str(payload['log_dir']).strip())
+        if payload.get('sr_type'):
+            self.config_store.set('realtime.sr_type', str(payload['sr_type']))
+        self.config_store.save()
+        hint = ''
+        if self.state.passthrough_running or self.state.realtime_running:
+            hint = '（请重新开启普通说话/AI 跟唱使新设备生效）'
+        self._publish_status('settings_saved', log='音频与系统设置已写入 config/client.json%s' % hint)
+
+    def _test_mic(self, payload=None):
+        payload = payload or {}
+        if payload.get('stop'):
+            if self.state.mode == 'passthrough':
+                self.stop_passthrough()
+            return
+        if self.state.mode == 'passthrough':
+            return
+        self._start_normal_talk(payload, label='试麦')

@@ -46,6 +46,10 @@ DEFAULT_CONFIG = {
         'crossfade_time': 0.05,
         'extra_time': 2.5,
         'sr_type': 'sr_model',
+        'threhold': -60,
+        'rms_mix_rate': 0.0,
+        'I_noise_reduce': False,
+        'O_noise_reduce': False,
     },
     'msst': {
         'preset': 'normal',

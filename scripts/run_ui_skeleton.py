@@ -39,7 +39,7 @@ def main():
 
     bridge.user_action.connect(on_user_action)
 
-    window = MainWindow(bridge, project_root=ROOT)
+    window = MainWindow(bridge, project_root=ROOT, config_store=controller.config_store)
     lyrics = LyricsWindow()
     lyrics.move(window.x() + 40, window.y() + 80)
     controller.set_lyrics_window(lyrics)
@@ -75,6 +75,14 @@ def main():
         elif action == 'playback_started':
             page.set_mode('ai_sing', active=True)
             page.set_playback_state(payload)
+        elif action == 'passthrough_started':
+            page.set_mode('normal_talk', active=True)
+        elif action in ('passthrough_stopped', 'passthrough_blocked'):
+            page.set_mode('idle')
+        elif action == 'realtime_started':
+            page.set_mode('realtime', active=True)
+        elif action == 'realtime_stopped':
+            page.set_mode('idle')
         elif action in ('playback_paused', 'playback_resumed'):
             page.set_playback_state(payload)
         elif action in ('playback_stopped', 'playback_finished'):

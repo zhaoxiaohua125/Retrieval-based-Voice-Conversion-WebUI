@@ -8,6 +8,7 @@ class ClientState:
     mode: str = 'idle'
     offline_running: bool = False
     realtime_running: bool = False
+    passthrough_running: bool = False
     playback_running: bool = False
     lyrics_running: bool = False
     last_error: str = ''
@@ -20,6 +21,7 @@ class ClientState:
             'mode': self.mode,
             'offline_running': self.offline_running,
             'realtime_running': self.realtime_running,
+            'passthrough_running': self.passthrough_running,
             'playback_running': self.playback_running,
             'lyrics_running': self.lyrics_running,
             'last_error': self.last_error,

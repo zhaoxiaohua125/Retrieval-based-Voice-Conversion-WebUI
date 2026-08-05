@@ -71,8 +71,33 @@ def test_shutdown_idle(errors):
     ctrl = ClientController(scheduler, project_root=ROOT)
     ctrl.start()
     ctrl.shutdown()
-    if ctrl.state.realtime_running or ctrl.state.offline_running or ctrl.state.playback_running:
+    if ctrl.state.realtime_running or ctrl.state.offline_running or ctrl.state.playback_running or ctrl.state.passthrough_running:
         errors.append('shutdown should clear running flags')
+    scheduler.shutdown()
+
+
+def test_normal_talk_route(errors):
+    from app.events import BusMessage, ModuleId, SignalType
+    from app.integration import ClientController
+    from app.scheduler import AppScheduler
+
+    scheduler = AppScheduler.reset_for_test()
+    scheduler = AppScheduler.instance().start()
+    events = []
+    scheduler.subscribe(SignalType.STATUS, lambda m: events.append(m.payload))
+    ctrl = ClientController(scheduler, project_root=ROOT)
+    ctrl.start()
+    scheduler.publish(BusMessage(SignalType.STATUS, ModuleId.UI, {'action': 'playback_normal_talk'}))
+    time.sleep(0.15)
+    started = any(isinstance(e, dict) and e.get('action') == 'passthrough_started' for e in events)
+    if started:
+        if ctrl.state.mode != 'passthrough' or not ctrl.state.passthrough_running:
+            errors.append('normal talk should enable passthrough state')
+        scheduler.publish(BusMessage(SignalType.STATUS, ModuleId.UI, {'action': 'playback_normal_talk'}))
+        time.sleep(0.05)
+        if ctrl.state.passthrough_running:
+            errors.append('normal talk toggle off should stop passthrough')
+    ctrl.shutdown()
     scheduler.shutdown()
 
 
@@ -125,6 +150,7 @@ def main():
     test_controller_basics(errors)
     test_lyrics_route(errors)
     test_shutdown_idle(errors)
+    test_normal_talk_route(errors)
     test_playback_library(errors)
     test_ai_sing_route(errors)
     if errors:

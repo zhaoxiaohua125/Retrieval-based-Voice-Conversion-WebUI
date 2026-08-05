@@ -62,11 +62,13 @@ class AudioService:
 
     def start_stream(self, passthrough: bool | None = None):
         self._ensure_shutdown_hook()
-        if self.manager and self.manager.running:
-            return self.manager
         cfg = self.load_stream_config()
         if passthrough is not None:
             cfg.passthrough = passthrough
+        if self.manager and self.manager.running:
+            if self.manager.config.passthrough == cfg.passthrough:
+                return self.manager
+            self.stop_stream()
         self.manager = AudioStreamManager(cfg)
         self.manager.start()
         self._publish(

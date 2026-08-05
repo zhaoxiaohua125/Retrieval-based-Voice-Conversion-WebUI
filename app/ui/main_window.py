@@ -5,11 +5,7 @@ from pathlib import Path
 from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import (
     QDialog,
-    QFormLayout,
-    QLineEdit,
     QMainWindow,
-    QPushButton,
-    QSpinBox,
     QStackedWidget,
     QStatusBar,
     QTextEdit,
@@ -21,6 +17,7 @@ from PyQt6.QtWidgets import (
 from app.ui.header_bar import HeaderBar
 from app.ui.layout_store import load_ui_layout, save_ui_layout
 from app.ui.pages import AnnouncePage, PlaybackPage, SongMakePage
+from app.ui.settings_dialog import SettingsDialog
 
 
 class MainWindow(QMainWindow):
@@ -28,10 +25,14 @@ class MainWindow(QMainWindow):
 
     TAB_NAMES = HeaderBar.TAB_NAMES
 
-    def __init__(self, bridge, project_root=None):
+    def __init__(self, bridge, project_root=None, config_store=None):
         super().__init__()
         self.bridge = bridge
         self.project_root = Path(project_root or Path(__file__).resolve().parents[2])
+        if config_store is None:
+            from app.config_store import ConfigStore
+            config_store = ConfigStore().load()
+        self.config_store = config_store
         self.setWindowTitle('RVC 声迹客户端')
         self.resize(1280, 800)
         self._build_ui()
@@ -94,42 +95,21 @@ class MainWindow(QMainWindow):
             self.page_playback.select_song_by_title(song_title)
 
     def _open_settings_dialog(self):
-        dlg = QDialog(self)
-        dlg.setWindowTitle('系统设置')
-        layout = QVBoxLayout(dlg)
-        form = QFormLayout()
-        self.set_osc_port = QSpinBox()
-        self.set_osc_port.setRange(1, 65535)
-        self.set_osc_port.setValue(9000)
-        self.set_update_url = QLineEdit('')
-        self.set_log_dir = QLineEdit('logs/client')
-        form.addRow('OSC 端口', self.set_osc_port)
-        form.addRow('更新地址', self.set_update_url)
-        form.addRow('日志目录', self.set_log_dir)
-        layout.addLayout(form)
-        btn_import = QPushButton('导入 RVC 模型…')
-        btn_import.setToolTip('导入 .pth 与 .index（与制作页相同）')
-        btn_import.clicked.connect(self.page_song_make.import_models)
-        btn_save = QPushButton('保存设置')
-        btn_save.clicked.connect(lambda: (self._save_settings(), dlg.accept()))
-        layout.addWidget(btn_import)
-        layout.addWidget(btn_save)
-        layout_data = load_ui_layout().get('settings') or {}
-        if layout_data.get('osc_port'):
-            self.set_osc_port.setValue(int(layout_data['osc_port']))
-        self.set_update_url.setText(layout_data.get('update_url', ''))
-        self.set_log_dir.setText(layout_data.get('log_dir', 'logs/client'))
-        dlg.exec()
-
-    def _save_settings(self):
+        dlg = SettingsDialog(
+            self.bridge, self.config_store, project_root=self.project_root,
+            song_make_page=self.page_song_make, parent=self,
+        )
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        payload = dlg.collect_payload()
         layout = load_ui_layout()
         layout['settings'] = {
-            'osc_port': self.set_osc_port.value(),
-            'update_url': self.set_update_url.text().strip(),
-            'log_dir': self.set_log_dir.text().strip(),
+            'osc_port': payload['osc_port'],
+            'update_url': payload['update_url'],
+            'log_dir': payload['log_dir'],
         }
         save_ui_layout(layout)
-        self.bridge.emit_action('settings_save', **layout['settings'], log='设置已保存')
+        self.bridge.emit_action('settings_save', **payload, log='设置已保存到 config/client.json')
 
     def append_log(self, text):
         self.log_view.append(text)

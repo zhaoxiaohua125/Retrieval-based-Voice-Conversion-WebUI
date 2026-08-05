@@ -740,10 +740,14 @@ python webui.py --noautoopen
 
 ---
 
-## 会话总结 - 2026-08-04 (24)
+## 会话总结 - 2026-08-04 (27)
 
-- **会话主要目的**: 制作页文件区增加空状态操作提示
-- **完成的主要任务**: 列表为空时居中显示「点击选择文件 / 拖拽导入」说明；有文件后自动隐藏；虚线边框 drop 区
-- **修改的文件列表**: app/ui/pages/song_make_page.py、README.md
+- **会话主要目的**: 系统设置增加 RVC 高级设置弹窗（对标 realtime_gui），含模型选择与推理参数
+- **完成的主要任务**:
+  1. 新增 `app/ui/rvc_advanced_dialog.py`：模型 .pth/.index、常规（音调/Index/响度/F0 算法）、性能（采样/淡入淡出/降噪）
+  2. 系统设置页改为显示「当前模型」+ **RVC 高级设置…** 按钮（独立弹窗，不挤占主设置页）
+  3. 保存时写入 `realtime.*` 并同步 `rvc.f0_up_key/formant/index_rate/f0_method`
+  4. `config_store` 扩展 threhold / rms_mix_rate / 降噪开关字段
+- **修改的文件列表**: app/ui/rvc_advanced_dialog.py、app/ui/settings_dialog.py、app/integration/controller.py、app/config_store.py、app/ui/main_window.py、README.md
 
 ---

@@ -15,16 +15,16 @@
     "block_ms": 200,
     "channels": 1,
     "dtype": "float32",
-    "input_device": 1,
-    "output_device": 10,
-    "hostapi": null,
+    "input_device": 27,
+    "output_device": 24,
+    "hostapi": "Windows WASAPI",
     "wasapi_exclusive": false,
     "ring_ms": 500,
     "passthrough": false
   },
   "rvc": {
     "f0_method": "rmvpe",
-    "index_rate": 0.75,
+    "index_rate": 0.0,
     "protect": 0.33,
     "f0_up_key": 0,
     "formant": 0.0
@@ -39,7 +39,11 @@
     "block_time": 0.25,
     "crossfade_time": 0.05,
     "extra_time": 2.5,
-    "sr_type": "sr_model"
+    "sr_type": "sr_model",
+    "threhold": -60,
+    "rms_mix_rate": 0.0,
+    "I_noise_reduce": false,
+    "O_noise_reduce": false
   },
   "msst": {
     "preset": "normal"
@@ -58,8 +62,8 @@
   },
   "ui": {
     "geometry": [
-      547,
-      384,
+      280,
+      357,
       1280,
       784
     ],
