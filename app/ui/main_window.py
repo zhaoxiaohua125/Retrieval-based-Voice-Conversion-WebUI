@@ -40,7 +40,6 @@ class MainWindow(QMainWindow):
         self._gpu_timer = QTimer(self)
         self._gpu_timer.timeout.connect(self._refresh_gpu_status)
         self._gpu_timer.start(8000)
-        self._refresh_gpu_status()
 
     @staticmethod
     def _client_version():

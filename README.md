@@ -837,3 +837,16 @@ python webui.py --noautoopen
 - **修改的文件列表**: scripts/build_client_package.ps1、build_demo_package.bat、packaging/INSTALL_RUNTIME.md、README.md
 
 ---
+
+## 会话总结 - 2026-08-05 (7)
+
+- **会话主要目的**: 打包后启动主界面过慢
+- **根因**: 启动前同步 `import torch`（打包版 Python 首次加载约 10~30s）；启动器也对内置 python 做 torch 检测；MainWindow 初始化即查 GPU
+- **完成的主要任务**:
+  1. 移除 run_ui_skeleton 启动时阻塞式 import torch
+  2. MainWindow GPU 状态改为 8 秒后首次刷新，不阻塞首屏
+  3. 内置 `python\python.exe` 直接启动，跳过 torch 检测；StartClient.bat 优先用内置 python
+- **说明**: 点「开始处理」时仍会加载 torch，仅优化首屏；打包版 Python 本身比 conda 原生略慢属正常
+- **修改的文件列表**: scripts/run_ui_skeleton.py、app/ui/main_window.py、scripts/resolve_launch_python.ps1、scripts/build_client_package.py
+
+---

@@ -51,17 +51,6 @@ def main():
     app.setApplicationName('RVC 声迹客户端')
     app.setApplicationVersion(CLIENT_VERSION)
 
-    try:
-        import torch  # noqa: F401
-    except ImportError:
-        QMessageBox.warning(
-            None,
-            '环境提示',
-            '当前 Python 未安装 PyTorch，离线做歌 / AI 唱歌不可用。\n\n'
-            '请双击 build_demo_package.bat 重新打包（内置 python 运行时），\n'
-            '或在本机安装 conda 环境 rvc312 后重新启动客户端。',
-        )
-
     if not QSystemTrayIcon.isSystemTrayAvailable():
         QMessageBox.warning(None, '提示', '当前系统托盘不可用，托盘菜单将跳过')
 
