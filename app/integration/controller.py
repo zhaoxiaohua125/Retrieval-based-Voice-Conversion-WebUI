@@ -3,6 +3,7 @@
 import logging
 import shutil
 import threading
+import time
 import traceback
 from pathlib import Path
 
@@ -33,16 +34,28 @@ class ClientController:
         self.audio = AudioService(self.scheduler, self.config_store)
         self.lyrics = LyricsService(self.scheduler, self.config_store)
         self._realtime = None
+        self._pitch_follow = None
         self._bridge = None
         self._lyrics_window = None
         self._offline_thread = None
         self._offline_pipeline = None
         self._player = WavPlayer()
         self._playback_tick = None
+        self._follow_tick = None
         self._playback_stop = threading.Event()
+        self._follow_stop = threading.Event()
+        self._follow_prepare_cancel = threading.Event()
+        self._follow_prepare_thread = None
         self._library = []
         self._started = False
         self._lock = threading.RLock()
+
+    @property
+    def pitch_follow(self):
+        if self._pitch_follow is None:
+            from app.pitchfix import PitchFollowService
+            self._pitch_follow = PitchFollowService(self.scheduler, self.config_store)
+        return self._pitch_follow
 
     @property
     def realtime(self):
@@ -79,6 +92,7 @@ class ClientController:
             self._stop_playback()
             self.stop_passthrough()
             self.stop_realtime()
+            self.stop_ai_follow()
             self._cancel_offline(wait=True)
             self.lyrics.stop()
             self._started = False
@@ -128,7 +142,7 @@ class ClientController:
             'playback_stop': self._stop_playback_all,
             'playback_seek': self._seek_playback,
             'playback_ai_follow': self._toggle_ai_follow,
-            'realtime_start': self._start_ai_follow,
+            'realtime_start': self._start_realtime_voice,
             'realtime_stop': self.stop_realtime,
             'playback_normal_talk': self._toggle_normal_talk,
             'playback_reverb_talk': lambda p: self._start_passthrough('混响说话'),
@@ -175,6 +189,8 @@ class ClientController:
 
     def _start_normal_talk(self, payload=None, label: str = '普通说话'):
         self._stop_playback()
+        if self.state.ai_follow_running:
+            self.stop_ai_follow()
         if self.state.realtime_running:
             self.stop_realtime()
         if self.state.offline_running:
@@ -251,6 +267,8 @@ class ClientController:
             return
         if self.state.passthrough_running:
             self.stop_passthrough()
+        if self.state.ai_follow_running:
+            self.stop_ai_follow()
         song = (payload or {}).get('song') or self.state.selected_song or {}
         play_path = song.get('play_path') or song.get('cover_path') or song.get('vocal_path')
         if not play_path:
@@ -366,11 +384,12 @@ class ClientController:
         if self.state.realtime_running:
             self.stop_realtime()
         else:
-            self._start_ai_follow(payload or {})
+            self._start_realtime_voice(payload or {})
 
     def _toggle_ai_follow(self, payload=None):
-        if self.state.realtime_running:
-            self.stop_realtime()
+        if self.state.ai_follow_running or self.state.ai_follow_preparing:
+            self._follow_prepare_cancel.set()
+            self.stop_ai_follow()
         else:
             self._start_ai_follow(payload or {})
 
@@ -379,8 +398,164 @@ class ClientController:
             self.stop_passthrough()
         if self.state.playback_running:
             self._stop_playback()
+        if self.state.realtime_running:
+            self.stop_realtime()
         if self.state.offline_running:
             self._publish_status('realtime_blocked', log='离线任务进行中，请稍后再启动 AI 跟唱')
+            return
+        if self.state.ai_follow_preparing:
+            return
+        song = (payload or {}).get('song') or self.state.selected_song or {}
+        if not song.get('instrumental_path') or not song.get('vocal_path'):
+            if song.get('play_path') or song.get('title'):
+                self._select_song({'song': song})
+                song = self.state.selected_song
+        if not song.get('instrumental_path'):
+            self._publish_error('AI 跟唱需要伴奏 instrumental.wav，请先在歌库选择已做歌条目')
+            return
+        if not song.get('vocal_path'):
+            self._publish_error('AI 跟唱需要参考人声 converted_vocal.wav，请先离线做歌')
+            return
+        self._select_song({'song': song})
+        ref_path = song.get('vocal_path') or ''
+        cache_hit = bool(ref_path and Path(ref_path).with_suffix('.f0.npz').is_file())
+        self.state.ai_follow_preparing = True
+        self._follow_prepare_cancel.clear()
+        self._publish_status(
+            'ai_follow_preparing',
+            title=song.get('title', ''),
+            log='正在启动 AI 跟唱…' if cache_hit else '缺少 F0 缓存，正在分析参考旋律（较慢；重新做歌可跳过此步）…',
+        )
+        self._follow_prepare_thread = threading.Thread(
+            target=self._ai_follow_prepare_worker,
+            args=(dict(song),),
+            name='ai-follow-prepare',
+            daemon=True,
+        )
+        self.scheduler.register_thread('ai-follow-prepare', self._follow_prepare_thread)
+        self._follow_prepare_thread.start()
+
+    def _ai_follow_prepare_worker(self, song: dict):
+        try:
+            if self._follow_prepare_cancel.is_set():
+                return
+            self.pitch_follow.start(song)
+            if self._follow_prepare_cancel.is_set():
+                self.pitch_follow.stop()
+                return
+            self.state.ai_follow_preparing = False
+            self.state.ai_follow_running = True
+            self.state.mode = 'ai_follow'
+            self.lyrics.start(source='manual', enable_tick=False)
+            self.state.lyrics_running = True
+            self._follow_stop.clear()
+            self._follow_tick = threading.Thread(target=self._follow_tick_loop, name='ai-follow-tick', daemon=True)
+            self.scheduler.register_thread('ai-follow-tick', self._follow_tick)
+            self._follow_tick.start()
+            title = song.get('title') or Path(song['instrumental_path']).stem
+            pf = self.pitch_follow
+            self._publish_status(
+                'ai_follow_started',
+                title=title,
+                duration=pf.duration,
+                position=0.0,
+                playing=True,
+                log='AI 跟唱已启动：%s\n对着麦克风唱，系统将按 AI 人声旋律修音\n输出=伴奏+修音人声（请在设置中核对音频设备）' % title,
+            )
+        except Exception as exc:
+            self.state.ai_follow_preparing = False
+            if not self._follow_prepare_cancel.is_set():
+                logger.error('ai follow prepare failed:\n%s', traceback.format_exc())
+                self._publish_error('AI 跟唱启动失败: %s' % exc, exc)
+                self._publish_status('ai_follow_failed', message=str(exc))
+        finally:
+            self.scheduler.unregister_thread('ai-follow-prepare')
+            self._follow_prepare_thread = None
+
+    def _release_ai_follow(self):
+        if self._pitch_follow is not None:
+            self._pitch_follow.stop()
+        if self.state.lyrics_running and self.state.mode == 'ai_follow':
+            self.lyrics.stop()
+            self.state.lyrics_running = False
+        was = self.state.ai_follow_running or self.state.ai_follow_preparing
+        self.state.ai_follow_running = False
+        self.state.ai_follow_preparing = False
+        if self.state.mode == 'ai_follow':
+            self.state.mode = 'idle'
+        if was:
+            self._publish_status('ai_follow_stopped', log='AI 跟唱已停止')
+
+    def _follow_tick_loop(self):
+        natural_finish = False
+        try:
+            while not self._follow_stop.is_set():
+                pf = self._pitch_follow
+                if pf is None:
+                    break
+                if pf.running or pf.position > 0:
+                    pos = pf.position
+                    self.lyrics.tick_at(pos)
+                    self._publish_status(
+                        'playback_tick',
+                        position=pos,
+                        duration=pf.duration,
+                        playing=pf.running,
+                        paused=False,
+                    )
+                if not pf.running and pf.duration > 0 and pf.position >= max(0.0, pf.duration - 0.2):
+                    natural_finish = True
+                    break
+                if self._follow_stop.wait(0.25):
+                    break
+        finally:
+            if natural_finish:
+                self.scheduler.publish(
+                    BusMessage(
+                        SignalType.STATUS,
+                        ModuleId.SCHEDULER,
+                        {'action': 'ai_follow_finished', 'log': 'AI 跟唱伴奏已播完'},
+                    )
+                )
+            self._follow_stop.set()
+            self._follow_tick = None
+            try:
+                self.scheduler.unregister_thread('ai-follow-tick')
+            except Exception:
+                pass
+            self._release_ai_follow()
+
+    def stop_ai_follow(self, payload=None):
+        self._follow_prepare_cancel.set()
+        self._follow_stop.set()
+        prep = self._follow_prepare_thread
+        if prep and prep.is_alive() and threading.current_thread() is not prep:
+            prep.join(timeout=0.5)
+        self._follow_prepare_thread = None
+        try:
+            self.scheduler.unregister_thread('ai-follow-prepare')
+        except Exception:
+            pass
+        tick = self._follow_tick
+        if tick and tick.is_alive() and threading.current_thread() is not tick:
+            tick.join(timeout=1.0)
+        if threading.current_thread() is not tick:
+            self._follow_tick = None
+            try:
+                self.scheduler.unregister_thread('ai-follow-tick')
+            except Exception:
+                pass
+            self._release_ai_follow()
+
+    def _start_realtime_voice(self, payload: dict):
+        if self.state.passthrough_running:
+            self.stop_passthrough()
+        if self.state.playback_running:
+            self._stop_playback()
+        if self.state.ai_follow_running:
+            self.stop_ai_follow()
+        if self.state.offline_running:
+            self._publish_status('realtime_blocked', log='离线任务进行中，请稍后再启动实时变声')
             return
         model_sid = (
             (payload or {}).get('model_sid')
@@ -395,14 +570,10 @@ class ClientController:
         self.state.realtime_running = True
         self.state.current_model = model_sid
         self.state.mode = 'realtime'
-        if self.state.loaded_lyrics and not self.lyrics.running:
-            clock = self.config_store.get('lyrics.clock_source', 'osc')
-            self.lyrics.start(source=clock)
-            self.state.lyrics_running = True
         self._publish_status(
             'realtime_started',
             model_sid=model_sid,
-            log='AI 跟唱已启动（模型 %s）\n音频 IN: %s\n音频 OUT: %s'
+            log='实时变声已启动（模型 %s）\n音频 IN: %s\n音频 OUT: %s'
             % (model_sid, self._device_name(self.audio.manager.config.input_device if self.audio.manager else None),
                self._device_name(self.audio.manager.config.output_device if self.audio.manager else None)),
         )
@@ -424,7 +595,7 @@ class ClientController:
         self.state.realtime_running = False
         if self.state.mode == 'realtime':
             self.state.mode = 'idle'
-        self._publish_status('realtime_stopped', log='AI 跟唱已停止')
+        self._publish_status('realtime_stopped', log='实时变声已停止')
 
     def _load_lyrics(self, payload: dict):
         path = (payload or {}).get('path', '')

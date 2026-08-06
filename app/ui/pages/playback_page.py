@@ -121,7 +121,7 @@ class PlaybackPage(QWidget):
         ctrl.addWidget(self.btn_normal_talk)
         self.btn_ai_follow = QPushButton('AI 跟唱')
         self.btn_ai_follow.setCheckable(True)
-        self.btn_ai_follow.setToolTip('实时变声（Voicemeeter 路由待联调）')
+        self.btn_ai_follow.setToolTip('AI 跟唱：按预渲染 AI 人声旋律实时修音（需 instrumental + converted_vocal）')
         self.btn_ai_follow.clicked.connect(lambda: self.bridge.emit_action('playback_ai_follow'))
         ctrl.addWidget(self.btn_ai_follow)
         self.btn_ai_sing = QPushButton('AI 唱歌')
@@ -243,30 +243,38 @@ class PlaybackPage(QWidget):
             self.lyric_prev.setText('')
             self.lyric_next.setText('')
 
+    def set_ai_follow_busy(self, busy: bool):
+        self.btn_ai_follow.setEnabled(not busy)
+        self.btn_ai_follow.setText('加载中…' if busy else 'AI 跟唱')
+        if busy:
+            self.btn_ai_follow.setChecked(True)
+
     def set_mode(self, mode: str, active: bool = False):
         self._mode = mode
         ai_sing = mode == 'ai_sing' and active
         normal_talk = mode == 'normal_talk' and active
-        ai_follow = mode == 'realtime' and active
+        ai_follow = mode == 'ai_follow' and active
+        realtime = mode == 'realtime' and active
         self.btn_ai_sing.blockSignals(True)
         self.btn_normal_talk.blockSignals(True)
         self.btn_ai_follow.blockSignals(True)
         self.btn_ai_sing.setChecked(ai_sing)
         self.btn_normal_talk.setChecked(normal_talk)
-        self.btn_ai_follow.setChecked(ai_follow)
+        self.btn_ai_follow.setChecked(ai_follow or realtime)
         self.btn_ai_sing.blockSignals(False)
         self.btn_normal_talk.blockSignals(False)
         self.btn_ai_follow.blockSignals(False)
         busy_play = ai_sing
-        busy_live = normal_talk or ai_follow
+        busy_live = normal_talk or ai_follow or realtime
         self.btn_ai_sing.setEnabled(not busy_live)
-        self.btn_normal_talk.setEnabled(not busy_play and not ai_follow)
-        self.btn_ai_follow.setEnabled(not busy_play and not normal_talk)
+        self.btn_normal_talk.setEnabled(not busy_play and not ai_follow and not realtime)
+        self.btn_ai_follow.setEnabled(not busy_play and not normal_talk and not realtime)
         if mode == 'idle':
             self.waveform.reset_position()
             self.btn_ai_sing.setChecked(False)
             self.btn_normal_talk.setChecked(False)
             self.btn_ai_follow.setChecked(False)
+            self.btn_ai_follow.setText('AI 跟唱')
             self.btn_ai_sing.setEnabled(True)
             self.btn_normal_talk.setEnabled(True)
             self.btn_ai_follow.setEnabled(True)

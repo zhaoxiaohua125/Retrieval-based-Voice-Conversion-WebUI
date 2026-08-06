@@ -925,6 +925,40 @@ python webui.py --noautoopen
 
 ---
 
+## 会话总结 - 2026-08-06 (2)
+
+- **会话主要目的**: 确认 Voicemeeter Potato 下 Studio One + RVC 外置联调方案，并编写可交付文档
+- **完成的主要任务**:
+  1. 说明 VST3 插件（已有）与 VST3 宿主（后期 1:1）区别；外置 VM+S1 为过渡路线
+  2. 新增 `docs/cn/StudioOne_Voicemeeter_Potato联调指南.md`：Potato 条带/B1/VAIO/AUX 路由、S1 VST3、OSC 歌词、OBS、验收清单与排错
+- **关键决策**: 用户 Voicemeeter 版本为 Potato；直播变声优先 S1+RVC VST3，客户端负责做歌/AI唱歌/歌词
+- **修改的文件列表**: docs/cn/StudioOne_Voicemeeter_Potato联调指南.md、README.md
+
+---
+
+## 会话总结 - 2026-08-06 (3)
+
+- **会话主要目的**: 实现 AI 跟唱 MVP（任务 9），对标声迹「预渲染旋律 + 实时修音」
+- **完成的主要任务**:
+  1. 新增 `app/pitchfix/`：`f0_curve`（converted_vocal RMVPE/pyin 参考曲线）、`corrector`（块级 pitch_shift）、`PitchFollowService`（伴奏+修音麦 duplex 输出）
+  2. `playback_ai_follow` 改走修音跟唱；托盘 `ai_toggle` 仍为实时 RVC 变声（`_start_realtime_voice`）
+  3. `config/client.json` 增加 `pitchfix.*`；`scripts/test_task9_pitchfix.py` 烟测通过
+- **关键决策**: 首版用 librosa pyin/yin + pitch_shift，强度/半音上限可配置；需歌库条目含 instrumental + converted_vocal
+- **修改的文件列表**: app/pitchfix/*、app/integration/controller.py、app/integration/state.py、app/ui/pages/playback_page.py、scripts/run_ui_skeleton.py、config/client.json、scripts/test_task9_pitchfix.py、README.md
+
+---
+
+## 会话总结 - 2026-08-06 (4)
+
+- **会话主要目的**: 修复 AI 跟唱点击卡 UI；同步讨论结论到开发大纲
+- **完成的主要任务**:
+  1. F0 提取改后台线程 `ai-follow-prepare`；即时提示「正在加载参考旋律…」；按钮显示「加载中…」
+  2. F0 降采样 22050 + 磁盘缓存 `.f0.npz`，二次启动显著加快
+  3. `开发大纲.md` 增补 2026-08-06 审查：不做项、VST3 策略、VM+S1 过渡、任务 9 MVP 进度
+- **修改的文件列表**: app/pitchfix/f0_curve.py、app/pitchfix/service.py、app/integration/controller.py、app/integration/state.py、app/ui/pages/playback_page.py、scripts/run_ui_skeleton.py、开发大纲.md、README.md
+
+---
+
 ## 会话总结 - 2026-08-05 (12)
 
 - **会话主要目的**: 复核声迹技术栈分析遗漏点，并澄清歌词格式能否对标声迹需求
@@ -976,5 +1010,49 @@ python webui.py --noautoopen
 - **关键决策**: 产品验收以预渲染+内置修音为准，禁止用整段实时 RVC 冒充跟唱
 - **修改的文件列表**:
   - 开发大纲.md、README.md
+
+---
+
+## 会话总结 - 2026-08-06 (16)
+
+- **会话主要目的**: 修复 AI 跟唱运行一段时间后界面卡住/转圈
+- **完成的主要任务**:
+  1. 修音核心改用 `scipy.signal.resample` 轻量变调，替换每块 `librosa.effects.pitch_shift`（CPU/GIL 过重）
+  2. F0 估计改为降采样自相关，每 3 块估一次；积压时直通麦克风避免 worker 拖死
+  3. AI 跟唱关闭歌词 20Hz 独立线程，改 follow tick 250ms 统一刷进度与歌词
+- **关键决策**: 卡顿主因是实时修音 + 高频 UI 信号，而非启动阶段 F0 缓存
+- **技术栈**: NumPy、SciPy、PyQt 信号节流
+- **修改的文件列表**:
+  - app/pitchfix/corrector.py、app/pitchfix/service.py
+  - app/lyrics/service.py、app/integration/controller.py
+  - README.md
+
+---
+
+## 会话总结 - 2026-08-06 (17)
+
+- **会话主要目的**: 评估并将 F0 缓存（`.f0.npz`）前移到离线做歌，避免 AI 跟唱点击后卡顿
+- **完成的主要任务**:
+  1. 确认卡顿主因：无缓存时 `ReferenceF0Curve.from_wav` 在跟唱启动阶段跑整段 `librosa pyin`（约 10s CPU 占满）
+  2. 离线流水线 RVC/混音完成后自动 `ReferenceF0Curve.from_wav(converted_vocal)`
+  3. AI 跟唱启动提示区分「有缓存 / 无缓存」；新增 `scripts/build_f0_cache.py` 给旧歌补缓存
+- **关键决策**: F0 属于离线可预计算资产，不应在跟唱热路径首次生成
+- **修改的文件列表**:
+  - app/rvc/offline_pipeline.py、app/pitchfix/f0_curve.py
+  - app/integration/controller.py、scripts/build_f0_cache.py
+  - README.md
+
+---
+
+## 会话总结 - 2026-08-06 (18)
+
+- **会话主要目的**: 根据日志修复 AI 跟唱几秒后自动停止的线程 bug
+- **完成的主要任务**:
+  1. 定位 `ai-follow-tick` 结束时调用 `stop_ai_follow()` → `join` 自身 → `RuntimeError: cannot join current thread`
+  2. 拆分 `_release_ai_follow()`；tick 线程在 `finally` 里收尾，禁止 join 当前线程
+  3. 外部 `stop_ai_follow` 仅 join 其他线程，避免重复清理
+- **关键决策**: 日志中 21:46:17 启动、21:46:31 报错并非 F0 慢，而是 tick 线程崩溃导致跟唱被误停
+- **修改的文件列表**:
+  - app/integration/controller.py、README.md
 
 ---

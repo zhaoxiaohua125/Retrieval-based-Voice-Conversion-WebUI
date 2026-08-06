@@ -30,7 +30,7 @@
     "formant": 0.0
   },
   "realtime": {
-    "model_sid": "weitianA1.pth",
+    "model_sid": "1孙悟空模型.pth",
     "index_path": "",
     "pitch": 0,
     "formant": 0.0,
@@ -60,10 +60,19 @@
     "mtc_port": "",
     "sim_speed": 1.0
   },
+  "pitchfix": {
+    "strength": 0.85,
+    "inst_gain": 0.85,
+    "mic_gain": 1.0,
+    "block_ms": 200,
+    "f0_min": 50,
+    "f0_max": 1100,
+    "max_semitone": 2.0
+  },
   "ui": {
     "geometry": [
-      -54,
-      299,
+      210,
+      286,
       1280,
       841
     ],

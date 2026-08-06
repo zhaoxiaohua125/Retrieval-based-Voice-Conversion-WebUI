@@ -280,6 +280,20 @@ class OfflineSongPipeline:
                 write_audio(cover_path, mixed, mix_sr, output_format)
                 lines.append('成品：%s' % cover_path)
 
+            if self._is_cancelled():
+                yield {'event': 'cancelled', 'message': '用户已取消制作'}
+                return
+            emit({'event': 'phase', 'phase': 'mix', 'percent': 96, 'message': '正在生成 AI 跟唱参考旋律…'})
+            from app.pitchfix.f0_curve import ReferenceF0Curve, f0_cache_path
+            try:
+                ReferenceF0Curve.from_wav(converted_vocal_path)
+                f0_path = f0_cache_path(converted_vocal_path)
+                lines.append('跟唱 F0 缓存：%s' % f0_path)
+                logger.info('offline pitchfix f0 cache=%s', f0_path)
+            except Exception:
+                logger.warning('offline F0 cache failed:\n%s', traceback.format_exc())
+                lines.append('跟唱 F0 缓存失败（AI 跟唱首次启动会较慢）')
+
             result = OfflineCoverResult(
                 preset_id=preset_id,
                 source_path=input_audio_path,

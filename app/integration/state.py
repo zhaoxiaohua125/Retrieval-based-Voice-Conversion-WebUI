@@ -10,6 +10,8 @@ class ClientState:
     realtime_running: bool = False
     passthrough_running: bool = False
     playback_running: bool = False
+    ai_follow_running: bool = False
+    ai_follow_preparing: bool = False
     lyrics_running: bool = False
     last_error: str = ''
     loaded_lyrics: bool = False
@@ -21,6 +23,8 @@ class ClientState:
             'mode': self.mode,
             'offline_running': self.offline_running,
             'realtime_running': self.realtime_running,
+            'ai_follow_running': self.ai_follow_running,
+            'ai_follow_preparing': self.ai_follow_preparing,
             'passthrough_running': self.passthrough_running,
             'playback_running': self.playback_running,
             'lyrics_running': self.lyrics_running,

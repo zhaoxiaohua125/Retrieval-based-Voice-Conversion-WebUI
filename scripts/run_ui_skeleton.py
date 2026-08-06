@@ -153,6 +153,16 @@ def main():
             page.set_mode('realtime', active=True)
         elif action == 'realtime_stopped':
             page.set_mode('idle')
+        elif action == 'ai_follow_preparing':
+            page.set_ai_follow_busy(True)
+        elif action == 'ai_follow_started':
+            make.set_offline_running(False)
+            page.set_ai_follow_busy(False)
+            page.set_mode('ai_follow', active=True)
+            page.set_playback_state(payload)
+        elif action in ('ai_follow_stopped', 'ai_follow_finished', 'ai_follow_failed'):
+            page.set_ai_follow_busy(False)
+            page.set_mode('idle')
         elif action in ('playback_paused', 'playback_resumed'):
             page.set_playback_state(payload)
         elif action in ('playback_stopped', 'playback_finished'):

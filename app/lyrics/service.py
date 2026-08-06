@@ -84,7 +84,7 @@ class LyricsService:
             self._clock = ManualPlaybackClock()
         return self._clock
 
-    def start(self, source: str | None = None):
+    def start(self, source: str | None = None, enable_tick: bool = True):
         self._ensure_hook()
         if self._running:
             return self
@@ -92,18 +92,40 @@ class LyricsService:
         if hasattr(self._clock, 'start'):
             self._clock.start()
         self._running = True
-        self._worker = threading.Thread(target=self._tick_loop, name='lyrics-sync', daemon=True)
-        self.scheduler.register_thread('lyrics-sync', self._worker)
-        self._worker.start()
+        if enable_tick:
+            self._worker = threading.Thread(target=self._tick_loop, name='lyrics-sync', daemon=True)
+            self.scheduler.register_thread('lyrics-sync', self._worker)
+            self._worker.start()
+        else:
+            self._worker = None
         self._publish(SignalType.STATUS, {'action': 'lyrics_sync_started', 'clock': self._clock_source})
         return self
+
+    def tick_at(self, time_sec: float):
+        if not self._running:
+            return
+        if isinstance(self._clock, ManualPlaybackClock):
+            self._clock.set_time(time_sec)
+        try:
+            hit = self.matcher.match(time_sec)
+            if hit.index != self._last_index:
+                self._last_index = hit.index
+                payload = {'action': 'lyric_tick', **hit.to_dict()}
+                self._publish(SignalType.STATUS, payload)
+                if self._tick_handler:
+                    self._tick_handler(payload)
+        except Exception:
+            logger.error('lyrics tick_at failed:\n%s', traceback.format_exc())
 
     def stop(self):
         self._running = False
         if self._worker and self._worker.is_alive():
             self._worker.join(timeout=2.0)
         self._worker = None
-        self.scheduler.unregister_thread('lyrics-sync')
+        try:
+            self.scheduler.unregister_thread('lyrics-sync')
+        except Exception:
+            pass
         if hasattr(self._clock, 'stop'):
             try:
                 self._clock.stop()
