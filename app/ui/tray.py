@@ -1,7 +1,7 @@
 """系统托盘菜单。"""
 
 from PyQt6.QtGui import QAction, QIcon
-from PyQt6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
+from PyQt6.QtWidgets import QMenu, QSystemTrayIcon
 
 
 def build_tray(bridge, main_window, lyrics_window=None, controller=None):
@@ -40,7 +40,7 @@ def build_tray(bridge, main_window, lyrics_window=None, controller=None):
 
     menu.addSeparator()
     act_quit = QAction('退出', main_window)
-    act_quit.triggered.connect(QApplication.instance().quit)
+    act_quit.triggered.connect(lambda: main_window.request_quit(confirm=True))
     menu.addAction(act_quit)
 
     tray.setContextMenu(menu)

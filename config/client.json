@@ -30,7 +30,7 @@
     "formant": 0.0
   },
   "realtime": {
-    "model_sid": "1孙悟空模型.pth",
+    "model_sid": "weitianA1.pth",
     "index_path": "",
     "pitch": 0,
     "formant": 0.0,
@@ -62,12 +62,12 @@
   },
   "ui": {
     "geometry": [
-      235,
-      285,
+      -54,
+      299,
       1280,
       841
     ],
     "active_tab": 3,
-    "active_nav_tab": 1
+    "active_nav_tab": 0
   }
 }

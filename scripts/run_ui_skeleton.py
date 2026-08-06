@@ -96,6 +96,23 @@ def main():
     lyrics.move(window.x() + 40, window.y() + 80)
     controller.set_lyrics_window(lyrics)
 
+    tray = None
+    if QSystemTrayIcon.isSystemTrayAvailable():
+        tray = build_tray(bridge, window, lyrics, controller)
+        tray.show()
+    window._quit_lyrics = lyrics
+    window._quit_tray = tray
+    window._quit_shutdown = lambda: scheduler.shutdown() if scheduler.running else None
+
+    def _finalize():
+        if scheduler.running:
+            scheduler.shutdown()
+        if tray is not None:
+            tray.hide()
+        lyrics.close()
+
+    app.aboutToQuit.connect(_finalize)
+
     def _apply_scheduler_status(envelope: dict):
         source = envelope.get('source')
         payload = envelope.get('payload') or {}
@@ -162,17 +179,10 @@ def main():
     scheduler.subscribe(SignalType.PROGRESS, on_scheduler_progress)
     window.page_playback.apply_library(controller.library)
 
-    tray = None
-    if QSystemTrayIcon.isSystemTrayAvailable():
-        tray = build_tray(bridge, window, lyrics, controller)
-        tray.show()
-
     window.show()
     bridge.log_message.emit('客户端已启动（AI 唱歌 / 离线做歌 / 歌词同步已接入）')
 
     code = app.exec()
-    controller.shutdown()
-    scheduler.shutdown()
     return code
 
 

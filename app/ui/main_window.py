@@ -1,11 +1,14 @@
 """主窗口 Shell：顶栏三 Tab + 页面栈 + 底状态栏/日志。"""
 
+import threading
 from pathlib import Path
 
 from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import (
+    QApplication,
     QDialog,
     QMainWindow,
+    QMessageBox,
     QStackedWidget,
     QStatusBar,
     QTextEdit,
@@ -13,7 +16,6 @@ from PyQt6.QtWidgets import (
     QWidget,
     QLabel,
 )
-
 from app.ui.header_bar import HeaderBar
 from app.ui.layout_store import load_ui_layout, save_ui_layout
 from app.ui.pages import AnnouncePage, PlaybackPage, SongMakePage
@@ -40,6 +42,10 @@ class MainWindow(QMainWindow):
         self._gpu_timer = QTimer(self)
         self._gpu_timer.timeout.connect(self._refresh_gpu_status)
         self._gpu_timer.start(8000)
+        self._quitting = False
+        self._quit_worker = None
+        self._quit_timer = None
+        self._quit_shutdown = None
 
     @staticmethod
     def _client_version():
@@ -144,10 +150,63 @@ class MainWindow(QMainWindow):
             self.header.set_active_tab(tab)
             self.stack.setCurrentIndex(tab)
 
-    def closeEvent(self, event):
+    def _save_window_layout(self):
         layout = load_ui_layout()
         g = self.geometry()
         layout['geometry'] = [g.x(), g.y(), g.width(), g.height()]
         layout['active_nav_tab'] = self.stack.currentIndex()
         save_ui_layout(layout)
-        event.accept()
+
+    def request_quit(self, confirm=True):
+        if self._quitting:
+            return True
+        if confirm:
+            btn = QMessageBox.question(
+                self,
+                '确认退出',
+                '确定要退出 RVC 声迹客户端吗？\n进行中的任务将被停止。',
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if btn != QMessageBox.StandardButton.Yes:
+                return False
+        self._quitting = True
+        self._save_window_layout()
+        self._gpu_timer.stop()
+        self.setEnabled(False)
+        self.status.showMessage('正在退出，请稍候…')
+        self._quit_worker = threading.Thread(target=self._run_shutdown, name='app-quit', daemon=True)
+        self._quit_worker.start()
+        self._quit_timer = QTimer(self)
+        self._quit_timer.timeout.connect(self._finish_quit)
+        self._quit_timer.start(50)
+        return True
+
+    def _run_shutdown(self):
+        fn = self._quit_shutdown
+        if fn:
+            try:
+                fn()
+            except Exception:
+                pass
+
+    def _finish_quit(self):
+        if self._quit_worker and self._quit_worker.is_alive():
+            return
+        if self._quit_timer:
+            self._quit_timer.stop()
+        lyrics = getattr(self, '_quit_lyrics', None)
+        if lyrics is not None:
+            lyrics.close()
+        tray = getattr(self, '_quit_tray', None)
+        if tray is not None:
+            tray.hide()
+        self.hide()
+        QApplication.instance().quit()
+
+    def closeEvent(self, event):
+        if self._quitting:
+            event.accept()
+            return
+        event.ignore()
+        self.request_quit(confirm=True)
