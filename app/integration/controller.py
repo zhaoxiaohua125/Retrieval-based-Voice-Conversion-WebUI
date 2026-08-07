@@ -429,6 +429,9 @@ class ClientController:
         self._stop_playback()
 
     def _toggle_playback_pause(self, payload=None):
+        if self.state.ai_follow_running or self.state.ai_follow_preparing:
+            self._stop_playback_all()
+            return
         if not self.state.playback_running:
             if self.state.selected_song:
                 self._start_ai_sing({'song': self.state.selected_song})

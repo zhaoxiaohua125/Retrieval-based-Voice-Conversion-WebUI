@@ -178,6 +178,8 @@ def main():
             page.set_mode('idle')
         elif action in ('playback_paused', 'playback_resumed'):
             page.set_playback_state(payload)
+        elif action == 'playback_idle':
+            page.set_mode('idle')
         elif action in ('playback_stopped', 'playback_finished'):
             page.set_mode('idle')
         elif action == 'lyrics_loaded':

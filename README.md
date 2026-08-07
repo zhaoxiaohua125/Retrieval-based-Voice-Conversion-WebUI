@@ -1185,3 +1185,15 @@ python webui.py --noautoopen
 - **修改的文件列表**: app/integration/controller.py、README.md
 
 ---
+
+## 会话总结 - 2026-08-07 (7)
+
+- **会话主要目的**: 播放控制对标声迹——合并播放/停止为单按钮，播放中显示选中态
+- **完成的主要任务**:
+  1. 移除「停止」按钮，`▶`/`⏸` 可切换单按钮（播放中蓝色选中）
+  2. AI 唱歌/跟唱播放时同步 transport 选中；跟唱播放中再点 = 停止
+  3. AI 唱歌播放中再点 = 暂停/继续
+- **修改的文件列表**:
+  - app/ui/pages/playback_page.py、app/integration/controller.py、scripts/run_ui_skeleton.py、README.md
+
+---

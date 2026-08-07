@@ -110,12 +110,12 @@ class PlaybackPage(QWidget):
 
         ctrl = QHBoxLayout()
         ctrl.addStretch()
-        self.btn_play = QPushButton('▶ 播放')
-        self.btn_play.clicked.connect(lambda: self.bridge.emit_action('playback_toggle_pause'))
+        self.btn_play = QPushButton('▶')
+        self.btn_play.setCheckable(True)
+        self.btn_play.setFixedWidth(52)
+        self.btn_play.setToolTip('播放 / 暂停（播放中再次点击可停止 AI 跟唱）')
+        self.btn_play.clicked.connect(self._on_transport)
         ctrl.addWidget(self.btn_play)
-        self.btn_stop = QPushButton('停止')
-        self.btn_stop.clicked.connect(lambda: self.bridge.emit_action('playback_stop'))
-        ctrl.addWidget(self.btn_stop)
         self.btn_normal_talk = QPushButton('普通说话')
         self.btn_normal_talk.setCheckable(True)
         self.btn_normal_talk.setToolTip('麦克风干声直通（不经 RVC）；需配置 Voicemeeter 路由')
@@ -141,7 +141,7 @@ class PlaybackPage(QWidget):
         self.btn_mix.clicked.connect(self._toggle_mix_panel)
         ctrl.addWidget(self.btn_mix)
         self._mix_panel = AiFollowMixPanel(self.bridge, self)
-        for btn in (self.btn_play, self.btn_stop, self.btn_normal_talk, self.btn_ai_follow, self.btn_ai_sing):
+        for btn in (self.btn_play, self.btn_normal_talk, self.btn_ai_follow, self.btn_ai_sing):
             btn.setStyleSheet(self.BTN_STYLE)
         ctrl.addStretch()
         center_layout.addLayout(ctrl)
@@ -195,6 +195,20 @@ class PlaybackPage(QWidget):
     def _on_wave_seek(self, ratio: float):
         self.bridge.emit_action('playback_seek', ratio=ratio)
 
+    def _on_transport(self):
+        was_active = not self.btn_play.isChecked()
+        if was_active and self._mode == 'ai_follow':
+            self.bridge.emit_action('playback_stop')
+            return
+        self.bridge.emit_action('playback_toggle_pause')
+
+    def _sync_transport(self, playing: bool, paused: bool = False):
+        active = bool(playing) and not bool(paused)
+        self.btn_play.blockSignals(True)
+        self.btn_play.setChecked(active)
+        self.btn_play.setText('⏸' if active else '▶')
+        self.btn_play.blockSignals(False)
+
     def _on_ai_sing(self):
         if self.btn_ai_sing.isChecked() and self._selected:
             self.bridge.emit_action('playback_ai_sing', song=self._selected)
@@ -227,7 +241,8 @@ class PlaybackPage(QWidget):
             self.progress.setValue(int(min(1.0, pos / dur) * 1000))
             self.progress.blockSignals(False)
             self.waveform.set_playback(pos, dur, playing and not paused)
-        self.btn_play.setText('▶ 播放' if paused or not playing else '⏸ 暂停')
+        if self._mode in ('ai_sing', 'ai_follow'):
+            self._sync_transport(playing, paused)
 
     def set_current_line(self, text: str):
         if text:
@@ -268,6 +283,7 @@ class PlaybackPage(QWidget):
         self.btn_ai_follow.setText('加载中…' if busy else 'AI 跟唱')
         if busy:
             self.btn_ai_follow.setChecked(True)
+            self._sync_transport(False)
 
     def set_mode(self, mode: str, active: bool = False):
         self._mode = mode
@@ -297,6 +313,7 @@ class PlaybackPage(QWidget):
             self.btn_ai_sing.setEnabled(True)
             self.btn_normal_talk.setEnabled(True)
             self.btn_ai_follow.setEnabled(True)
+            self._sync_transport(False)
 
     def selected_song(self):
         return self._selected
