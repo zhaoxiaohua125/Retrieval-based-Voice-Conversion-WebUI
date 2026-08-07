@@ -1,6 +1,7 @@
 """任务 7：全模块集成控制器（仅路由与生命周期，不含业务实现）。"""
 
 import logging
+import queue
 import shutil
 import threading
 import time
@@ -20,7 +21,7 @@ from app.rvc.types import RvcInferParams
 from app.rvc.vc_context import discover_first_model, resolve_index_for_model
 from app.scheduler import AppScheduler
 
-logger = logging.getLogger('rvc_client.integration')
+logger = logging.getLogger('rvc_client')
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -53,6 +54,10 @@ class ClientController:
         self._library = []
         self._started = False
         self._lock = threading.RLock()
+        self._tick_generation = 0
+        self._switch_queue = queue.Queue()
+        self._switch_worker = threading.Thread(target=self._switch_worker_loop, name='mode-switch', daemon=True)
+        self._switch_worker.start()
 
     @property
     def pitch_follow(self):
@@ -150,7 +155,7 @@ class ClientController:
             'realtime_start': self._start_realtime_voice,
             'realtime_stop': self.stop_realtime,
             'playback_normal_talk': self._toggle_normal_talk,
-            'playback_reverb_talk': lambda p: self._start_passthrough('混响说话'),
+            'playback_reverb_talk': self._toggle_reverb_talk,
             'ai_toggle': self._toggle_ai,
             'lyrics_load': self._load_lyrics,
             'lyrics_start': lambda p: self.lyrics.start(source=(p or {}).get('clock_source')),
@@ -179,21 +184,111 @@ class ClientController:
         detail = (msg.payload or {}).get('detail') or (msg.payload or {}).get('message') or 'unknown'
         self._log_ui('错误: %s' % detail)
 
-    def _start_passthrough(self, label: str, payload=None):
-        """混响说话等占位：暂与普通说话相同（直通）。"""
-        if self.state.mode == 'passthrough':
+    def _is_talk_mode(self) -> bool:
+        return self.state.mode in ('normal_talk', 'reverb_talk')
+
+    def _switch_worker_loop(self):
+        while True:
+            fn, args, kwargs = self._switch_queue.get()
+            name = getattr(fn, '__name__', str(fn))
+            logger.info('mode switch begin: %s mode=%s passthrough=%s playback=%s', name, self.state.mode, self.state.passthrough_running, self.state.playback_running)
+            try:
+                fn(*args, **kwargs)
+                logger.info('mode switch done: %s mode=%s player_active=%s', name, self.state.mode, self._player.is_active)
+            except Exception:
+                logger.error('mode switch failed (%s):\n%s', name, traceback.format_exc())
+            finally:
+                self._switch_queue.task_done()
+
+    def _dispatch_mode_switch(self, fn, *args, **kwargs):
+        while not self._switch_queue.empty():
+            try:
+                self._switch_queue.get_nowait()
+                self._switch_queue.task_done()
+            except queue.Empty:
+                break
+        self._switch_queue.put((fn, args, kwargs))
+
+    def _halt_playback_tick(self, wait: float = 0.4):
+        self._tick_generation += 1
+        self._playback_stop.set()
+        tick = self._playback_tick
+        self._playback_tick = None
+        if tick is not None and tick.is_alive() and threading.current_thread() is not tick:
+            tick.join(timeout=wait)
+        try:
+            self.scheduler.unregister_thread('playback-tick')
+        except Exception:
+            pass
+
+    def _begin_playback_tick(self):
+        self._playback_stop.clear()
+        gen = self._tick_generation
+        self._playback_tick = threading.Thread(
+            target=self._playback_tick_loop, args=(gen,), name='playback-tick', daemon=True
+        )
+        self.scheduler.register_thread('playback-tick', self._playback_tick)
+        self._playback_tick.start()
+
+    def _restart_playback_tick(self):
+        self._halt_playback_tick(wait=0.25)
+        self._playback_stop.clear()
+        gen = self._tick_generation
+        self._playback_tick = threading.Thread(
+            target=self._playback_tick_loop, args=(gen,), name='playback-tick', daemon=True
+        )
+        self.scheduler.register_thread('playback-tick', self._playback_tick)
+        self._playback_tick.start()
+
+    def _reverb_inst_state(self):
+        mgr = self.audio.manager
+        if mgr is None or mgr.inst_duration <= 0:
+            return 0.0, 0.0, False, False
+        pos = mgr.inst_position
+        dur = mgr.inst_duration
+        playing = mgr.inst_playing and not mgr.inst_paused
+        paused = mgr.inst_paused and mgr.inst_playing
+        return pos, dur, playing, paused
+
+    def _toggle_reverb_talk(self, payload=None):
+        if self.state.mode == 'reverb_talk':
             self.stop_passthrough()
             return
-        self._start_normal_talk(payload, label=label)
+        self._dispatch_mode_switch(self._start_talk, payload, mode='reverb_talk')
 
     def _toggle_normal_talk(self, payload=None):
-        if self.state.mode == 'passthrough':
+        if self.state.mode == 'normal_talk':
             self.stop_passthrough()
             return
-        self._start_normal_talk(payload)
+        self._start_talk(payload, mode='normal_talk')
 
-    def _start_normal_talk(self, payload=None, label: str = '普通说话'):
-        self._stop_playback()
+    def _start_talk(self, payload=None, mode: str = 'normal_talk'):
+        label = '混响说话' if mode == 'reverb_talk' else '普通说话'
+        if self._is_talk_mode() and self.state.mode != mode:
+            self.stop_passthrough(handoff=(mode == 'reverb_talk' and self.state.mode == 'normal_talk'))
+        carry_pos = self._current_song_position()
+        inst_path = ''
+        player_handoff = False
+        if mode == 'normal_talk':
+            self._stop_playback()
+        elif mode == 'reverb_talk':
+            if self.state.mode == 'ai_sing':
+                carry_pos = self._player.position
+                player_handoff = True
+                self.state.mode = 'reverb_talk'
+                self._stop_playback(handoff=True)
+                time.sleep(0.2)
+                logger.info('reverb handoff from ai_sing pos=%.2fs', carry_pos)
+            elif self.state.playback_running and self._player.is_active:
+                carry_pos = self._player.position
+                player_handoff = True
+                self.state.mode = 'reverb_talk'
+                self._stop_playback(handoff=True)
+                time.sleep(0.2)
+            song = self.state.selected_song or {}
+            inst_path = song.get('instrumental_path') or ''
+            if inst_path and not Path(inst_path).is_file():
+                inst_path = ''
         if self.state.ai_follow_running:
             self.stop_ai_follow()
         if self.state.realtime_running:
@@ -204,41 +299,99 @@ class ClientController:
         audio_cfg = self.config_store.get('audio', {}) or {}
         if audio_cfg.get('input_device') is None or audio_cfg.get('output_device') is None:
             self._publish_error('请先在 config/client.json 配置 audio.input_device 与 output_device')
-            self._publish_status('passthrough_blocked', log='普通说话：未配置音频设备')
+            self._publish_status('passthrough_blocked', log='%s：未配置音频设备' % label)
             return
-        try:
-            self.audio.start_stream(passthrough=True)
-        except Exception as exc:
-            self._publish_error('音频流启动失败: %s' % exc, exc)
-            self._publish_status('passthrough_blocked', log='普通说话启动失败')
+        last_err = None
+        for attempt in range(4):
+            try:
+                self.audio.start_stream(
+                    passthrough=True,
+                    reverb=(mode == 'reverb_talk'),
+                    inst_path=inst_path or None,
+                    inst_seek=carry_pos,
+                )
+                last_err = None
+                break
+            except Exception as exc:
+                last_err = exc
+                logger.warning('%s stream retry %s: %s', label, attempt + 1, exc)
+                time.sleep(0.12 * (attempt + 1))
+        if last_err is not None:
+            self._publish_error('音频流启动失败: %s' % last_err, last_err)
+            self._publish_status('passthrough_blocked', log='%s启动失败' % label)
             return
-        self.state.mode = 'passthrough'
+        self.state.mode = mode
         self.state.passthrough_running = True
         in_dev = self.audio.manager.config.input_device if self.audio.manager else None
         out_dev = self.audio.manager.config.output_device if self.audio.manager else None
         gain = passthrough_gain_from_audio(self.config_store.get('audio', {}) or {})
+        inst_hint = ''
+        pos, dur, playing, paused = 0.0, 0.0, False, False
+        if mode == 'reverb_talk' and inst_path:
+            self.state.playback_running = True
+            self._ensure_playback_lyrics(carry_pos)
+            self._restart_playback_tick()
+            pos, dur, playing, paused = self._reverb_inst_state()
+            inst_hint = '\n伴奏：%s（与 AI 唱歌可互切，播放头同步）' % Path(inst_path).name
+            self._publish_status(
+                'playback_tick',
+                position=pos,
+                duration=dur,
+                playing=playing,
+                paused=paused,
+            )
+        elif mode == 'reverb_talk':
+            inst_hint = '\n未找到伴奏轨，仅混响麦克风'
+        extra = '\n已叠加房间混响（可调 audio.reverb_mix / reverb_decay）' if mode == 'reverb_talk' else ''
         self._publish_status(
             'passthrough_started',
-            mode='normal_talk',
+            mode=mode,
             input_device=in_dev,
             output_device=out_dev,
-            log='%s：干声直通已启动（不经 RVC）\nIN: %s\nOUT: %s\n监听增益: %.1fx（设置里 %s%%）\n保存设置后需重开本模式；Voicemeeter：H1→B1，VAIO→A1'
-            % (label, self._device_name(in_dev), self._device_name(out_dev), gain, int(gain * 50)),
+            position=pos if mode == 'reverb_talk' and inst_path else 0.0,
+            duration=dur if mode == 'reverb_talk' and inst_path else 0.0,
+            playing=playing if mode == 'reverb_talk' and inst_path else False,
+            paused=paused if mode == 'reverb_talk' and inst_path else False,
+            log='%s：%s\nIN: %s\nOUT: %s\n监听增益: %.1fx（设置里 %s%%）%s%s\n保存设置后需重开本模式；Voicemeeter：H1→B1，VAIO→A1'
+            % (
+                label,
+                '伴奏+混响麦' if mode == 'reverb_talk' and inst_path else ('干声+混响直通' if mode == 'reverb_talk' else '干声直通已启动（不经 RVC）'),
+                self._device_name(in_dev),
+                self._device_name(out_dev),
+                gain,
+                int(gain * 50),
+                extra,
+                inst_hint,
+            ),
         )
 
-    def stop_passthrough(self, payload=None):
+    def stop_passthrough(self, payload=None, handoff: bool = False):
         if not self.state.passthrough_running and not (self.audio.manager and self.audio.manager.running):
             return
+        was_reverb = self.state.mode == 'reverb_talk'
+        label = '混响说话' if was_reverb else '普通说话'
+        if was_reverb or (handoff and self.state.playback_running):
+            self._halt_playback_tick(wait=0.25 if handoff else 0.4)
         self.audio.stop_stream()
+        if handoff:
+            time.sleep(0.25)
+        else:
+            time.sleep(0.03)
         self.state.passthrough_running = False
-        if self.state.mode == 'passthrough':
+        if was_reverb and self.state.playback_running and not handoff:
+            self.state.playback_running = False
+            if self.state.lyrics_running:
+                self.lyrics.stop()
+                self.state.lyrics_running = False
+        if self._is_talk_mode() and not handoff:
             self.state.mode = 'idle'
-        self._publish_status('passthrough_stopped', log='普通说话已停止')
+        if not handoff:
+            self._publish_status('passthrough_stopped', log='%s已停止' % label)
 
     def _stop_playback_all(self, payload=None):
         if self.state.ai_follow_running or self.state.ai_follow_preparing:
             self.stop_ai_follow()
-        if self.state.mode == 'passthrough':
+        if self._is_talk_mode():
             self.stop_passthrough()
         self._stop_playback(payload)
 
@@ -282,7 +435,8 @@ class ClientController:
             self._sync_playback_output_device()
             play_path = song.get('play_path') or song.get('cover_path')
             if play_path and Path(play_path).is_file():
-                self._player.load(str(play_path))
+                if str(play_path) != self._player.path or not self._player.is_active:
+                    self._player.load(str(play_path))
             if song.get('instrumental_path') and song.get('vocal_path'):
                 self.pitch_follow.preload(song)
         except Exception:
@@ -315,6 +469,8 @@ class ClientController:
             pf = self._pitch_follow
             if pf is not None and pf.duration > 0:
                 return pf.position
+        if self.state.mode == 'reverb_talk' and self.audio.manager and self.audio.manager.inst_duration > 0:
+            return self.audio.manager.inst_position
         if self.state.playback_running and self._player.is_active:
             return self._player.position
         return 0.0
@@ -328,15 +484,30 @@ class ClientController:
         self.lyrics.sync_at(time_sec, force=True)
 
     def _start_ai_sing(self, payload: dict):
+        self._dispatch_mode_switch(self._start_ai_sing_impl, payload or {})
+
+    def _start_ai_sing_impl(self, payload: dict):
         if self.state.offline_running:
             self._publish_status('playback_blocked', log='离线做歌进行中，请稍后再播放')
             return
-        if self.state.passthrough_running:
-            self.stop_passthrough()
         carry_pos = float((payload or {}).get('position', 0) or 0)
-        if carry_pos <= 0:
-            carry_pos = self._current_song_position()
         from_inst_dur = 0.0
+        reverb_handoff = False
+        if self.state.mode == 'reverb_talk':
+            reverb_handoff = True
+            mgr = self.audio.manager
+            if mgr is not None and mgr.inst_duration > 0:
+                carry_pos = mgr.inst_position
+                from_inst_dur = mgr.inst_duration
+            logger.info('ai_sing handoff from reverb pos=%.2fs inst_dur=%.2fs', carry_pos, from_inst_dur)
+            self.stop_passthrough(handoff=True)
+            self._player.stop()
+            time.sleep(0.15)
+            logger.info('ai_sing reverb stream released')
+        elif self.state.passthrough_running:
+            self.stop_passthrough()
+        elif carry_pos <= 0:
+            carry_pos = self._current_song_position()
         follow_active = self.state.ai_follow_running or self.state.ai_follow_preparing
         if follow_active:
             pf = self._pitch_follow
@@ -362,18 +533,51 @@ class ClientController:
             self._player.seek_ratio(carry_pos / duration)
         if follow_active:
             self.stop_ai_follow(handoff=True)
-        elif self.state.playback_running:
+        elif self.state.playback_running and not reverb_handoff:
             self._stop_playback(handoff=True)
         self.state.playback_running = True
         self.state.mode = 'ai_sing'
-        self._playback_stop.clear()
-        self._playback_tick = threading.Thread(target=self._playback_tick_loop, name='playback-tick', daemon=True)
-        self.scheduler.register_thread('playback-tick', self._playback_tick)
-        self._playback_tick.start()
         pos = self._player.position
         self._ensure_playback_lyrics(pos)
-        self._player.play(on_finish=self._on_playback_finished)
+        started = False
+        last_err = None
+        for attempt in range(4):
+            try:
+                if not self._player.play(on_finish=self._on_playback_finished):
+                    raise RuntimeError('播放器未启动')
+                started = True
+                break
+            except Exception as exc:
+                last_err = exc
+                logger.warning('player play retry %s: %s', attempt + 1, exc)
+                time.sleep(0.08 * (attempt + 1))
+        if not started:
+            self.state.playback_running = False
+            self.state.mode = 'idle'
+            self._halt_playback_tick()
+            self._publish_error('AI 唱歌播放失败: %s' % last_err, last_err)
+            self._publish_status('playback_stopped', log='AI 唱歌启动失败，请稍后再试')
+            return
+        time.sleep(0.06)
+        if not self._player.is_active:
+            logger.warning('ai_sing inactive after play, retry once pos=%.2fs', self._player.position)
+            self._player.stop()
+            time.sleep(0.12)
+            try:
+                if not self._player.play(on_finish=self._on_playback_finished):
+                    raise RuntimeError('播放器重试未启动')
+            except Exception as exc:
+                logger.error('ai_sing retry play failed: %s', exc, exc_info=True)
+                self.state.playback_running = False
+                self.state.mode = 'idle'
+                self._halt_playback_tick()
+                self._publish_error('AI 唱歌播放失败: %s' % exc, exc)
+                self._publish_status('playback_stopped', log='AI 唱歌启动失败，请稍后再试')
+                return
+        self._restart_playback_tick()
+        pos = self._player.position
         title = song.get('title') or Path(play_path).stem
+        logger.info('ai_sing playing title=%s pos=%.2fs active=%s', title, pos, self._player.is_active)
         hint = '（从 %s 继续）' % self._fmt_pos(pos) if pos > 0.5 else ''
         self._publish_status(
             'playback_started',
@@ -401,9 +605,22 @@ class ClientController:
                 daemon=True,
             ).start()
 
-    def _playback_tick_loop(self):
-        while not self._playback_stop.is_set():
-            if self._player.is_active:
+    def _playback_tick_loop(self, gen: int):
+        stuck = 0
+        while not self._playback_stop.is_set() and self._tick_generation == gen:
+            if self.state.mode == 'reverb_talk' and self.audio.manager and self.audio.manager.inst_duration > 0:
+                stuck = 0
+                pos, dur, playing, paused = self._reverb_inst_state()
+                self.lyrics.sync_at(pos)
+                self._publish_status(
+                    'playback_tick',
+                    position=pos,
+                    duration=dur,
+                    playing=playing,
+                    paused=paused,
+                )
+            elif self._player.is_active:
+                stuck = 0
                 pos = self._player.position
                 self.lyrics.sync_at(pos)
                 self._publish_status(
@@ -413,7 +630,18 @@ class ClientController:
                     playing=self._player.is_playing,
                     paused=not self._player.is_playing and self._player.is_active,
                 )
-            if self._playback_stop.wait(0.1):
+            elif self.state.mode == 'ai_sing' and self.state.playback_running:
+                stuck += 1
+                if stuck in (3, 10, 30):
+                    logger.warning(
+                        'ai_sing tick stalled gen=%s stuck=%s player_active=%s pos=%.2fs mode=%s',
+                        gen,
+                        stuck,
+                        self._player.is_active,
+                        self._player.position,
+                        self.state.mode,
+                    )
+            if self._playback_stop.wait(0.1) or self._tick_generation != gen:
                 break
 
     def _on_playback_finished(self):
@@ -431,6 +659,24 @@ class ClientController:
     def _toggle_playback_pause(self, payload=None):
         if self.state.ai_follow_running or self.state.ai_follow_preparing:
             self._stop_playback_all()
+            return
+        if self.state.mode == 'reverb_talk' and self.audio.manager and self.audio.manager.inst_duration > 0:
+            resumed = self.audio.manager.toggle_inst_pause()
+            pos, dur, playing, paused = self._reverb_inst_state()
+            self._publish_status(
+                'playback_paused' if not resumed else 'playback_resumed',
+                playing=playing,
+                paused=paused,
+                position=pos,
+                duration=dur,
+            )
+            self._publish_status(
+                'playback_tick',
+                position=pos,
+                duration=dur,
+                playing=playing,
+                paused=paused,
+            )
             return
         if not self.state.playback_running:
             if self.state.selected_song:
@@ -460,18 +706,29 @@ class ClientController:
             self._pitch_follow.seek(ratio * self._pitch_follow.duration)
             self.lyrics.sync_at(self._pitch_follow.position, force=True)
             return
+        if self.state.mode == 'reverb_talk' and self.audio.manager and self.audio.manager.inst_duration > 0:
+            self.audio.manager.seek_instrumental(ratio * self.audio.manager.inst_duration)
+            self.lyrics.sync_at(self.audio.manager.inst_position, force=True)
+            pos, dur, playing, paused = self._reverb_inst_state()
+            self._publish_status(
+                'playback_tick',
+                position=pos,
+                duration=dur,
+                playing=playing,
+                paused=paused,
+            )
+            return
         if not self._player.is_active or self._player.duration <= 0:
             return
         self._player.seek_ratio(ratio)
         self.lyrics.sync_at(self._player.position, force=True)
 
     def _stop_playback(self, payload=None, handoff=False):
-        self._playback_stop.set()
-        self._player.stop()
-        if self._playback_tick and self._playback_tick.is_alive():
-            self._playback_tick.join(timeout=0.05 if handoff else 1.0)
-        self._playback_tick = None
-        self.scheduler.unregister_thread('playback-tick')
+        if handoff:
+            self._player.stop()
+        else:
+            self._player.stop_reset()
+        self._halt_playback_tick(wait=0.2 if handoff else 0.4)
         was_sing = self.state.mode == 'ai_sing'
         self.state.playback_running = False
         if handoff:
@@ -998,15 +1255,15 @@ class ClientController:
             mgr.config.passthrough_gain = passthrough_gain_from_audio(merged)
         hint = ''
         if self.state.passthrough_running or self.state.realtime_running:
-            hint = '（请重新开启普通说话/AI 跟唱使新设备生效）'
+            hint = '（请重新开启普通说话/混响说话/AI 跟唱使新设备生效）'
         self._publish_status('settings_saved', log='音频与系统设置已写入 config/client.json%s' % hint)
 
     def _test_mic(self, payload=None):
         payload = payload or {}
         if payload.get('stop'):
-            if self.state.mode == 'passthrough':
+            if self._is_talk_mode():
                 self.stop_passthrough()
             return
-        if self.state.mode == 'passthrough':
+        if self._is_talk_mode():
             return
-        self._start_normal_talk(payload, label='试麦')
+        self._start_talk(payload, mode='normal_talk')

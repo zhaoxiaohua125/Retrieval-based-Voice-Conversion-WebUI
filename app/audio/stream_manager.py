@@ -27,6 +27,10 @@ class AudioStreamConfig:
     ring_ms: int = 500
     passthrough: bool = False
     passthrough_gain: float = 2.0
+    passthrough_reverb: bool = False
+    reverb_mix: float = 0.35
+    reverb_decay: float = 0.72
+    inst_gain: float = 0.77
 
     def block_frames(self) -> int:
         ms = max(100, min(500, int(self.block_ms)))
@@ -52,6 +56,14 @@ class AudioStreamManager:
         self._error = None
         self._reconnect = False
         self._watchdog = None
+        self._rev_bufs = None
+        self._rev_pos = None
+        self._rev_delays = None
+        self._inst_data = None
+        self._inst_pos = 0
+        self._inst_duration = 0.0
+        self._inst_paused = False
+        self._inst_finished = False
         self._stats = {'callbacks': 0, 'underruns': 0, 'input_overflow': 0, 'restarts': 0}
 
     @property
@@ -71,6 +83,81 @@ class AudioStreamManager:
             return self.config.input_device, self.config.output_device
         return pick_voicemeeter_defaults()
 
+    @property
+    def inst_position(self) -> float:
+        with self._lock:
+            sr = int(self.config.sample_rate or 48000)
+            return self._inst_pos / sr if sr else 0.0
+
+    @property
+    def inst_duration(self) -> float:
+        return float(self._inst_duration)
+
+    @property
+    def inst_playing(self) -> bool:
+        with self._lock:
+            return self._inst_data is not None and not self._inst_finished
+
+    @property
+    def inst_paused(self) -> bool:
+        return bool(self._inst_paused)
+
+    def load_instrumental(self, path: str, seek_sec: float = 0.0):
+        import soundfile as sf
+
+        data, sr = sf.read(str(path), dtype='float32', always_2d=True)
+        if data.shape[1] > 1:
+            data = data.mean(axis=1, keepdims=True)
+        target_sr = int(self.config.sample_rate)
+        if int(sr) != target_sr:
+            import librosa
+
+            data = librosa.resample(data.T, orig_sr=int(sr), target_sr=target_sr).T.reshape(-1, 1)
+        with self._lock:
+            self._inst_data = np.asarray(data[:, 0], dtype=np.float32)
+            self._inst_pos = max(0, int(float(seek_sec) * target_sr))
+            self._inst_duration = len(self._inst_data) / target_sr if target_sr else 0.0
+            self._inst_paused = False
+            self._inst_finished = False
+
+    def clear_instrumental(self):
+        with self._lock:
+            self._inst_data = None
+            self._inst_pos = 0
+            self._inst_duration = 0.0
+            self._inst_paused = False
+            self._inst_finished = False
+
+    def seek_instrumental(self, seconds: float):
+        with self._lock:
+            if self._inst_data is None:
+                return
+            sr = int(self.config.sample_rate)
+            self._inst_pos = max(0, min(len(self._inst_data), int(float(seconds) * sr)))
+            self._inst_finished = False
+
+    def toggle_inst_pause(self) -> bool:
+        with self._lock:
+            if self._inst_data is None:
+                return False
+            self._inst_paused = not self._inst_paused
+            return not self._inst_paused
+
+    def _read_inst_frames(self, frames: int) -> np.ndarray:
+        with self._lock:
+            if self._inst_data is None or self._inst_paused:
+                return np.zeros(frames, dtype=np.float32)
+            start = self._inst_pos
+            end = min(start + frames, len(self._inst_data))
+            got = max(0, end - start)
+            out = np.zeros(frames, dtype=np.float32)
+            if got:
+                out[:got] = self._inst_data[start:end]
+                self._inst_pos = end
+            if end >= len(self._inst_data):
+                self._inst_finished = True
+            return out
+
     def start(self):
         with self._lock:
             if self._running:
@@ -80,6 +167,7 @@ class AudioStreamManager:
                 raise RuntimeError('未找到可用音频输入/输出设备')
             self.config.input_device = in_dev
             self.config.output_device = out_dev
+            self._init_reverb()
             self._open_stream()
             self._running = True
             self._watchdog = threading.Thread(target=self._watch_loop, name='audio-watchdog', daemon=True)
@@ -90,11 +178,14 @@ class AudioStreamManager:
     def stop(self):
         with self._lock:
             self._running = False
-            self._close_stream()
+            stream = self._stream
+            self._stream = None
             self.input_ring.clear()
             self.output_ring.clear()
-            logger.info('audio stream stopped')
-            return self
+            self.clear_instrumental()
+        self._close_stream(stream)
+        logger.info('audio stream stopped')
+        return self
 
     def _extra_settings(self):
         import sounddevice as sd
@@ -122,15 +213,46 @@ class AudioStreamManager:
         )
         self._stream.start()
 
-    def _close_stream(self):
-        if self._stream is None:
+    def _init_reverb(self):
+        if not self.config.passthrough_reverb:
+            self._rev_bufs = self._rev_pos = self._rev_delays = None
+            return
+        sr = int(self.config.sample_rate)
+        self._rev_delays = [max(1, int(d * sr / 48000)) for d in (1557, 1617, 1491, 1422)]
+        self._rev_bufs = [np.zeros(d, dtype=np.float32) for d in self._rev_delays]
+        self._rev_pos = [0] * len(self._rev_delays)
+
+    def _reverb_mono(self, mono: np.ndarray) -> np.ndarray:
+        if not self.config.passthrough_reverb or self._rev_bufs is None:
+            return mono[:, 0]
+        mix = float(self.config.reverb_mix or 0.35)
+        decay = float(self.config.reverb_decay or 0.72)
+        dry = mono[:, 0]
+        wet = np.zeros(len(dry), dtype=np.float32)
+        for i, buf in enumerate(self._rev_bufs):
+            delay = self._rev_delays[i]
+            pos = self._rev_pos[i]
+            for j, sample in enumerate(dry):
+                tap = buf[pos]
+                wet[j] += tap
+                buf[pos] = sample + tap * decay
+                pos = (pos + 1) % delay
+            self._rev_pos[i] = pos
+        wet *= 0.25
+        return np.clip(dry * (1.0 - mix) + wet * mix, -1.0, 1.0)
+
+    def _close_stream(self, stream=None):
+        if stream is None:
+            with self._lock:
+                stream = self._stream
+                self._stream = None
+        if stream is None:
             return
         try:
-            self._stream.abort()
-            self._stream.close()
+            stream.abort()
+            stream.close()
         except Exception:
             logger.debug('stream close: %s', traceback.format_exc())
-        self._stream = None
 
     def _callback(self, indata, outdata, frames, time_info, status):
         import sounddevice as sd
@@ -152,6 +274,12 @@ class AudioStreamManager:
             if self.config.passthrough:
                 gain = float(self.config.passthrough_gain or 1.0)
                 boosted = np.clip(mono_in * gain, -1.0, 1.0)
+                if self.config.passthrough_reverb:
+                    boosted[:, 0] = self._reverb_mono(boosted)
+                if self._inst_data is not None:
+                    inst = self._read_inst_frames(frames).reshape(-1, 1)
+                    ig = float(self.config.inst_gain or 0.77)
+                    boosted = np.clip(boosted + inst * ig, -1.0, 1.0)
                 self.output_ring.write(boosted)
             need = outdata.shape[0]
             chunk = self.output_ring.read(need)
@@ -192,16 +320,22 @@ class AudioStreamManager:
             with self._lock:
                 if not self._running:
                     break
-                try:
-                    self._close_stream()
+                old = self._stream
+                self._stream = None
+            try:
+                self._close_stream(old)
+                with self._lock:
+                    if not self._running:
+                        break
                     self._open_stream()
                     self._stats['restarts'] += 1
                     self._error = None
-                    logger.warning('audio stream restarted after device/error event')
-                except Exception as exc:
+                logger.warning('audio stream restarted after device/error event')
+            except Exception as exc:
+                with self._lock:
                     self._error = str(exc)
-                    self._reconnect = True
-                    logger.error('audio reconnect failed: %s', exc)
+                self._reconnect = True
+                logger.error('audio reconnect failed: %s', exc)
 
     def push_output(self, frames: np.ndarray) -> int:
         return self.output_ring.write(frames)

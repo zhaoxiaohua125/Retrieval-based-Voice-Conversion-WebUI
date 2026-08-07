@@ -7,7 +7,7 @@ import numpy as np
 import sounddevice as sd
 import soundfile as sf
 
-logger = logging.getLogger('rvc_client.playback')
+logger = logging.getLogger('rvc_client')
 
 
 class WavPlayer:
@@ -21,6 +21,7 @@ class WavPlayer:
         self._playing = False
         self._paused = False
         self._stream = None
+        self._stream_gen = 0
         self._on_finish = None
         self._duration = 0.0
         self._path = ''
@@ -66,10 +67,29 @@ class WavPlayer:
             return self._target_sr
         return int(file_sr)
 
+    @staticmethod
+    def _close_stream(stream):
+        if stream is None:
+            return
+        try:
+            stream.abort()
+            stream.close()
+        except Exception:
+            pass
+
+    def _take_stream_locked(self):
+        stream = self._stream
+        self._stream = None
+        return stream
+
     def load(self, path: str):
         path = str(path)
-        if path == self._path and self._data is not None:
-            return self._duration
+        with self._lock:
+            if path == self._path and self._data is not None:
+                return self._duration
+            need_stop = self._playing
+        if need_stop:
+            self.stop()
         data, sr = sf.read(path, dtype='float32', always_2d=True)
         sr = int(sr)
         out_sr = self._playback_sr(sr)
@@ -78,8 +98,6 @@ class WavPlayer:
             data = librosa.resample(data.T, orig_sr=sr, target_sr=out_sr).T
             sr = out_sr
         with self._lock:
-            if self._playing:
-                self.stop()
             self._data = data
             self._sr = sr
             self._pos = 0
@@ -92,56 +110,76 @@ class WavPlayer:
             self.load(path)
         with self._lock:
             if self._data is None:
+                logger.warning('wav play skipped: no data')
                 return False
+            if self._pos >= len(self._data):
+                logger.warning('wav play at eof pos=%s len=%s, rewind', self._pos, len(self._data))
+                self._pos = 0
             self._on_finish = on_finish
             self._paused = False
             self._playing = True
-            self._start_stream()
+        try:
+            gen = self._start_stream()
+        except Exception:
+            with self._lock:
+                self._playing = False
+                self._on_finish = None
+            raise
+        logger.info('wav play started gen=%s dev=%s pos=%.2fs dur=%.2fs', gen, self._output_device, self.position, self.duration)
         return True
 
     def _start_stream(self):
-        if self._stream is not None:
-            try:
-                self._stream.stop()
-                self._stream.close()
-            except Exception:
-                pass
-            self._stream = None
+        with self._lock:
+            self._stream_gen += 1
+            gen = self._stream_gen
+            old = self._take_stream_locked()
+            channels = self._data.shape[1]
+            sr = self._sr
+            out_dev = self._output_device
 
-        def callback(outdata, frames, _time, status):
-            del _time, status
-            with self._lock:
-                if self._paused or not self._playing or self._data is None:
-                    outdata.fill(0)
-                    return
-                end = self._pos + frames
-                chunk = self._data[self._pos:end]
-                if len(chunk) < frames:
-                    outdata[: len(chunk)] = chunk
-                    outdata[len(chunk) :] = 0
-                    self._playing = False
-                    raise sd.CallbackStop()
-                outdata[:] = chunk
-                self._pos = end
+            def callback(outdata, frames, _time, status):
+                del _time, status
+                with self._lock:
+                    if self._stream_gen != gen or self._paused or not self._playing or self._data is None:
+                        outdata.fill(0)
+                        return
+                    end = self._pos + frames
+                    chunk = self._data[self._pos:end]
+                    if len(chunk) < frames:
+                        outdata[: len(chunk)] = chunk
+                        outdata[len(chunk) :] = 0
+                        self._playing = False
+                        raise sd.CallbackStop()
+                    outdata[:] = chunk
+                    self._pos = end
 
-        channels = self._data.shape[1]
-        kwargs = dict(
-            samplerate=self._sr,
-            channels=channels,
-            callback=callback,
-            finished_callback=self._on_stream_finished,
-        )
-        if self._output_device is not None:
-            kwargs['device'] = self._output_device
-        self._stream = sd.OutputStream(**kwargs)
-        self._stream.start()
+            def finished_callback():
+                self._on_stream_finished(gen)
 
-    def _on_stream_finished(self):
+            kwargs = dict(
+                samplerate=sr,
+                channels=channels,
+                callback=callback,
+                finished_callback=finished_callback,
+            )
+            if out_dev is not None:
+                kwargs['device'] = out_dev
+            stream = sd.OutputStream(**kwargs)
+            self._stream = stream
+        self._close_stream(old)
+        stream.start()
+        return gen
+
+    def _on_stream_finished(self, gen: int):
         cb = None
         with self._lock:
+            if gen != self._stream_gen:
+                logger.info('ignore stale stream finished gen=%s current=%s', gen, self._stream_gen)
+                return
             self._playing = False
             self._stream = None
             cb = self._on_finish
+            self._on_finish = None
         if cb:
             try:
                 cb()
@@ -170,18 +208,18 @@ class WavPlayer:
                 return
             ratio = max(0.0, min(1.0, float(ratio)))
             self._pos = int(ratio * self._duration * self._sr)
+            self._pos = min(self._pos, max(0, len(self._data) - 1))
 
     def stop(self):
         with self._lock:
+            self._stream_gen += 1
             self._playing = False
             self._paused = False
             self._on_finish = None
-            stream = self._stream
-            self._stream = None
+            stream = self._take_stream_locked()
+        self._close_stream(stream)
+
+    def stop_reset(self):
+        self.stop()
+        with self._lock:
             self._pos = 0
-        if stream is not None:
-            try:
-                stream.stop()
-                stream.close()
-            except Exception:
-                pass

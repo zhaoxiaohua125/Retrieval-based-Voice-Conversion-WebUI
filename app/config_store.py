@@ -34,6 +34,8 @@ DEFAULT_CONFIG = {
         'passthrough_gain': 2.0,
         'passthrough_ui': 100,
         'passthrough_block_ms': 50,
+        'reverb_mix': 0.35,
+        'reverb_decay': 0.72,
     },
     'rvc': {
         'f0_method': 'rmvpe',

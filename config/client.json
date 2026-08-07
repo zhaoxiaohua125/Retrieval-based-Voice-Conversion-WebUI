@@ -23,7 +23,9 @@
     "passthrough": false,
     "passthrough_gain": 4.0,
     "passthrough_ui": 200,
-    "passthrough_block_ms": 50
+    "passthrough_block_ms": 50,
+    "reverb_mix": 0.35,
+    "reverb_decay": 0.72
   },
   "rvc": {
     "f0_method": "rmvpe",
@@ -83,8 +85,8 @@
   },
   "ui": {
     "geometry": [
-      602,
-      448,
+      927,
+      432,
       1280,
       842
     ],

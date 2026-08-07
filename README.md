@@ -1197,3 +1197,56 @@ python webui.py --noautoopen
   - app/ui/pages/playback_page.py、app/integration/controller.py、scripts/run_ui_skeleton.py、README.md
 
 ---
+
+## 会话总结 - 2026-08-07 (8)
+
+- **会话主要目的**: 新增「混响说话」并按声迹 AI 顺序排列播放栏按钮
+- **完成的主要任务**:
+  1. 播放栏顺序：▶ → AI跟唱 → AI唱歌 → 混响说话 → 普通说话 → 🔊
+  2. 混响说话：直通 + 4 路 comb 延迟混响（`audio.reverb_mix` / `reverb_decay`）
+  3. 模式独立：`normal_talk` / `reverb_talk` 互斥切换，UI 选中态同步
+- **修改的文件列表**:
+  - app/audio/stream_manager.py、app/audio/service.py、app/config_store.py
+  - app/integration/controller.py、app/ui/pages/playback_page.py
+  - scripts/run_ui_skeleton.py、scripts/test_task7_integration.py、README.md
+
+---
+
+## 会话总结 - 2026-08-07 (9)
+
+- **会话主要目的**: 对标声迹——混响说话与 AI 唱歌可互切，混响模式下保留伴奏
+- **完成的主要任务**:
+  1. 混响说话播放 `instrumental.wav` + 混响麦（同一条音频流混音）
+  2. AI 唱歌 ↔ 混响说话 handoff：播放头同步，互切不停歌
+  3. UI：混响与 AI 唱歌按钮可同时可点；transport/进度条在混响伴奏下可用
+- **修改的文件列表**:
+  - app/audio/stream_manager.py、app/audio/service.py
+  - app/integration/controller.py、app/ui/pages/playback_page.py
+  - scripts/run_ui_skeleton.py、README.md
+
+---
+
+## 会话总结 - 2026-08-07 (10)
+
+- **会话主要目的**: 修复混响说话 → AI 唱歌切换卡死、两按钮同时变蓝
+- **完成的主要任务**:
+  1. handoff 时先切 `mode`、`_release_playback_tick` 短超时 join，避免 UI 线程死锁
+  2. 混响→唱歌跳过重复 `_stop_playback`；`_ensure_playback_tick` 防止双 tick
+  3. UI 互斥：点模式按钮立刻取消另一模式选中
+- **修改的文件列表**: app/integration/controller.py、app/ui/pages/playback_page.py、README.md
+
+---
+
+## 会话总结 - 2026-08-07 (16)
+
+- **会话主要目的**: 修复 AI 唱歌 ↔ 混响说话多次切换后失效
+- **根因**:
+  1. `AudioStreamManager.stop()` 持锁 `abort()`，callback 内 `_read_inst_frames` 抢锁 → 死锁
+  2. 混响→唱歌时提前 `mode=ai_sing`，`stop_passthrough` 误判非混响、跳过 tick 回收
+- **完成的主要任务**:
+  1. 音频流 `abort/close` 改为锁外执行（与 WavPlayer 同方案）
+  2. handoff 时保持 mode 至 `stop_passthrough` 完成；handoff 且 `playback_running` 强制 halt tick
+  3. 统一用 `_restart_playback_tick` 避免僵尸 tick
+- **修改的文件列表**: app/audio/stream_manager.py、app/integration/controller.py、README.md
+
+---

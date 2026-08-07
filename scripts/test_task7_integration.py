@@ -91,7 +91,7 @@ def test_normal_talk_route(errors):
     time.sleep(0.15)
     started = any(isinstance(e, dict) and e.get('action') == 'passthrough_started' for e in events)
     if started:
-        if ctrl.state.mode != 'passthrough' or not ctrl.state.passthrough_running:
+        if ctrl.state.mode != 'normal_talk' or not ctrl.state.passthrough_running:
             errors.append('normal talk should enable passthrough state')
         scheduler.publish(BusMessage(SignalType.STATUS, ModuleId.UI, {'action': 'playback_normal_talk'}))
         time.sleep(0.05)

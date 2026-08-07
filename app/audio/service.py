@@ -19,6 +19,15 @@ def passthrough_gain_from_audio(audio: dict) -> float:
     return max(0.5, min(4.0, float(audio.get('passthrough_gain', 2.0))))
 
 
+def inst_gain_from_config(config_store: ConfigStore) -> float:
+    pf = config_store.get('pitchfix', {}) or {}
+    if pf.get('inst_gain') is not None:
+        return float(pf['inst_gain'])
+    if pf.get('inst_ui') is not None:
+        return int(pf['inst_ui']) / 100.0
+    return 0.77
+
+
 class AudioService:
     """任务 3 音频 IO 门面：枚举设备、启停采集流。"""
 
@@ -51,6 +60,9 @@ class AudioService:
             ring_ms=int(audio.get('ring_ms', 500)),
             passthrough=bool(audio.get('passthrough', False)),
             passthrough_gain=passthrough_gain_from_audio(audio),
+            passthrough_reverb=False,
+            reverb_mix=float(audio.get('reverb_mix', 0.35)),
+            reverb_decay=float(audio.get('reverb_decay', 0.72)),
         )
 
     def save_device_selection(self, input_device: int, output_device: int, hostapi: str | None = None):
@@ -68,22 +80,41 @@ class AudioService:
         self._publish(SignalType.STATUS, {'action': 'devices_listed', 'summary': summary, 'devices': [d.to_dict() for d in devices]})
         return devices
 
-    def start_stream(self, passthrough: bool | None = None):
+    def start_stream(
+        self,
+        passthrough: bool | None = None,
+        reverb: bool = False,
+        inst_path: str | None = None,
+        inst_seek: float = 0.0,
+    ):
         self._ensure_shutdown_hook()
         cfg = self.load_stream_config()
         if passthrough is not None:
             cfg.passthrough = passthrough
+        cfg.passthrough_reverb = bool(reverb)
         if cfg.passthrough:
             audio = self.config_store.get('audio', {}) or {}
             cfg.block_ms = int(audio.get('passthrough_block_ms', 50))
+            cfg.reverb_mix = float(audio.get('reverb_mix', 0.35))
+            cfg.reverb_decay = float(audio.get('reverb_decay', 0.72))
+            cfg.inst_gain = inst_gain_from_config(self.config_store)
         if self.manager and self.manager.running:
-            if self.manager.config.passthrough == cfg.passthrough:
+            same = (
+                self.manager.config.passthrough == cfg.passthrough
+                and self.manager.config.passthrough_reverb == cfg.passthrough_reverb
+            )
+            if same and not inst_path:
                 self.manager.config.passthrough_gain = cfg.passthrough_gain
+                self.manager.config.reverb_mix = cfg.reverb_mix
+                self.manager.config.reverb_decay = cfg.reverb_decay
+                self.manager.config.inst_gain = cfg.inst_gain
                 if cfg.passthrough:
                     self.manager.config.block_ms = cfg.block_ms
                 return self.manager
             self.stop_stream()
         self.manager = AudioStreamManager(cfg)
+        if inst_path:
+            self.manager.load_instrumental(inst_path, inst_seek)
         self.manager.start()
         self._publish(
             SignalType.STATUS,

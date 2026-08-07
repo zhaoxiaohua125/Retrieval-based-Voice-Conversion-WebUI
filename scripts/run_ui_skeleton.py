@@ -156,7 +156,9 @@ def main():
             page.set_mode('ai_sing', active=True)
             page.set_playback_state(payload)
         elif action == 'passthrough_started':
-            page.set_mode('normal_talk', active=True)
+            page.set_mode(payload.get('mode') or 'normal_talk', active=True)
+            if (payload.get('mode') or '') == 'reverb_talk':
+                page.set_playback_state(payload)
         elif action in ('passthrough_stopped', 'passthrough_blocked'):
             page.set_mode('idle')
         elif action == 'realtime_started':
