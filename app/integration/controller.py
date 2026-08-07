@@ -8,6 +8,7 @@ import traceback
 from pathlib import Path
 
 from app.audio import AudioService
+from app.audio.service import passthrough_gain_from_audio
 from app.config_store import ConfigStore
 from app.events import BusMessage, ModuleId, SignalType
 from app.integration.state import ClientState
@@ -48,6 +49,7 @@ class ClientController:
         self._follow_prepare_cancel = threading.Event()
         self._follow_prepare_thread = None
         self._follow_handoff = False
+        self._mix_save_timer = None
         self._library = []
         self._started = False
         self._lock = threading.RLock()
@@ -214,13 +216,14 @@ class ClientController:
         self.state.passthrough_running = True
         in_dev = self.audio.manager.config.input_device if self.audio.manager else None
         out_dev = self.audio.manager.config.output_device if self.audio.manager else None
+        gain = passthrough_gain_from_audio(self.config_store.get('audio', {}) or {})
         self._publish_status(
             'passthrough_started',
             mode='normal_talk',
             input_device=in_dev,
             output_device=out_dev,
-            log='%s：干声直通已启动（未经 RVC）\nIN: %s\nOUT: %s\nVoicemeeter：仅麦克风进采集轨，输出轨勿勾 B1 防反馈'
-            % (label, self._device_name(in_dev), self._device_name(out_dev)),
+            log='%s：干声直通已启动（不经 RVC）\nIN: %s\nOUT: %s\n监听增益: %.1fx（设置里 %s%%）\n保存设置后需重开本模式；Voicemeeter：H1→B1，VAIO→A1'
+            % (label, self._device_name(in_dev), self._device_name(out_dev), gain, int(gain * 50)),
         )
 
     def stop_passthrough(self, payload=None):
@@ -482,6 +485,20 @@ class ClientController:
         else:
             self._start_realtime_voice(payload or {})
 
+    def _persist_config_safe(self):
+        try:
+            self.config_store.save()
+        except OSError as exc:
+            logger.warning('config save failed: %s', exc)
+            self._publish_status('config_save_warn', log='参数已生效；配置文件写入失败（可能被占用），稍后再保存')
+
+    def _schedule_config_save(self):
+        if self._mix_save_timer is not None:
+            self._mix_save_timer.cancel()
+        self._mix_save_timer = threading.Timer(0.35, self._persist_config_safe)
+        self._mix_save_timer.daemon = True
+        self._mix_save_timer.start()
+
     def _update_ai_follow_mix(self, payload: dict):
         p = payload or {}
         cs = self.config_store
@@ -500,7 +517,6 @@ class ClientController:
                 cs.set('pitchfix.%s' % dst, float(p[src]))
         if 'detune_mode' in p:
             cs.set('pitchfix.detune_mode', str(p['detune_mode']))
-        cs.save()
         pf = self._pitch_follow
         if pf is not None and (self.state.ai_follow_running or pf.running):
             pf.apply_settings(
@@ -511,6 +527,7 @@ class ClientController:
                 follow_attenuation=p.get('follow_attenuation'),
                 detune_mode=p.get('detune_mode'),
             )
+        self._schedule_config_save()
 
     def _toggle_ai_follow(self, payload=None):
         if self.state.ai_follow_running or self.state.ai_follow_preparing:
@@ -940,9 +957,14 @@ class ClientController:
     def _save_settings(self, payload: dict):
         payload = payload or {}
         audio = payload.get('audio') or {}
-        for key in ('hostapi', 'wasapi_exclusive', 'input_device', 'output_device', 'sample_rate'):
+        for key in ('hostapi', 'wasapi_exclusive', 'input_device', 'output_device', 'sample_rate', 'passthrough_gain', 'passthrough_ui'):
             if key in audio:
                 self.config_store.set('audio.%s' % key, audio[key])
+        if 'passthrough_ui' in audio:
+            from app.audio.service import passthrough_gain_from_audio
+            merged = dict(self.config_store.get('audio', {}) or {})
+            merged.update(audio)
+            self.config_store.set('audio.passthrough_gain', passthrough_gain_from_audio(merged))
         realtime = payload.get('realtime') or {}
         for key, val in realtime.items():
             self.config_store.set('realtime.%s' % key, val)
@@ -966,6 +988,11 @@ class ClientController:
             self.config_store.set('realtime.sr_type', str(payload['sr_type']))
         self.config_store.save()
         self._sync_playback_output_device()
+        mgr = self.audio.manager
+        if mgr and mgr.running and mgr.config.passthrough:
+            from app.audio.service import passthrough_gain_from_audio
+            merged = dict(self.config_store.get('audio', {}) or {})
+            mgr.config.passthrough_gain = passthrough_gain_from_audio(merged)
         hint = ''
         if self.state.passthrough_running or self.state.realtime_running:
             hint = '（请重新开启普通说话/AI 跟唱使新设备生效）'

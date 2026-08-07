@@ -1164,3 +1164,24 @@ python webui.py --noautoopen
   - app/integration/controller.py、app/pitchfix/service.py、README.md
 
 ---
+
+## 会话总结 - 2026-08-07 (5)
+
+- **会话主要目的**: 修复 🔊 混音面板拖动参数时偶发 `[WinError 5] 拒绝访问` 导致跟唱停止
+- **完成的主要任务**:
+  1. `ConfigStore.save()` 增加线程锁、重试与直接写 `client.json` 回退
+  2. `_update_ai_follow_mix` 先 `apply_settings` 再 **350ms 防抖写盘**；写盘失败仅 warning，不抛错中断跟唱
+- **关键决策**: 滑条拖动实时改听感，落盘合并为单次；Windows 文件占用时不阻断播放
+- **技术栈**: PyQt6、threading.Timer、ConfigStore
+- **修改的文件列表**:
+  - app/config_store.py、app/integration/controller.py、README.md
+
+---
+
+## 会话总结 - 2026-08-07 (6)
+
+- **会话主要目的**: 修复点击「普通说话」报 `NameError: passthrough_gain_from_audio is not defined`
+- **完成的主要任务**: 在 `controller.py` 顶部补充 `from app.audio.service import passthrough_gain_from_audio`
+- **修改的文件列表**: app/integration/controller.py、README.md
+
+---

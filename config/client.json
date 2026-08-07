@@ -20,7 +20,10 @@
     "hostapi": "Windows WASAPI",
     "wasapi_exclusive": false,
     "ring_ms": 500,
-    "passthrough": false
+    "passthrough": false,
+    "passthrough_gain": 4.0,
+    "passthrough_ui": 200,
+    "passthrough_block_ms": 50
   },
   "rvc": {
     "f0_method": "rmvpe",
@@ -62,14 +65,14 @@
   },
   "pitchfix": {
     "strength": 0.85,
-    "inst_gain": 0.84,
-    "mic_gain": 0.0,
-    "inst_ui": 84,
-    "mic_ui": 0,
-    "orig_ui": 75,
+    "inst_gain": 0.42,
+    "mic_gain": 1.48,
+    "inst_ui": 42,
+    "mic_ui": 148,
+    "orig_ui": 5,
     "threshold": 58,
     "attenuation_ui": 1,
-    "ref_vocal_gain": 0.75,
+    "ref_vocal_gain": 0.05,
     "follow_threshold": 58.0,
     "follow_attenuation": 0.1,
     "detune_mode": "off",

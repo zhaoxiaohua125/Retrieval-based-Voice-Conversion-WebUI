@@ -12,6 +12,13 @@ from app.scheduler import AppScheduler
 logger = logging.getLogger('rvc_client.audio')
 
 
+def passthrough_gain_from_audio(audio: dict) -> float:
+    ui = audio.get('passthrough_ui')
+    if ui is not None:
+        return max(0.5, min(4.0, int(ui) / 50.0))
+    return max(0.5, min(4.0, float(audio.get('passthrough_gain', 2.0))))
+
+
 class AudioService:
     """任务 3 音频 IO 门面：枚举设备、启停采集流。"""
 
@@ -43,6 +50,7 @@ class AudioService:
             wasapi_exclusive=bool(audio.get('wasapi_exclusive', False)),
             ring_ms=int(audio.get('ring_ms', 500)),
             passthrough=bool(audio.get('passthrough', False)),
+            passthrough_gain=passthrough_gain_from_audio(audio),
         )
 
     def save_device_selection(self, input_device: int, output_device: int, hostapi: str | None = None):
@@ -65,8 +73,14 @@ class AudioService:
         cfg = self.load_stream_config()
         if passthrough is not None:
             cfg.passthrough = passthrough
+        if cfg.passthrough:
+            audio = self.config_store.get('audio', {}) or {}
+            cfg.block_ms = int(audio.get('passthrough_block_ms', 50))
         if self.manager and self.manager.running:
             if self.manager.config.passthrough == cfg.passthrough:
+                self.manager.config.passthrough_gain = cfg.passthrough_gain
+                if cfg.passthrough:
+                    self.manager.config.block_ms = cfg.block_ms
                 return self.manager
             self.stop_stream()
         self.manager = AudioStreamManager(cfg)

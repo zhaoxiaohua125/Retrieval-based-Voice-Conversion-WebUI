@@ -26,6 +26,7 @@ class AudioStreamConfig:
     wasapi_exclusive: bool = False
     ring_ms: int = 500
     passthrough: bool = False
+    passthrough_gain: float = 2.0
 
     def block_frames(self) -> int:
         ms = max(100, min(500, int(self.block_ms)))
@@ -149,7 +150,9 @@ class AudioStreamManager:
                 mono_in = mono_in.reshape(-1, 1)
             self.input_ring.write(mono_in)
             if self.config.passthrough:
-                self.output_ring.write(mono_in)
+                gain = float(self.config.passthrough_gain or 1.0)
+                boosted = np.clip(mono_in * gain, -1.0, 1.0)
+                self.output_ring.write(boosted)
             need = outdata.shape[0]
             chunk = self.output_ring.read(need)
             filled = self._smooth_output(chunk, need)

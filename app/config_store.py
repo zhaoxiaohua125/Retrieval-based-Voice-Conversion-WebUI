@@ -1,8 +1,12 @@
 import json
+import logging
 import os
+import threading
+import time
 from copy import deepcopy
 from pathlib import Path
 
+logger = logging.getLogger('rvc_client.config')
 
 DEFAULT_CONFIG = {
     'version': 1,
@@ -27,6 +31,9 @@ DEFAULT_CONFIG = {
         'wasapi_exclusive': False,
         'ring_ms': 500,
         'passthrough': False,
+        'passthrough_gain': 2.0,
+        'passthrough_ui': 100,
+        'passthrough_block_ms': 50,
     },
     'rvc': {
         'f0_method': 'rmvpe',
@@ -70,6 +77,8 @@ DEFAULT_CONFIG = {
 
 
 class ConfigStore:
+    _save_lock = threading.Lock()
+
     def __init__(self, path=None):
         root = Path(__file__).resolve().parents[1]
         self.path = Path(path or root / 'config' / 'client.json')
@@ -91,13 +100,34 @@ class ConfigStore:
         return self
 
     def save(self):
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix('.json.tmp')
-        with open(tmp, 'w', encoding='utf-8') as f:
-            json.dump(self._data, f, ensure_ascii=False, indent=2)
-            f.write('\n')
-        os.replace(tmp, self.path)
-        return self
+        text = json.dumps(self._data, ensure_ascii=False, indent=2) + '\n'
+        with self._save_lock:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.path.with_suffix('.json.tmp')
+            last_err = None
+            for attempt in range(6):
+                try:
+                    with open(tmp, 'w', encoding='utf-8') as f:
+                        f.write(text)
+                    for i in range(5):
+                        try:
+                            os.replace(tmp, self.path)
+                            return self
+                        except (PermissionError, OSError) as exc:
+                            last_err = exc
+                            time.sleep(0.04 * (i + 1))
+                    with open(self.path, 'w', encoding='utf-8') as f:
+                        f.write(text)
+                    try:
+                        tmp.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                    return self
+                except (PermissionError, OSError) as exc:
+                    last_err = exc
+                    time.sleep(0.05 * (attempt + 1))
+            logger.warning('config save failed after retries: %s', last_err)
+            raise last_err
 
     def get(self, dotted_key, default=None):
         node = self._data

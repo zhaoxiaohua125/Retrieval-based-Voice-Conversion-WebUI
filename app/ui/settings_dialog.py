@@ -1,5 +1,6 @@
 """系统设置：常规项 + 音频设备（对标 realtime_gui / YY 试麦）。"""
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -12,6 +13,7 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QRadioButton,
+    QSlider,
     QSpinBox,
     QVBoxLayout,
 )
@@ -108,6 +110,18 @@ class SettingsDialog(QDialog):
         mic_row.addWidget(self.btn_test_mic)
         mic_row.addWidget(self.lbl_mic_hint, stretch=1)
         audio_layout.addLayout(mic_row)
+        pt_row = QHBoxLayout()
+        pt_row.addWidget(QLabel('普通说话音量（%）'))
+        self.slider_passthrough = QSlider(Qt.Orientation.Horizontal)
+        self.slider_passthrough.setRange(50, 200)
+        self.slider_passthrough.setToolTip('50%～200%，默认 100%=2 倍增益；保存后请重开「普通说话」')
+        self.lbl_passthrough = QLabel('')
+        self.lbl_passthrough.setMinimumWidth(40)
+        self.lbl_passthrough.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.slider_passthrough.valueChanged.connect(lambda v: self.lbl_passthrough.setText('%s%%' % v))
+        pt_row.addWidget(self.slider_passthrough, stretch=1)
+        pt_row.addWidget(self.lbl_passthrough)
+        audio_layout.addLayout(pt_row)
         root.addWidget(audio_box)
 
         rvc_row = QHBoxLayout()
@@ -137,6 +151,9 @@ class SettingsDialog(QDialog):
         self.edit_log_dir.setText(str(self.config.get('paths.log_dir', layout.get('log_dir', 'logs/client'))))
         self.spin_sample_rate.setValue(int(self.config.get('audio.sample_rate', 48000)))
         self.chk_wasapi.setChecked(bool(self.config.get('audio.wasapi_exclusive', False)))
+        pt_ui = int(self.config.get('audio.passthrough_ui', 100))
+        self.slider_passthrough.setValue(max(50, min(200, pt_ui)))
+        self.lbl_passthrough.setText('%s%%' % self.slider_passthrough.value())
         sr_type = str(self.config.get('realtime.sr_type', 'sr_model'))
         if sr_type == 'sr_device':
             self.radio_sr_device.setChecked(True)
@@ -266,6 +283,8 @@ class SettingsDialog(QDialog):
                 'input_device': self.cmb_input.currentData(),
                 'output_device': self.cmb_output.currentData(),
                 'sample_rate': sample_rate,
+                'passthrough_ui': int(self.slider_passthrough.value()),
+                'passthrough_gain': round(int(self.slider_passthrough.value()) / 50.0, 3),
             },
         }
         if self._realtime_payload:
