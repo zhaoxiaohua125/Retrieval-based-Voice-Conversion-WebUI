@@ -328,7 +328,8 @@ class SongMakePage(QWidget):
         layout.addStretch()
         self._adv_group = adv
         adv.setVisible(False)
-        self._update_index_hint()
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(0, self._update_index_hint)
         return panel
 
     def _weights_dir(self):

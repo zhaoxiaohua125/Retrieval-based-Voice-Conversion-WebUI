@@ -11,8 +11,10 @@ logger = logging.getLogger('rvc_client.playback')
 
 
 class WavPlayer:
-    def __init__(self):
+    def __init__(self, output_device=None, target_sr: int | None = 48000):
         self._lock = threading.RLock()
+        self._output_device = output_device
+        self._target_sr = int(target_sr) if target_sr else None
         self._data = None
         self._sr = 48000
         self._pos = 0
@@ -46,12 +48,40 @@ class WavPlayer:
         with self._lock:
             return self._playing
 
-    def load(self, path: str):
-        data, sr = sf.read(path, dtype='float32', always_2d=True)
+    def set_output_device(self, device):
         with self._lock:
-            self.stop()
+            self._output_device = device
+
+    def set_target_sr(self, sr: int | None):
+        with self._lock:
+            self._target_sr = int(sr) if sr else None
+
+    def _playback_sr(self, file_sr: int) -> int:
+        if self._output_device is not None:
+            try:
+                return int(sd.query_devices(self._output_device).get('default_samplerate') or file_sr)
+            except Exception:
+                pass
+        if self._target_sr:
+            return self._target_sr
+        return int(file_sr)
+
+    def load(self, path: str):
+        path = str(path)
+        if path == self._path and self._data is not None:
+            return self._duration
+        data, sr = sf.read(path, dtype='float32', always_2d=True)
+        sr = int(sr)
+        out_sr = self._playback_sr(sr)
+        if out_sr != sr:
+            import librosa
+            data = librosa.resample(data.T, orig_sr=sr, target_sr=out_sr).T
+            sr = out_sr
+        with self._lock:
+            if self._playing:
+                self.stop()
             self._data = data
-            self._sr = int(sr)
+            self._sr = sr
             self._pos = 0
             self._duration = len(data) / sr if sr else 0.0
             self._path = path
@@ -95,12 +125,15 @@ class WavPlayer:
                 self._pos = end
 
         channels = self._data.shape[1]
-        self._stream = sd.OutputStream(
+        kwargs = dict(
             samplerate=self._sr,
             channels=channels,
             callback=callback,
             finished_callback=self._on_stream_finished,
         )
+        if self._output_device is not None:
+            kwargs['device'] = self._output_device
+        self._stream = sd.OutputStream(**kwargs)
         self._stream.start()
 
     def _on_stream_finished(self):
@@ -142,6 +175,7 @@ class WavPlayer:
         with self._lock:
             self._playing = False
             self._paused = False
+            self._on_finish = None
             stream = self._stream
             self._stream = None
             self._pos = 0

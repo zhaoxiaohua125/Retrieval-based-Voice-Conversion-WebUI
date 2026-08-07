@@ -1044,6 +1044,62 @@ python webui.py --noautoopen
 
 ---
 
+## 会话总结 - 2026-08-06 (19)
+
+- **会话主要目的**: 做歌末尾生成 `.f0.npz` 时 UI「未响应」，需慢但不卡界面
+- **完成的主要任务**:
+  1. 定位原因：虽在后台线程，但 `librosa pyin` 占 GIL/CPU，Qt 主线程得不到调度
+  2. F0 生成改 **子进程**（`f0_build_cli.py` + `build_f0_cache_isolated`），与 UI 进程隔离
+  3. 等待期间 heartbeat 刷进度；取消制作会 terminate 子进程
+- **关键决策**: 用子进程而非再加线程/async；做歌线程可阻塞，UI 进程不能
+- **修改的文件列表**:
+  - app/pitchfix/f0_curve.py、app/pitchfix/f0_build_cli.py
+  - app/rvc/offline_pipeline.py、README.md
+
+---
+
+## 会话总结 - 2026-08-07 (20)
+
+- **会话主要目的**: 对标声迹 AI，增加 AI 跟唱混音调节面板（喇叭按钮）
+- **完成的主要任务**:
+  1. 播放页控制条增加 🔊 按钮，弹出混音浮层（伴奏/人声/原唱/阈值/衰减 + 重置）
+  2. 滑块实时写入 `config/client.json` 并 `apply_settings` 到运行中的 `PitchFollowService`
+  3. 混音支持 AI 原唱轨叠加；阈值控制修音门限；衰减影响修音强度
+- **修改的文件列表**:
+  - app/ui/ai_follow_mix_panel.py、app/ui/pages/playback_page.py
+  - app/pitchfix/service.py、app/integration/controller.py、config/client.json、README.md
+
+---
+
+## 会话总结 - 2026-08-07 (21)
+
+- **会话主要目的**: MVP 实现声迹「AI 跑调模式」并更新开发大纲待办
+- **完成的主要任务**:
+  1. 新增 `app/pitchfix/detune.py`：8 种 LFO 预设，对目标 F0 叠加音分抖动
+  2. 🔊 混音面板增加「AI跑调模式」下拉，实时写入 config 并生效
+  3. `开发大纲.md` §任务9 补充已完成/未完成清单（RMVPE、播放设置 Tab、智能切换等）
+- **技术栈**: LFO、音分→Hz 换算、PyQt6 QComboBox
+- **修改的文件列表**:
+  - app/pitchfix/detune.py、service.py
+  - app/ui/ai_follow_mix_panel.py、app/integration/controller.py
+  - config/client.json、scripts/test_task9_pitchfix.py、开发大纲.md、README.md
+
+---
+
+## 会话总结 - 2026-08-07 (22)
+
+- **会话主要目的**: 修复开发环境首次启动 UI 需 1 分钟+的问题
+- **完成的主要任务**:
+  1. 定位根因：`SongMakePage` 启动时 `resolve_index_for_model` 导入 `infer.hubert` → 连带加载 PyTorch（~7s+）
+  2. 新增 `app/rvc/index_lookup.py` 轻量 Index 查找，不导入 torch
+  3. 启动 splash「正在启动…」；烟测启动从 ~10s 降至 ~3.5s
+- **修改的文件列表**:
+  - app/rvc/index_lookup.py、app/rvc/vc_context.py
+  - app/ui/pages/song_make_page.py、scripts/run_ui_skeleton.py
+  - scripts/profile_ui_startup.py、README.md
+
+---
+
 ## 会话总结 - 2026-08-06 (18)
 
 - **会话主要目的**: 根据日志修复 AI 跟唱几秒后自动停止的线程 bug
@@ -1054,5 +1110,57 @@ python webui.py --noautoopen
 - **关键决策**: 日志中 21:46:17 启动、21:46:31 报错并非 F0 慢，而是 tick 线程崩溃导致跟唱被误停
 - **修改的文件列表**:
   - app/integration/controller.py、README.md
+
+---
+
+## 会话总结 - 2026-08-07
+
+- **会话主要目的**: 记录 Voicemeeter 联调问题；修复 AI 跟唱与 AI 唱歌切换不同步、跟唱后无法点「AI 唱歌」
+- **完成的主要任务**:
+  1. `开发大纲.md` 追加 VM/VAIO 路由与听感联调备注（AUX 误选、H1 A1 回音、VAIO 推子）
+  2. 跟唱↔唱歌切换共用播放头：`PitchFollowService.seek` + controller 携带 `carry_pos`
+  3. 播放页按钮互锁调整：跟唱/唱歌可互相切换，不再 disable
+  4. 跟唱模式下进度条 seek 同步伴奏参考轨
+- **关键决策**: 对标声迹「唱到 A 切模式从 A 继续」；VM 问题暂搁置文档化
+- **技术栈**: PyQt6、PitchFollowService、WavPlayer、Voicemeeter Potato
+- **修改的文件列表**:
+  - app/pitchfix/service.py、app/integration/controller.py、app/ui/pages/playback_page.py、开发大纲.md、README.md
+
+---
+
+## 会话总结 - 2026-08-07 (2)
+
+- **会话主要目的**: AI 跟唱/唱歌切换时歌词不同步，改为共用歌词会话
+- **完成的主要任务**:
+  1. `LyricsService.sync_at(force)` + 同路径 LRC 跳过重复 load
+  2. 模式切换 `handoff`：不 stop 歌词、不重发 `playback_stopped`/`ai_follow_stopped`
+  3. 跟唱/唱歌统一由播放 tick 驱动 `sync_at`（无独立 lyrics 线程）
+- **关键决策**: 对标声迹「同一播放头 T + 同一套歌词」；仅用户点停止或换歌才 teardown
+- **修改的文件列表**:
+  - app/lyrics/service.py、app/integration/controller.py、开发大纲.md、README.md
+
+---
+
+## 会话总结 - 2026-08-07 (3)
+
+- **会话主要目的**: 修复唱歌→跟唱切换时歌词仍跳回开头
+- **完成的主要任务**:
+  1. `_select_song` 同路径 LRC 不再重复发 `lyrics_loaded`（根因：UI 被重置到第一句）
+  2. 唱歌→跟唱 handoff 后立即 `sync_at` + 发 `playback_tick` 锁定进度
+  3. `ai_follow_preparing` 时 UI 提前切到跟唱模式并保持进度条
+- **修改的文件列表**:
+  - app/integration/controller.py、scripts/run_ui_skeleton.py、README.md
+
+---
+
+## 会话总结 - 2026-08-07 (4)
+
+- **会话主要目的**: 跟唱→唱歌按钮无选中态；唱歌→跟唱切换不够丝滑
+- **完成的主要任务**:
+  1. 修复 handoff 竞态：tick 线程 `finally` 误发 `ai_follow_stopped` 导致 UI 回 idle、AI 唱歌失蓝
+  2. 跟唱 **先出声再加载 F0**（伴奏/原唱轨立即播放，F0 后台加载）
+  3. `PitchFollowService.start(song, seek_sec)` 切换时直接 seek，减少静音间隙
+- **修改的文件列表**:
+  - app/integration/controller.py、app/pitchfix/service.py、README.md
 
 ---

@@ -10,10 +10,12 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QSlider,
     QSplitter,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
+from app.ui.ai_follow_mix_panel import AiFollowMixPanel
 from app.ui.waveform_widget import WaveformWidget
 
 
@@ -129,6 +131,16 @@ class PlaybackPage(QWidget):
         self.btn_ai_sing.setToolTip('播放离线生成的 AI 成品（cover.wav）')
         self.btn_ai_sing.clicked.connect(self._on_ai_sing)
         ctrl.addWidget(self.btn_ai_sing)
+        self.btn_mix = QToolButton()
+        self.btn_mix.setText('🔊')
+        self.btn_mix.setToolTip('AI 跟唱混音调节（伴奏/人声/原唱/阈值）')
+        self.btn_mix.setStyleSheet(
+            'QToolButton{padding:8px 10px;border-radius:6px;border:1px solid #cbd5e1;background:#fff;font-size:16px;}'
+            'QToolButton:hover{background:#f8fafc;}'
+        )
+        self.btn_mix.clicked.connect(self._toggle_mix_panel)
+        ctrl.addWidget(self.btn_mix)
+        self._mix_panel = AiFollowMixPanel(self.bridge, self)
         for btn in (self.btn_play, self.btn_stop, self.btn_normal_talk, self.btn_ai_follow, self.btn_ai_sing):
             btn.setStyleSheet(self.BTN_STYLE)
         ctrl.addStretch()
@@ -191,6 +203,14 @@ class PlaybackPage(QWidget):
             self.bridge.emit_action('playback_ai_sing', log='请先在歌库中选择歌曲')
         else:
             self.bridge.emit_action('playback_stop')
+
+    def _toggle_mix_panel(self):
+        self._mix_panel._load_from_config()
+        g = self.btn_mix.mapToGlobal(self.btn_mix.rect().topLeft())
+        self._mix_panel.adjustSize()
+        self._mix_panel.move(max(8, g.x() - self._mix_panel.width() + self.btn_mix.width()), g.y() - self._mix_panel.height() - 8)
+        self._mix_panel.show()
+        self._mix_panel.raise_()
 
     def _on_seek(self):
         pos = self.progress.value() / 1000.0
@@ -264,11 +284,10 @@ class PlaybackPage(QWidget):
         self.btn_ai_sing.blockSignals(False)
         self.btn_normal_talk.blockSignals(False)
         self.btn_ai_follow.blockSignals(False)
-        busy_play = ai_sing
-        busy_live = normal_talk or ai_follow or realtime
-        self.btn_ai_sing.setEnabled(not busy_live)
-        self.btn_normal_talk.setEnabled(not busy_play and not ai_follow and not realtime)
-        self.btn_ai_follow.setEnabled(not busy_play and not normal_talk and not realtime)
+        block_live = normal_talk or realtime
+        self.btn_ai_sing.setEnabled(not block_live)
+        self.btn_normal_talk.setEnabled(not ai_sing and not ai_follow and not realtime)
+        self.btn_ai_follow.setEnabled(not block_live)
         if mode == 'idle':
             self.waveform.reset_position()
             self.btn_ai_sing.setChecked(False)

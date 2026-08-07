@@ -113,10 +113,17 @@ class OfflineSongPipeline:
     def __init__(self, work_root=None, msst_keep_work=False):
         self.msst = MsstSongSeparator(work_root=work_root, keep_work=msst_keep_work)
         self._cancel_requested = False
+        self._f0_proc = {}
 
     def cancel(self):
         """取消 MSST 分离与 RVC 分段推理。"""
         self._cancel_requested = True
+        proc = self._f0_proc.get('proc')
+        if proc is not None and proc.poll() is None:
+            try:
+                proc.terminate()
+            except Exception:
+                logger.debug('f0 proc terminate failed', exc_info=True)
         return self.msst.cancel()
 
     def _is_cancelled(self):
@@ -284,9 +291,13 @@ class OfflineSongPipeline:
                 yield {'event': 'cancelled', 'message': '用户已取消制作'}
                 return
             emit({'event': 'phase', 'phase': 'mix', 'percent': 96, 'message': '正在生成 AI 跟唱参考旋律…'})
-            from app.pitchfix.f0_curve import ReferenceF0Curve, f0_cache_path
+            from app.pitchfix.f0_curve import build_f0_cache_isolated, f0_cache_path
             try:
-                ReferenceF0Curve.from_wav(converted_vocal_path)
+                build_f0_cache_isolated(
+                    converted_vocal_path,
+                    cancel_check=self._is_cancelled,
+                    proc_holder=self._f0_proc,
+                )
                 f0_path = f0_cache_path(converted_vocal_path)
                 lines.append('跟唱 F0 缓存：%s' % f0_path)
                 logger.info('offline pitchfix f0 cache=%s', f0_path)

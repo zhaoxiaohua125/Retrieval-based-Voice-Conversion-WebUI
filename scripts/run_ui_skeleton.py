@@ -76,6 +76,16 @@ def main():
     app.setApplicationName('RVC 声迹客户端')
     app.setApplicationVersion(CLIENT_VERSION)
 
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtWidgets import QLabel
+
+    splash = QLabel('RVC 声迹客户端\n正在启动…')
+    splash.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    splash.setStyleSheet('QLabel{background:#2563eb;color:#fff;font-size:16px;padding:32px 48px;border-radius:8px;}')
+    splash.setWindowFlags(Qt.WindowType.SplashScreen | Qt.WindowType.FramelessWindowHint)
+    splash.show()
+    app.processEvents()
+
     if not QSystemTrayIcon.isSystemTrayAvailable():
         QMessageBox.warning(None, '提示', '当前系统托盘不可用，托盘菜单将跳过')
 
@@ -155,6 +165,9 @@ def main():
             page.set_mode('idle')
         elif action == 'ai_follow_preparing':
             page.set_ai_follow_busy(True)
+            page.set_mode('ai_follow', active=True)
+            if float(payload.get('duration', 0) or 0) > 0 or float(payload.get('position', 0) or 0) > 0:
+                page.set_playback_state(payload)
         elif action == 'ai_follow_started':
             make.set_offline_running(False)
             page.set_ai_follow_busy(False)
@@ -190,6 +203,7 @@ def main():
     window.page_playback.apply_library(controller.library)
 
     window.show()
+    splash.close()
     bridge.log_message.emit('客户端已启动（AI 唱歌 / 离线做歌 / 歌词同步已接入）')
 
     code = app.exec()

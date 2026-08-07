@@ -9,7 +9,18 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.pitchfix.corrector import correct_toward_target, estimate_f0
+from app.pitchfix.detune import apply_detune_f0, detune_cents
 from app.pitchfix.f0_curve import ReferenceF0Curve
+
+
+def test_detune():
+    base = 440.0
+    a = apply_detune_f0(base, 'off', 1.0)
+    b = apply_detune_f0(base, 'humanized', 0.25)
+    assert a == base
+    assert b != base
+    assert detune_cents('humanized', 0.25) != 0
+    print('detune ok off=%.1f humanized=%.1f cents=%.2f' % (a, b, detune_cents('humanized', 0.25)))
 
 
 def test_corrector_math():
@@ -31,6 +42,7 @@ def test_f0_curve_lookup():
 
 
 def main():
+    test_detune()
     test_f0_curve_lookup()
     test_corrector_math()
     wav = ROOT / 'opt' / 'task4_offline'

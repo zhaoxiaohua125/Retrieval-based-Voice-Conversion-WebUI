@@ -91,10 +91,8 @@ def discover_first_model(weight_root=None, project_root=None):
     return None
 
 
-@_with_clean_argv
 def resolve_index_for_model(model_sid, project_root=None):
-    """按 RVC 规则搜索 index 文件（优先 outside_index_root，其次 logs）。"""
+    """按 RVC 规则搜索 index 文件（轻量实现，不导入 torch/hubert）。"""
+    from app.rvc.index_lookup import find_index_for_model_project
     ensure_rvc_runtime_env(project_root)
-    from infer.vc.utils import get_index_path_from_model
-
-    return get_index_path_from_model(model_sid) or ''
+    return find_index_for_model_project(model_sid, project_root=project_root) or ''

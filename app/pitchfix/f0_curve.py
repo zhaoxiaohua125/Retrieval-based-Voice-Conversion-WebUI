@@ -1,6 +1,9 @@
 """参考人声 F0 曲线（离线提取，播放时按 T 查表；支持磁盘缓存）。"""
 
 import logging
+import subprocess
+import sys
+import time
 from pathlib import Path
 
 import librosa
@@ -9,6 +12,9 @@ import soundfile as sf
 
 logger = logging.getLogger('rvc_client.pitchfix')
 
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_F0_CLI = Path(__file__).resolve().parent / 'f0_build_cli.py'
+
 
 def f0_cache_path(wav_path) -> Path:
     return Path(wav_path).with_suffix('.f0.npz')
@@ -16,6 +22,39 @@ def f0_cache_path(wav_path) -> Path:
 
 def _f0_cache_path(wav_path) -> Path:
     return f0_cache_path(wav_path)
+
+
+def build_f0_cache_isolated(wav_path, fmin=50, fmax=1100, cancel_check=None, on_wait=None, proc_holder=None):
+    """在子进程里生成 F0 缓存，避免 librosa pyin 占满 UI 进程 GIL。"""
+    wav_path = Path(wav_path)
+    cache = f0_cache_path(wav_path)
+    if not wav_path.is_file():
+        raise FileNotFoundError(wav_path)
+    if cache.is_file() and cache.stat().st_mtime >= wav_path.stat().st_mtime:
+        return cache
+    cmd = [sys.executable, str(_F0_CLI), str(wav_path.resolve()), str(fmin), str(fmax)]
+    flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0) if sys.platform == 'win32' else 0
+    proc = subprocess.Popen(cmd, cwd=str(_PROJECT_ROOT), creationflags=flags)
+    if proc_holder is not None:
+        proc_holder['proc'] = proc
+    try:
+        while proc.poll() is None:
+            if cancel_check and cancel_check():
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                raise RuntimeError('F0 生成已取消')
+            if on_wait:
+                on_wait()
+            time.sleep(0.2)
+        if proc.returncode != 0:
+            raise RuntimeError('F0 子进程失败 exit=%s' % proc.returncode)
+    finally:
+        if proc_holder is not None:
+            proc_holder.pop('proc', None)
+    return cache
 
 
 class ReferenceF0Curve:
