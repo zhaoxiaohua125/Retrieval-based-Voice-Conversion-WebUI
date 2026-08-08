@@ -1336,3 +1336,23 @@ python webui.py --noautoopen
 - **修改的文件列表**: app/ui/pages/playback_page.py、README.md
 
 ---
+
+## 会话总结 - 2026-08-08 (11)
+
+- **会话主要目的**: 非播放状态下点击模式按钮不要自动开始播放
+- **修复**: 新增 `_is_timeline_playing()` / `autoplay` 标志；暂停/停止时切模式仅切换就绪，按 ▶ 才开始；切歌续播仍仅在播放中触发
+- **修改的文件列表**: app/integration/controller.py、README.md
+
+---
+
+## 会话总结 - 2026-08-08 (12)
+
+- **会话主要目的**: 模式按钮仅负责选中，播放/暂停统一由左侧 ▶ 控制；播放中切模式不中断
+- **完成的主要任务**:
+  1. 四模式按钮改为纯选中（QButtonGroup），不再启停音频
+  2. 新增 `playback_transport` / `_select_mode`：▶ 开始/暂停/继续，`selected_mode` 持久化
+  3. 播放中切换模式自动 handoff 并保持播放；暂停时切换仅换模式不自动播
+  4. 停止播放后保留模式按钮选中态，不再全部置灰为 idle
+- **修改的文件列表**: app/integration/controller.py、app/integration/state.py、app/ui/pages/playback_page.py、scripts/run_ui_skeleton.py、README.md
+
+---

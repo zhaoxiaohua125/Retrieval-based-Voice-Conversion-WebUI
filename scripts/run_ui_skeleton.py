@@ -177,7 +177,7 @@ def main():
             if (payload.get('mode') or '') in ('reverb_talk', 'normal_talk') and float(payload.get('duration', 0) or 0) > 0:
                 page.set_playback_state(payload)
         elif action in ('passthrough_stopped', 'passthrough_blocked'):
-            page.set_mode('idle')
+            page.set_playback_stopped()
         elif action == 'realtime_started':
             page.set_mode('realtime', active=True)
         elif action == 'realtime_stopped':
@@ -194,13 +194,15 @@ def main():
             page.set_playback_state(payload)
         elif action in ('ai_follow_stopped', 'ai_follow_finished', 'ai_follow_failed'):
             page.set_ai_follow_busy(False)
-            page.set_mode('idle')
+            page.set_playback_stopped()
         elif action in ('playback_paused', 'playback_resumed'):
             page.set_playback_state(payload)
         elif action == 'playback_idle':
             page.set_mode('idle')
         elif action in ('playback_stopped', 'playback_finished'):
-            page.set_mode('idle')
+            page.set_playback_stopped()
+        elif action == 'mode_selected':
+            page.set_selected_mode(payload.get('mode', 'ai_sing'))
         elif action == 'lyrics_loaded':
             page.set_lyrics_lines(payload.get('lines') or [])
         elif action == 'lyrics_missing':

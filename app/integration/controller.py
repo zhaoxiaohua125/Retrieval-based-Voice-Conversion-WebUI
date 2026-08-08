@@ -25,6 +25,7 @@ logger = logging.getLogger('rvc_client')
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PLAY_MODES = ('sequential', 'repeat_one', 'shuffle')
 PLAY_MODE_LABELS = {'sequential': '顺序播放', 'repeat_one': '单曲循环', 'shuffle': '随机播放'}
+MODE_IDS = ('ai_sing', 'ai_follow', 'reverb_talk', 'normal_talk')
 
 
 class ClientController:
@@ -149,16 +150,18 @@ class ClientController:
             'offline_cancel': lambda p: self._cancel_offline_user(),
             'playback_refresh_library': lambda p: self._refresh_library(),
             'playback_select_song': self._select_song,
-            'playback_ai_sing': self._start_ai_sing,
-            'playback_toggle_pause': self._toggle_playback_pause,
+            'playback_select_mode': self._select_mode,
+            'playback_transport': self._playback_transport,
+            'playback_ai_sing': lambda p: self._select_mode({**(p or {}), 'mode': 'ai_sing'}),
+            'playback_toggle_pause': self._playback_transport,
             'playback_stop': self._stop_playback_all,
             'playback_seek': self._seek_playback,
-            'playback_ai_follow': self._toggle_ai_follow,
+            'playback_ai_follow': lambda p: self.stop_ai_follow() if (p or {}).get('stop') else self._select_mode({**(p or {}), 'mode': 'ai_follow'}),
             'playback_ai_follow_mix': self._update_ai_follow_mix,
             'realtime_start': self._start_realtime_voice,
             'realtime_stop': self.stop_realtime,
-            'playback_normal_talk': self._toggle_normal_talk,
-            'playback_reverb_talk': self._toggle_reverb_talk,
+            'playback_normal_talk': lambda p: self._select_mode({**(p or {}), 'mode': 'normal_talk'}),
+            'playback_reverb_talk': lambda p: self._select_mode({**(p or {}), 'mode': 'reverb_talk'}),
             'playback_set_play_mode': self._set_play_mode,
             'ai_toggle': self._toggle_ai,
             'lyrics_load': self._load_lyrics,
@@ -331,17 +334,18 @@ class ClientController:
         if self.state.mode == 'reverb_talk':
             self.stop_passthrough()
             return
-        self._dispatch_mode_switch(self._start_talk, payload, mode='reverb_talk')
+        self._dispatch_mode_switch(self._start_talk, self._with_autoplay(payload), mode='reverb_talk')
 
     def _toggle_normal_talk(self, payload=None):
         if self.state.mode == 'normal_talk':
             self.stop_passthrough()
             return
-        self._dispatch_mode_switch(self._start_talk, payload, mode='normal_talk')
+        self._dispatch_mode_switch(self._start_talk, self._with_autoplay(payload), mode='normal_talk')
 
     def _start_talk(self, payload=None, mode: str = 'normal_talk'):
         label = '混响说话' if mode == 'reverb_talk' else '普通说话'
         payload = payload or {}
+        autoplay = bool(payload.get('autoplay', True))
         if 'position' in payload:
             carry_pos = float(payload.get('position') or 0)
         else:
@@ -401,9 +405,15 @@ class ClientController:
         has_inst = bool(inst_path)
         if has_inst and mode in ('reverb_talk', 'normal_talk'):
             self._inst_end_sent = False
-            self.state.playback_running = True
             self._ensure_playback_lyrics(carry_pos)
             self._restart_playback_tick()
+            if not autoplay:
+                mgr = self.audio.manager
+                if mgr is not None and mgr.inst_duration > 0 and not mgr.inst_paused:
+                    mgr.toggle_inst_pause()
+                self.state.playback_running = False
+            else:
+                self.state.playback_running = True
             pos, dur, playing, paused = self._reverb_inst_state()
             inst_hint = '\n伴奏：%s（与 AI 唱歌可互切，播放头同步）' % Path(inst_path).name
             self._publish_status(
@@ -488,7 +498,151 @@ class ClientController:
                 logger.error('library refresh failed:\n%s', traceback.format_exc())
         threading.Thread(target=_work, name='library-scan', daemon=True).start()
 
+    def _is_timeline_playing(self) -> bool:
+        if self.state.ai_follow_running:
+            pf = self._pitch_follow
+            return pf is not None and pf.running
+        if self.state.mode in ('reverb_talk', 'normal_talk'):
+            mgr = self.audio.manager
+            if mgr is not None and mgr.inst_duration > 0:
+                return mgr.inst_playing and not mgr.inst_paused
+            return False
+        if self.state.mode == 'ai_sing':
+            return self._player.is_playing
+        return False
+
+    def _with_autoplay(self, payload=None) -> dict:
+        p = dict(payload or {})
+        if 'autoplay' not in p:
+            p['autoplay'] = self._is_timeline_playing()
+        return p
+
+    def _has_paused_session(self) -> bool:
+        if self.state.mode in ('reverb_talk', 'normal_talk') and self.state.passthrough_running:
+            mgr = self.audio.manager
+            if mgr is not None and mgr.inst_duration > 0:
+                return mgr.inst_paused and mgr.inst_playing
+            return False
+        if self.state.mode == 'ai_sing' and self._player.is_active:
+            return not self._player.is_playing
+        return False
+
+    def _apply_mode(self, mode: str, autoplay: bool = True, song: dict | None = None):
+        if mode not in MODE_IDS:
+            return
+        song = dict(song or self.state.selected_song or {})
+        if mode == 'ai_sing' and not song.get('play_path'):
+            self._publish_status('playback_idle', log='请先在歌库选择歌曲')
+            return
+        if mode == 'ai_follow' and (not song.get('instrumental_path') or not song.get('vocal_path')):
+            self._publish_error('AI 跟唱需要 instrumental.wav 与 converted_vocal.wav')
+            return
+        carry = self._current_song_position() if self._is_timeline_playing() or self._has_paused_session() else 0.0
+        payload = {'song': song, 'position': carry, 'autoplay': autoplay}
+        if mode == 'ai_sing':
+            self._dispatch_mode_switch(self._start_ai_sing_impl, payload)
+        elif mode == 'ai_follow':
+            self._dispatch_mode_switch(self._start_ai_follow, payload)
+        else:
+            self._dispatch_mode_switch(self._start_talk, payload, mode=mode)
+
+    def _select_mode(self, payload=None):
+        payload = payload or {}
+        mode = str(payload.get('mode') or '')
+        if mode not in MODE_IDS:
+            return
+        song = payload.get('song') or self.state.selected_song or {}
+        if mode == 'ai_sing' and not song.get('play_path'):
+            self._publish_status('playback_idle', log='请先在歌库选择歌曲')
+            return
+        self.state.selected_mode = mode
+        self._publish_status('mode_selected', mode=mode)
+        if self._is_timeline_playing() and mode == self.state.mode:
+            return
+        if self._has_paused_session() and mode == self.state.mode:
+            return
+        if self._is_timeline_playing():
+            self._apply_mode(mode, autoplay=True, song=song)
+        elif self._has_paused_session():
+            self._apply_mode(mode, autoplay=False, song=song)
+
+    def _pause_timeline(self):
+        if self.state.ai_follow_running or self.state.ai_follow_preparing:
+            self.stop_ai_follow()
+            self._publish_status('playback_paused', playing=False, paused=True)
+            return
+        if self.state.mode in ('reverb_talk', 'normal_talk') and self.audio.manager and self.audio.manager.inst_duration > 0:
+            if self.audio.manager.inst_paused:
+                return
+            self.audio.manager.toggle_inst_pause()
+            pos, dur, playing, paused = self._reverb_inst_state()
+            self.state.playback_running = playing
+            self._publish_status('playback_paused', playing=playing, paused=paused, position=pos, duration=dur)
+            self._publish_status('playback_tick', position=pos, duration=dur, playing=playing, paused=paused)
+            return
+        if self.state.mode == 'ai_sing' and self._player.is_playing:
+            self._player.pause()
+            self._publish_status(
+                'playback_paused',
+                playing=False,
+                paused=True,
+                position=self._player.position,
+                duration=self._player.duration,
+            )
+            self._publish_status(
+                'playback_tick',
+                position=self._player.position,
+                duration=self._player.duration,
+                playing=False,
+                paused=True,
+            )
+
+    def _resume_timeline(self):
+        if self.state.mode in ('reverb_talk', 'normal_talk') and self.audio.manager and self.audio.manager.inst_duration > 0:
+            if not self.audio.manager.inst_paused:
+                return
+            self.audio.manager.toggle_inst_pause()
+            pos, dur, playing, paused = self._reverb_inst_state()
+            self.state.playback_running = playing
+            self._publish_status('playback_resumed', playing=playing, paused=paused, position=pos, duration=dur)
+            self._publish_status('playback_tick', position=pos, duration=dur, playing=playing, paused=paused)
+            return
+        if self.state.mode == 'ai_sing' and self._player.is_active and not self._player.is_playing:
+            if self._player.play(on_finish=self._on_playback_finished):
+                self.state.playback_running = True
+                self._restart_playback_tick()
+                pos = self._player.position
+                self._publish_status(
+                    'playback_resumed',
+                    playing=True,
+                    paused=False,
+                    position=pos,
+                    duration=self._player.duration,
+                )
+                self._publish_status(
+                    'playback_tick',
+                    position=pos,
+                    duration=self._player.duration,
+                    playing=True,
+                    paused=False,
+                )
+            return
+        if self.state.mode == 'ai_follow' and not self.state.ai_follow_running:
+            self._apply_mode('ai_follow', autoplay=True)
+
+    def _playback_transport(self, payload=None):
+        if self._is_timeline_playing():
+            self._pause_timeline()
+            return
+        if self._has_paused_session():
+            self._resume_timeline()
+            return
+        mode = self.state.selected_mode if self.state.selected_mode in MODE_IDS else 'ai_sing'
+        self._apply_mode(mode, autoplay=True)
+
     def _active_playback_mode(self) -> str:
+        if not self._is_timeline_playing():
+            return ''
         if self.state.ai_follow_running or self.state.ai_follow_preparing or self.state.mode == 'ai_follow':
             return 'ai_follow'
         if self.state.mode in ('reverb_talk', 'normal_talk') and self.state.passthrough_running:
@@ -599,13 +753,14 @@ class ClientController:
         self.lyrics.sync_at(time_sec, force=True)
 
     def _start_ai_sing(self, payload: dict):
-        self._dispatch_mode_switch(self._start_ai_sing_impl, payload or {})
+        self._dispatch_mode_switch(self._start_ai_sing_impl, self._with_autoplay(payload))
 
     def _start_ai_sing_impl(self, payload: dict):
         if self.state.offline_running:
             self._publish_status('playback_blocked', log='离线做歌进行中，请稍后再播放')
             return
         payload = payload or {}
+        autoplay = bool(payload.get('autoplay', True))
         explicit_pos = 'position' in payload
         carry_pos = float(payload.get('position', 0) or 0)
         from_inst_dur = 0.0
@@ -665,11 +820,33 @@ class ClientController:
             self._player.seek_ratio(0)
         elif self.state.playback_running and not reverb_handoff and not follow_active:
             self._stop_playback(handoff=True)
-        self.state.playback_running = True
         self.state.mode = 'ai_sing'
         self._inst_end_sent = False
         pos = self._player.position
         self._ensure_playback_lyrics(pos)
+        if not autoplay:
+            self.state.playback_running = False
+            self._restart_playback_tick()
+            title = song.get('title') or Path(play_path).stem
+            self._publish_status(
+                'playback_started',
+                title=title,
+                play_path=play_path,
+                duration=duration,
+                position=pos,
+                playing=False,
+                paused=True,
+                log='AI 唱歌：已就绪 %s（按播放键开始）' % title,
+            )
+            self._publish_status(
+                'playback_tick',
+                position=pos,
+                duration=duration,
+                playing=False,
+                paused=True,
+            )
+            return
+        self.state.playback_running = True
         started = False
         last_err = None
         for attempt in range(4):
@@ -821,11 +998,11 @@ class ClientController:
                 break
         return dict(library[(idx + 1) % len(library)])
 
-    def _continue_mode_with_song(self, mode: str, song: dict, carry_pos: float = 0.0):
-        self._dispatch_mode_switch(self._continue_mode_with_song_impl, mode, dict(song), float(carry_pos))
+    def _continue_mode_with_song(self, mode: str, song: dict, carry_pos: float = 0.0, autoplay: bool = True):
+        self._dispatch_mode_switch(self._continue_mode_with_song_impl, mode, dict(song), float(carry_pos), bool(autoplay))
 
-    def _continue_mode_with_song_impl(self, mode: str, song: dict, carry_pos: float = 0.0):
-        payload = {'song': song, 'position': carry_pos}
+    def _continue_mode_with_song_impl(self, mode: str, song: dict, carry_pos: float = 0.0, autoplay: bool = True):
+        payload = {'song': song, 'position': carry_pos, 'autoplay': autoplay}
         if mode == 'ai_sing':
             self._start_ai_sing_impl(payload)
         elif mode == 'ai_follow':
@@ -905,49 +1082,7 @@ class ClientController:
         self._stop_playback()
 
     def _toggle_playback_pause(self, payload=None):
-        if self.state.ai_follow_running or self.state.ai_follow_preparing:
-            self._stop_playback_all()
-            return
-        if self.state.mode in ('reverb_talk', 'normal_talk') and self.audio.manager and self.audio.manager.inst_duration > 0:
-            resumed = self.audio.manager.toggle_inst_pause()
-            pos, dur, playing, paused = self._reverb_inst_state()
-            self.state.playback_running = playing
-            self._publish_status(
-                'playback_paused' if not resumed else 'playback_resumed',
-                playing=playing,
-                paused=paused,
-                position=pos,
-                duration=dur,
-            )
-            self._publish_status(
-                'playback_tick',
-                position=pos,
-                duration=dur,
-                playing=playing,
-                paused=paused,
-            )
-            return
-        if not self.state.playback_running:
-            if self.state.selected_song:
-                self._start_ai_sing({'song': self.state.selected_song})
-            else:
-                self._publish_status('playback_idle', log='请先选择歌曲')
-            return
-        resumed = self._player.toggle_pause()
-        self._publish_status(
-            'playback_paused' if not resumed else 'playback_resumed',
-            playing=resumed,
-            paused=not resumed,
-            position=self._player.position,
-            duration=self._player.duration,
-        )
-        self._publish_status(
-            'playback_tick',
-            position=self._player.position,
-            duration=self._player.duration,
-            playing=resumed,
-            paused=not resumed,
-        )
+        self._playback_transport(payload)
 
     def _seek_playback(self, payload: dict):
         ratio = float((payload or {}).get('ratio', 0))
@@ -1066,7 +1201,7 @@ class ClientController:
             self._follow_prepare_cancel.set()
             self.stop_ai_follow()
             return
-        self._dispatch_mode_switch(self._start_ai_follow, payload or {})
+        self._dispatch_mode_switch(self._start_ai_follow, self._with_autoplay(payload or {}))
 
     def _finish_ai_follow_start(self, song: dict, carry_pos: float = 0.0):
         pf = self.pitch_follow
@@ -1092,6 +1227,7 @@ class ClientController:
 
     def _start_ai_follow(self, payload: dict):
         payload = payload or {}
+        autoplay = bool(payload.get('autoplay', True))
         explicit_pos = 'position' in payload
         carry_pos = float(payload.get('position', 0) or 0)
         need_release = (
@@ -1133,6 +1269,29 @@ class ClientController:
             carry_pos = self._align_timeline(carry_pos, handoff_dur, inst_dur)
         tick_dur = inst_dur or handoff_dur
         self._ensure_playback_lyrics(carry_pos)
+        if not autoplay:
+            self.state.mode = 'ai_follow'
+            self.state.ai_follow_running = False
+            self.state.ai_follow_preparing = False
+            self.state.playback_running = False
+            title = song.get('title') or Path(song.get('instrumental_path') or '').stem
+            self._publish_status(
+                'ai_follow_started',
+                title=title,
+                duration=tick_dur,
+                position=carry_pos,
+                playing=False,
+                paused=True,
+                log='AI 跟唱：已就绪 %s（按播放键开始）' % title,
+            )
+            self._publish_status(
+                'playback_tick',
+                position=carry_pos,
+                duration=tick_dur,
+                playing=False,
+                paused=True,
+            )
+            return
         if self.pitch_follow.assets_ready(song):
             self._publish_status(
                 'ai_follow_preparing',

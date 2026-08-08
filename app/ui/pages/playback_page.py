@@ -2,6 +2,7 @@
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
+    QButtonGroup,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -113,7 +114,7 @@ class PlaybackPage(QWidget):
         self.btn_play = QPushButton('▶')
         self.btn_play.setCheckable(True)
         self.btn_play.setFixedWidth(52)
-        self.btn_play.setToolTip('播放 / 暂停（播放中再次点击可停止 AI 跟唱）')
+        self.btn_play.setToolTip('播放 / 暂停')
         self.btn_play.clicked.connect(self._on_transport)
         ctrl.addWidget(self.btn_play)
         self.btn_ai_follow = QPushButton('AI 跟唱')
@@ -156,8 +157,14 @@ class PlaybackPage(QWidget):
         self.btn_mix.clicked.connect(self._toggle_mix_panel)
         ctrl.addWidget(self.btn_mix)
         self._mix_panel = AiFollowMixPanel(self.bridge, self)
+        self._mode_group = QButtonGroup(self)
+        self._mode_group.setExclusive(True)
+        for btn in (self.btn_ai_follow, self.btn_ai_sing, self.btn_reverb_talk, self.btn_normal_talk):
+            self._mode_group.addButton(btn)
         for btn in (self.btn_play, self.btn_ai_follow, self.btn_ai_sing, self.btn_reverb_talk, self.btn_normal_talk):
             btn.setStyleSheet(self.BTN_STYLE)
+        self._mode = 'ai_sing'
+        self.btn_ai_sing.setChecked(True)
         ctrl.addStretch()
         center_layout.addLayout(ctrl)
         splitter.addWidget(center)
@@ -223,11 +230,33 @@ class PlaybackPage(QWidget):
         self.bridge.emit_action('playback_seek', ratio=ratio)
 
     def _on_transport(self):
-        was_active = not self.btn_play.isChecked()
-        if was_active and self._mode == 'ai_follow':
-            self.bridge.emit_action('playback_stop')
+        self.bridge.emit_action('playback_transport')
+
+    def _select_mode_ui(self, mode: str):
+        if mode not in ('ai_sing', 'ai_follow', 'reverb_talk', 'normal_talk'):
             return
-        self.bridge.emit_action('playback_toggle_pause')
+        if mode in ('ai_sing', 'ai_follow') and not self._selected:
+            peer = {'ai_sing': self.btn_ai_sing, 'ai_follow': self.btn_ai_follow}[mode]
+            peer.blockSignals(True)
+            peer.setChecked(False)
+            peer.blockSignals(False)
+            self.bridge.emit_action('playback_select_mode', mode=mode, log='请先在歌库中选择歌曲')
+            return
+        self._uncheck_mode_buttons(mode)
+        peer = {
+            'ai_sing': self.btn_ai_sing,
+            'ai_follow': self.btn_ai_follow,
+            'reverb_talk': self.btn_reverb_talk,
+            'normal_talk': self.btn_normal_talk,
+        }[mode]
+        peer.blockSignals(True)
+        peer.setChecked(True)
+        peer.blockSignals(False)
+        self._mode = mode
+        payload = {'mode': mode}
+        if self._selected:
+            payload['song'] = self._selected
+        self.bridge.emit_action('playback_select_mode', **payload)
 
     def _sync_transport(self, playing: bool, paused: bool = False):
         active = bool(playing) and not bool(paused)
@@ -250,38 +279,16 @@ class PlaybackPage(QWidget):
             btn.blockSignals(False)
 
     def _on_normal_talk(self):
-        if self.btn_normal_talk.isChecked():
-            self._uncheck_mode_buttons('normal_talk')
-            self.bridge.emit_action('playback_normal_talk')
-        elif self._mode == 'normal_talk':
-            self.bridge.emit_action('playback_normal_talk')
+        self._select_mode_ui('normal_talk')
 
     def _on_ai_follow(self):
-        if self.btn_ai_follow.isChecked() and self._selected:
-            self._uncheck_mode_buttons('ai_follow')
-            self.bridge.emit_action('playback_ai_follow', song=self._selected)
-        elif self.btn_ai_follow.isChecked():
-            self.btn_ai_follow.setChecked(False)
-            self.bridge.emit_action('playback_ai_follow', log='请先在歌库中选择歌曲')
-        elif self._mode == 'ai_follow':
-            self.bridge.emit_action('playback_ai_follow', stop=True)
+        self._select_mode_ui('ai_follow')
 
     def _on_reverb_talk(self):
-        if self.btn_reverb_talk.isChecked():
-            self._uncheck_mode_buttons('reverb_talk')
-            self.bridge.emit_action('playback_reverb_talk')
-        elif self._mode == 'reverb_talk':
-            self.bridge.emit_action('playback_reverb_talk')
+        self._select_mode_ui('reverb_talk')
 
     def _on_ai_sing(self):
-        if self.btn_ai_sing.isChecked() and self._selected:
-            self._uncheck_mode_buttons('ai_sing')
-            self.bridge.emit_action('playback_ai_sing', song=self._selected)
-        elif self.btn_ai_sing.isChecked():
-            self.btn_ai_sing.setChecked(False)
-            self.bridge.emit_action('playback_ai_sing', log='请先在歌库中选择歌曲')
-        else:
-            self.bridge.emit_action('playback_stop')
+        self._select_mode_ui('ai_sing')
 
     def _toggle_mix_panel(self):
         self._mix_panel._load_from_config()
@@ -350,55 +357,44 @@ class PlaybackPage(QWidget):
             self.btn_ai_follow.setChecked(True)
             self._sync_transport(False)
 
+    def set_selected_mode(self, mode: str):
+        if mode not in ('ai_sing', 'ai_follow', 'reverb_talk', 'normal_talk'):
+            return
+        self._mode = mode
+        self._uncheck_mode_buttons(mode)
+        peer = {
+            'ai_sing': self.btn_ai_sing,
+            'ai_follow': self.btn_ai_follow,
+            'reverb_talk': self.btn_reverb_talk,
+            'normal_talk': self.btn_normal_talk,
+        }.get(mode)
+        if peer:
+            peer.blockSignals(True)
+            peer.setChecked(True)
+            peer.blockSignals(False)
+
+    def set_playback_stopped(self):
+        self._sync_transport(False)
+
     def set_mode(self, mode: str, active: bool = False):
         if mode == 'idle':
-            self._mode = 'idle'
-        elif active:
-            self._mode = mode
-        ai_sing = self._mode == 'ai_sing'
-        normal_talk = self._mode == 'normal_talk'
-        reverb_talk = self._mode == 'reverb_talk'
-        ai_follow = self._mode == 'ai_follow'
+            self.set_playback_stopped()
+            return
+        if mode == 'realtime':
+            self._mode = 'realtime'
+            self.btn_ai_follow.blockSignals(True)
+            self.btn_ai_follow.setChecked(True)
+            self.btn_ai_follow.blockSignals(False)
+            for peer in (self.btn_ai_sing, self.btn_normal_talk, self.btn_reverb_talk):
+                peer.setEnabled(False)
+            return
+        if active:
+            self.set_selected_mode(mode)
         realtime = self._mode == 'realtime'
-        self.btn_ai_sing.blockSignals(True)
-        self.btn_normal_talk.blockSignals(True)
-        self.btn_reverb_talk.blockSignals(True)
-        self.btn_ai_follow.blockSignals(True)
-        self.btn_ai_sing.setChecked(ai_sing)
-        self.btn_normal_talk.setChecked(normal_talk)
-        self.btn_reverb_talk.setChecked(reverb_talk)
-        self.btn_ai_follow.setChecked(ai_follow or realtime)
-        if active or mode == 'idle':
-            for name, peer in (
-                ('ai_sing', self.btn_ai_sing),
-                ('reverb_talk', self.btn_reverb_talk),
-                ('ai_follow', self.btn_ai_follow),
-                ('normal_talk', self.btn_normal_talk),
-            ):
-                if self._mode != name:
-                    peer.blockSignals(True)
-                    peer.setChecked(False)
-                    peer.blockSignals(False)
-        self.btn_ai_sing.blockSignals(False)
-        self.btn_normal_talk.blockSignals(False)
-        self.btn_reverb_talk.blockSignals(False)
-        self.btn_ai_follow.blockSignals(False)
         self.btn_ai_sing.setEnabled(not realtime)
         self.btn_normal_talk.setEnabled(not realtime)
         self.btn_reverb_talk.setEnabled(not realtime)
         self.btn_ai_follow.setEnabled(not realtime)
-        if mode == 'idle':
-            self.waveform.reset_position()
-            self.btn_ai_sing.setChecked(False)
-            self.btn_normal_talk.setChecked(False)
-            self.btn_reverb_talk.setChecked(False)
-            self.btn_ai_follow.setChecked(False)
-            self.btn_ai_follow.setText('AI 跟唱')
-            self.btn_ai_sing.setEnabled(True)
-            self.btn_normal_talk.setEnabled(True)
-            self.btn_reverb_talk.setEnabled(True)
-            self.btn_ai_follow.setEnabled(True)
-            self._sync_transport(False)
 
     def selected_song(self):
         return self._selected
@@ -441,13 +437,13 @@ class PlaybackPage(QWidget):
         self._on_transport()
 
     def trigger_ai_follow(self):
-        self._toggle_mode_button('ai_follow', self.btn_ai_follow)
+        self._on_ai_follow()
 
     def trigger_ai_sing(self):
-        self._toggle_mode_button('ai_sing', self.btn_ai_sing)
+        self._on_ai_sing()
 
     def trigger_reverb_talk(self):
-        self._toggle_mode_button('reverb_talk', self.btn_reverb_talk)
+        self._on_reverb_talk()
 
     def trigger_normal_talk(self):
-        self._toggle_mode_button('normal_talk', self.btn_normal_talk)
+        self._on_normal_talk()

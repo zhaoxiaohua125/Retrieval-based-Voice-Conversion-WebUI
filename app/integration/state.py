@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 @dataclass
 class ClientState:
     mode: str = 'idle'
+    selected_mode: str = 'ai_sing'
     offline_running: bool = False
     realtime_running: bool = False
     passthrough_running: bool = False
@@ -21,6 +22,7 @@ class ClientState:
     def to_dict(self):
         return {
             'mode': self.mode,
+            'selected_mode': self.selected_mode,
             'offline_running': self.offline_running,
             'realtime_running': self.realtime_running,
             'ai_follow_running': self.ai_follow_running,
