@@ -1299,3 +1299,12 @@ python webui.py --noautoopen
 - **修改的文件列表**: app/integration/controller.py、README.md
 
 ---
+
+## 会话总结 - 2026-08-08 (7)
+
+- **会话主要目的**: 播放中点击歌库切换歌曲时，新歌曲应立即开始播放
+- **根因**: `_select_song` 仅更新选中项与预加载，未在当前播放模式下重启
+- **修复**: 检测到切歌且处于 AI 唱歌/跟唱/混响/普通说话时，调用 `_continue_mode_with_song` 从 0 秒播放新歌；自动切歌路径传 `resume_if_playing=False` 避免重复启动
+- **修改的文件列表**: app/integration/controller.py、README.md
+
+---

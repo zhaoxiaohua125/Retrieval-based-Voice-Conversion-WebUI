@@ -342,7 +342,11 @@ class ClientController:
 
     def _start_talk(self, payload=None, mode: str = 'normal_talk'):
         label = '混响说话' if mode == 'reverb_talk' else '普通说话'
-        carry_pos = self._current_song_position()
+        payload = payload or {}
+        if 'position' in payload:
+            carry_pos = float(payload.get('position') or 0)
+        else:
+            carry_pos = self._current_song_position()
         if self._is_talk_mode() and self.state.mode != mode:
             self.stop_passthrough(handoff=True)
         if self.state.mode == 'ai_sing' or (self.state.playback_running and self._player.is_active):
@@ -477,10 +481,25 @@ class ClientController:
         self._library = scan_song_library(self.project_root, dirs=dirs)
         self._publish_status('library_updated', songs=self._library, log='歌库已刷新（%s 首）' % len(self._library))
 
+    def _active_playback_mode(self) -> str:
+        if self.state.ai_follow_running or self.state.ai_follow_preparing or self.state.mode == 'ai_follow':
+            return 'ai_follow'
+        if self.state.mode in ('reverb_talk', 'normal_talk') and self.state.passthrough_running:
+            return self.state.mode
+        if self.state.mode == 'ai_sing' or (self.state.playback_running and self._player.is_active):
+            return 'ai_sing'
+        return ''
+
     def _select_song(self, payload: dict):
-        song = (payload or {}).get('song') or payload or {}
+        payload = payload or {}
+        song = payload.get('song') or payload or {}
         if not song.get('play_path'):
             return
+        prev = self.state.selected_song or {}
+        prev_id = prev.get('id') or prev.get('play_path')
+        new_id = song.get('id') or song.get('play_path')
+        switching = bool(prev_id and new_id and prev_id != new_id)
+        resume_if_playing = payload.get('resume_if_playing', True)
         self.state.selected_song = dict(song)
         lrc = song.get('lrc_path') or find_lrc_in_dir(song.get('dir') or Path(song.get('play_path', '')).parent, song.get('title', ''))
         if lrc and Path(lrc).is_file():
@@ -499,6 +518,14 @@ class ClientController:
             self.state.loaded_lyrics = False
             hint = Path(lrc).name if lrc else '%s.lrc' % song.get('title', '')
             self._publish_status('lyrics_missing', log='未找到歌词文件（期望同名 %s），仅播放音频' % hint)
+        if resume_if_playing and switching:
+            mode = self._active_playback_mode()
+            if mode:
+                title = song.get('title') or Path(song.get('play_path') or '').stem
+                self._inst_end_sent = False
+                self._continue_mode_with_song(mode, dict(self.state.selected_song), 0.0)
+                self._publish_status('track_advance', title=title, log='切换歌曲：%s' % title)
+                return
         threading.Thread(
             target=self._preload_song_assets,
             args=(dict(self.state.selected_song),),
@@ -838,7 +865,7 @@ class ClientController:
                 hint = '随机播放：%s' % next_title
             else:
                 hint = '下一首：%s' % next_title
-            self._select_song({'song': next_song})
+            self._select_song({'song': next_song, 'resume_if_playing': False})
             self._publish_status('select_song_ui', title=next_title)
             self._publish_status('track_advance', title=next_title, log=hint)
             self._inst_end_sent = False

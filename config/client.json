@@ -73,7 +73,7 @@
     "normal_talk": "F4"
   },
   "playback": {
-    "play_mode": "repeat_one"
+    "play_mode": "sequential"
   },
   "pitchfix": {
     "strength": 0.85,
