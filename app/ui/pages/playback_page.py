@@ -81,7 +81,7 @@ class PlaybackPage(QWidget):
         self.lyric_prev.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lyric_prev.setWordWrap(True)
         self.lyric_prev.setStyleSheet('font-size:16px;color:#94a3b8;')
-        self.lyric_main = QLabel('—')
+        self.lyric_main = QLabel('暂无歌词')
         self.lyric_main.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lyric_main.setWordWrap(True)
         self.lyric_main.setStyleSheet('font-size:32px;font-weight:700;color:#2563eb;padding:8px 0;')
@@ -174,10 +174,11 @@ class PlaybackPage(QWidget):
         self._lyric_lines = []
 
     def apply_library(self, songs: list):
+        keep = self._selected
         self._songs = list(songs or [])
-        self._filter_songs(self.search_box.text())
+        self._filter_songs(self.search_box.text(), auto_select=not keep)
 
-    def _filter_songs(self, keyword: str):
+    def _filter_songs(self, keyword: str, auto_select: bool = True):
         keyword = (keyword or '').strip().lower()
         self.song_list.blockSignals(True)
         self.song_list.clear()
@@ -189,10 +190,21 @@ class PlaybackPage(QWidget):
             item.setData(Qt.ItemDataRole.UserRole, song)
             self.song_list.addItem(item)
         self.song_list.blockSignals(False)
-        if self.song_list.count() and self.song_list.currentRow() < 0:
-            self.song_list.setCurrentRow(0)
+        if auto_select and self.song_list.count() and self.song_list.currentRow() < 0:
+            self.select_initial_song()
+
+    def select_initial_song(self):
+        if self.song_list.count() <= 0:
+            return
+        self.song_list.blockSignals(True)
+        self.song_list.setCurrentRow(0)
+        self.song_list.blockSignals(False)
+        self._apply_row_song(0, resume_if_playing=False)
 
     def _on_row_changed(self, row: int):
+        self._apply_row_song(row, resume_if_playing=True)
+
+    def _apply_row_song(self, row: int, resume_if_playing: bool = True):
         if row < 0:
             self._selected = None
             return
@@ -205,7 +217,7 @@ class PlaybackPage(QWidget):
         play_path = song.get('play_path') or song.get('cover_path') or song.get('vocal_path')
         self.waveform.load_file(play_path or '')
         self.waveform.set_position_ratio(0.0)
-        self.bridge.emit_action('playback_select_song', song=song)
+        self.bridge.emit_action('playback_select_song', song=song, resume_if_playing=resume_if_playing)
 
     def _on_wave_seek(self, ratio: float):
         self.bridge.emit_action('playback_seek', ratio=ratio)
@@ -327,7 +339,7 @@ class PlaybackPage(QWidget):
             self.lyric_prev.setText('')
             self.lyric_next.setText(self._lyric_lines[1] if len(self._lyric_lines) > 1 else '')
         else:
-            self.lyric_main.setText('—')
+            self.lyric_main.setText('暂无歌词')
             self.lyric_prev.setText('')
             self.lyric_next.setText('')
 

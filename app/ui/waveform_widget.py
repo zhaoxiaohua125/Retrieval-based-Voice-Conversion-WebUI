@@ -92,7 +92,6 @@ class WaveformWidget(QWidget):
         self.update()
         if self._loader and self._loader.isRunning():
             self._loader.requestInterruption()
-            self._loader.wait(200)
         self._loader = _WaveformLoadWorker(path)
         self._loader.loaded.connect(self._on_loaded)
         self._loader.failed.connect(self._on_failed)

@@ -96,7 +96,6 @@ class ClientController:
         self.scheduler.subscribe(SignalType.ERROR, self._on_error)
         self.scheduler.add_shutdown_hook(self.shutdown)
         self._started = True
-        self._refresh_library()
         self._publish_status('controller_ready', log='集成控制器已就绪')
         return self
 
@@ -475,11 +474,19 @@ class ClientController:
             self.stop_passthrough()
         self._stop_playback(payload)
 
-    def _refresh_library(self):
+    def _scan_library_blocking(self):
         opt_dir = self.config_store.get('paths.opt_dir', 'opt')
         dirs = [opt_dir, str(Path(opt_dir) / 'task4_offline')]
         self._library = scan_song_library(self.project_root, dirs=dirs)
-        self._publish_status('library_updated', songs=self._library, log='歌库已刷新（%s 首）' % len(self._library))
+
+    def _refresh_library(self):
+        def _work():
+            try:
+                self._scan_library_blocking()
+                self._publish_status('library_updated', songs=self._library, log='歌库已刷新（%s 首）' % len(self._library))
+            except Exception:
+                logger.error('library refresh failed:\n%s', traceback.format_exc())
+        threading.Thread(target=_work, name='library-scan', daemon=True).start()
 
     def _active_playback_mode(self) -> str:
         if self.state.ai_follow_running or self.state.ai_follow_preparing or self.state.mode == 'ai_follow':
@@ -507,7 +514,7 @@ class ClientController:
             self.lyrics.load_lrc(lrc)
             self.state.loaded_lyrics = True
             self.state.selected_song['lrc_path'] = lrc
-            if self.lyrics._loaded_path != prev_lrc:
+            if switching or self.lyrics._loaded_path != prev_lrc:
                 doc = self.lyrics.document
                 self._publish_status(
                     'lyrics_loaded',
@@ -515,9 +522,14 @@ class ClientController:
                     log='已加载歌词：%s（%s 行）' % (doc.title or song.get('title', ''), len(doc.lines)),
                 )
         else:
+            self.lyrics.clear()
             self.state.loaded_lyrics = False
             hint = Path(lrc).name if lrc else '%s.lrc' % song.get('title', '')
-            self._publish_status('lyrics_missing', log='未找到歌词文件（期望同名 %s），仅播放音频' % hint)
+            self._publish_status(
+                'lyrics_loaded',
+                lines=[],
+                log='未找到歌词文件（期望同名 %s），仅播放音频' % hint,
+            )
         if resume_if_playing and switching:
             mode = self._active_playback_mode()
             if mode:
@@ -810,25 +822,28 @@ class ClientController:
         return dict(library[(idx + 1) % len(library)])
 
     def _continue_mode_with_song(self, mode: str, song: dict, carry_pos: float = 0.0):
+        self._dispatch_mode_switch(self._continue_mode_with_song_impl, mode, dict(song), float(carry_pos))
+
+    def _continue_mode_with_song_impl(self, mode: str, song: dict, carry_pos: float = 0.0):
         payload = {'song': song, 'position': carry_pos}
         if mode == 'ai_sing':
-            self._start_ai_sing(payload)
+            self._start_ai_sing_impl(payload)
         elif mode == 'ai_follow':
             self.stop_ai_follow(handoff=True)
             time.sleep(0.1)
             self._start_ai_follow(payload)
         elif mode == 'reverb_talk':
             if self.state.passthrough_running:
-                self.stop_passthrough()
+                self.stop_passthrough(handoff=True)
             time.sleep(0.1)
-            self._dispatch_mode_switch(self._start_talk, payload, mode='reverb_talk')
+            self._start_talk(payload, mode='reverb_talk')
         elif mode == 'normal_talk':
             if self.state.passthrough_running:
-                self.stop_passthrough()
+                self.stop_passthrough(handoff=True)
             time.sleep(0.1)
-            self._dispatch_mode_switch(self._start_talk, payload, mode='normal_talk')
+            self._start_talk(payload, mode='normal_talk')
         else:
-            self._start_ai_sing(payload)
+            self._start_ai_sing_impl(payload)
 
     def _handle_track_end(self, from_follow: bool = False) -> bool:
         if self._track_end_busy:
@@ -870,10 +885,7 @@ class ClientController:
             self._publish_status('track_advance', title=next_title, log=hint)
             self._inst_end_sent = False
             active_mode = cur_mode if cur_mode in ('ai_sing', 'ai_follow', 'reverb_talk', 'normal_talk') else 'ai_sing'
-            if from_follow and active_mode == 'ai_follow':
-                self._dispatch_mode_switch(self._continue_mode_with_song, active_mode, next_song, 0.0)
-            else:
-                self._continue_mode_with_song(active_mode, next_song, 0.0)
+            self._continue_mode_with_song(active_mode, next_song, 0.0)
             return True
         finally:
             self._track_end_busy = False

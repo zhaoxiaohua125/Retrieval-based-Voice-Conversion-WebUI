@@ -1308,3 +1308,31 @@ python webui.py --noautoopen
 - **修改的文件列表**: app/integration/controller.py、README.md
 
 ---
+
+## 会话总结 - 2026-08-08 (8)
+
+- **会话主要目的**: 修复启动后或切歌/切模式时界面偶发「未响应」
+- **根因**: 调度器在 UI 线程同步执行 handler；切歌续播、停止跟唱/直通里的 `join`/`sleep` 阻塞主线程；启动时同步选歌与波形 `wait(200)` 进一步卡住界面
+- **修复**:
+  1. `_continue_mode_with_song` 统一走 mode-switch 后台队列（`_continue_mode_with_song_impl`）
+  2. 启动页关闭前后台扫描歌库并 `processEvents`；首曲选择延后到 `QTimer.singleShot(0)`
+  3. 波形加载取消 UI 线程 `wait(200)`；刷新歌库改为后台线程
+- **修改的文件列表**: app/integration/controller.py、app/ui/pages/playback_page.py、app/ui/waveform_widget.py、scripts/run_ui_skeleton.py、README.md
+
+---
+
+## 会话总结 - 2026-08-08 (9)
+
+- **会话主要目的**: 修复切换歌曲后歌词未刷新、无歌词歌曲仍显示上一首歌词
+- **根因**: 无 LRC 时未清空 `LyricsService` 与 UI；UI 层 `lyrics_loaded` 在 `lines` 为空时不更新
+- **修复**: 新增 `LyricsService.clear()`；切歌时无歌词发布 `lyrics_loaded lines=[]`；有歌词且切歌时强制刷新 UI
+- **修改的文件列表**: app/lyrics/service.py、app/integration/controller.py、scripts/run_ui_skeleton.py、README.md
+
+---
+
+## 会话总结 - 2026-08-08 (10)
+
+- **会话主要目的**: 无歌词歌曲的歌词区显示「暂无歌词」而非横线
+- **修改的文件列表**: app/ui/pages/playback_page.py、README.md
+
+---

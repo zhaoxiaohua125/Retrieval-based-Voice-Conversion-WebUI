@@ -68,6 +68,8 @@ def _install_crash_diagnostics():
 
 def main():
     import logging
+    import threading
+
     console_level = logging.WARNING if (ROOT / 'VERSION').is_file() else logging.INFO
     setup_rotating_logging(console_level=console_level)
     _install_crash_diagnostics()
@@ -76,7 +78,7 @@ def main():
     app.setApplicationName('RVC 声迹客户端')
     app.setApplicationVersion(CLIENT_VERSION)
 
-    from PyQt6.QtCore import Qt
+    from PyQt6.QtCore import Qt, QTimer
     from PyQt6.QtWidgets import QLabel
 
     splash = QLabel('RVC 声迹客户端\n正在启动…')
@@ -100,6 +102,20 @@ def main():
             bridge.log_message.emit(str(payload['log']))
 
     bridge.user_action.connect(on_user_action)
+
+    scan_done = threading.Event()
+
+    def _startup_scan():
+        try:
+            controller._scan_library_blocking()
+        finally:
+            scan_done.set()
+
+    threading.Thread(target=_startup_scan, name='startup-library-scan', daemon=True).start()
+    splash.setText('RVC 声迹客户端\n正在扫描歌库…')
+    while not scan_done.is_set():
+        app.processEvents()
+        scan_done.wait(0.02)
 
     window = MainWindow(bridge, project_root=ROOT, config_store=controller.config_store)
     window.set_controller(controller)
@@ -186,8 +202,9 @@ def main():
         elif action in ('playback_stopped', 'playback_finished'):
             page.set_mode('idle')
         elif action == 'lyrics_loaded':
-            if payload.get('lines'):
-                page.set_lyrics_lines(payload.get('lines'))
+            page.set_lyrics_lines(payload.get('lines') or [])
+        elif action == 'lyrics_missing':
+            page.set_lyrics_lines([])
         elif action == 'play_mode_changed':
             page.set_play_mode(payload.get('mode', 'sequential'))
         elif action == 'select_song_ui':
@@ -214,6 +231,7 @@ def main():
 
     window.show()
     splash.close()
+    QTimer.singleShot(0, window.page_playback.select_initial_song)
     bridge.log_message.emit('客户端已启动（AI 唱歌 / 离线做歌 / 歌词同步已接入）')
 
     code = app.exec()

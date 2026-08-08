@@ -61,6 +61,12 @@ class LyricsService:
         self._publish(SignalType.STATUS, {'action': 'lyrics_loaded', 'count': len(doc.lines), 'title': doc.title})
         return doc
 
+    def clear(self):
+        self.document = LyricDocument()
+        self.matcher.set_document(self.document)
+        self._loaded_path = ''
+        self._last_index = -1
+
     def set_offset_ms(self, offset_ms: int):
         self.matcher.set_offset_ms(int(offset_ms))
         self.config_store.set('lyrics.offset_ms', int(offset_ms))
