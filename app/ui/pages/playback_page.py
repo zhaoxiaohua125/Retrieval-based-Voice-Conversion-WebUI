@@ -119,7 +119,7 @@ class PlaybackPage(QWidget):
         ctrl.addWidget(self.btn_play)
         self.btn_ai_follow = QPushButton('AI 跟唱')
         self.btn_ai_follow.setCheckable(True)
-        self.btn_ai_follow.setToolTip('AI 跟唱：按预渲染 AI 人声旋律实时修音（需 instrumental + converted_vocal）')
+        self.btn_ai_follow.setToolTip('AI 跟唱：伴奏按时间轴播放；麦克风有声音时门控输出 AI 人声（不识别音准）')
         self.btn_ai_follow.clicked.connect(self._on_ai_follow)
         ctrl.addWidget(self.btn_ai_follow)
         self.btn_ai_sing = QPushButton('AI 唱歌')

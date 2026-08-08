@@ -1356,3 +1356,45 @@ python webui.py --noautoopen
 - **修改的文件列表**: app/integration/controller.py、app/integration/state.py、app/ui/pages/playback_page.py、scripts/run_ui_skeleton.py、README.md
 
 ---
+
+## 会话总结 - 2026-08-08 (13)
+
+- **会话主要目的**: AI 跟唱改为声迹 Phase 1 方案（预渲染 AI 人声 + VAD 门控），并更新开发大纲
+- **完成的主要任务**:
+  1. 重写 `PitchFollowService`：输出 = 伴奏 + converted_vocal(按 T) × VAD门控 × AI人声音量；麦仅作 RMS 开关
+  2. 移除热路径 F0 加载/修音/detune；保留 `f0_curve`/`corrector`/`detune` 供 Phase 2
+  3. 🔊 混音面板文案对齐 VAD（AI人声音量/跟唱阈值/衰减）；移除跑调模式 UI
+  4. 更新 `开发大纲.md`：任务 9 拆 Phase 1（VAD）与 Phase 2（可选修音）
+- **关键决策**: Phase 1 对标声迹当前听感路径；条件允许再通过 `follow_engine=pitch_correct` 集成原修音引擎
+- **技术栈**: sounddevice duplex、RingBuffer、librosa/soundfile 按 T 读轨、RMS VAD + hangover
+- **修改的文件列表**: app/pitchfix/service.py、app/integration/controller.py、app/ui/ai_follow_mix_panel.py、app/ui/pages/playback_page.py、开发大纲.md、README.md
+
+---
+
+## 会话总结 - 2026-08-08 (14)
+
+- **会话主要目的**: 跟唱衰减上限改为 0.2；修复耳麦电平偏低时 VAD 不触发
+- **完成的主要任务**:
+  1. 跟唱衰减滑条改为 0.10~0.20（步进 0.01），修复旧映射最大到 10.0 的 bug
+  2. VAD 阈值系数 0.03→0.002，并叠加 peak×0.35 检测，降低触发门槛
+  3. 阈值 tooltip 提示耳麦电平低时可调到 30~50
+- **修改的文件列表**: app/pitchfix/service.py、app/ui/ai_follow_mix_panel.py、README.md
+
+---
+
+## 会话总结 - 2026-08-08 (15)
+
+- **会话主要目的**: 降低 VAD 对喘气/气声的误触发
+- **修复**: 改回 RMS 检测（去掉峰值）；阈值系数 0.002→0.006；连续 2 个音频块超阈才开门控
+- **修改的文件列表**: app/pitchfix/service.py、app/ui/ai_follow_mix_panel.py、README.md
+
+---
+
+## 会话总结 - 2026-08-08 (16)
+
+- **会话主要目的**: 修复跟唱过程中 AI 人声偶发停顿
+- **根因**: 字间电平回落触发关门；衰减 0.10 时释放仅 ~0.15s；重开需 2 块造成断句
+- **修复**: 开/关双阈值（关阈=开阈×0.35）；释放 max(0.25s, 衰减×2.5)；grace 内 1 块即可重开
+- **修改的文件列表**: app/pitchfix/service.py、app/ui/ai_follow_mix_panel.py、README.md
+
+---

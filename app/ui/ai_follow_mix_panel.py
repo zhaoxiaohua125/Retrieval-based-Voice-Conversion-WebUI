@@ -1,10 +1,9 @@
 """AI 跟唱混音调节浮层（对标声迹喇叭面板）。"""
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QComboBox, QFrame, QHBoxLayout, QLabel, QPushButton, QSlider, QVBoxLayout
+from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QSlider, QVBoxLayout
 
 from app.config_store import ConfigStore
-from app.pitchfix.detune import detune_mode_labels
 
 _DEFAULTS = {
     'inst_ui': 77,
@@ -12,16 +11,16 @@ _DEFAULTS = {
     'orig_ui': 0,
     'threshold': 75,
     'attenuation_ui': 1,
-    'detune_mode': 'off',
 }
 
 
 def _att_from_slider(v: int) -> float:
-    return max(0.1, float(v) / 10.0)
+    return min(0.2, max(0.1, 0.1 + (int(v) - 1) * 0.01))
 
 
 def _slider_from_att(att: float) -> int:
-    return max(1, min(100, int(round(float(att) * 10))))
+    att = min(0.2, max(0.1, float(att)))
+    return max(1, min(11, int(round((att - 0.1) / 0.01)) + 1))
 
 
 class AiFollowMixPanel(QFrame):
@@ -40,25 +39,14 @@ class AiFollowMixPanel(QFrame):
         layout.setContentsMargins(16, 14, 16, 12)
         layout.setSpacing(10)
         self._rows = {}
-        for key, label, lo, hi in (
-            ('inst_ui', '伴奏音量', 0, 100),
-            ('mic_ui', '人声音量', 0, 150),
-            ('orig_ui', '原唱音量', 0, 100),
-            ('threshold', 'AI跟唱阈值', 0, 100),
-            ('attenuation_ui', 'AI跟唱衰减', 1, 100),
+        for key, label, lo, hi, tip in (
+            ('inst_ui', '伴奏音量', 0, 100, ''),
+            ('mic_ui', 'AI人声音量', 0, 150, 'VAD 门控打开时，按歌曲时间轴播放 converted_vocal 的音量'),
+            ('orig_ui', '原唱监听', 0, 100, '不参与 VAD，始终叠加 converted_vocal（通常为 0）'),
+            ('threshold', '跟唱阈值', 0, 100, '越高越不易误触（喘气可调到 65~80）；越低越容易跟唱'),
+            ('attenuation_ui', '跟唱衰减', 1, 11, '字间/停麦后 AI 人声保持（秒）；0.10≈0.25s，0.20≈0.5s；句中断可略加大'),
         ):
-            layout.addLayout(self._make_row(key, label, lo, hi))
-        detune_row = QHBoxLayout()
-        detune_row.addWidget(QLabel('AI跑调模式'))
-        self.cmb_detune = QComboBox()
-        self._detune_ids = []
-        for mode_id, label in detune_mode_labels():
-            self.cmb_detune.addItem(label, mode_id)
-            self._detune_ids.append(mode_id)
-        self.cmb_detune.setToolTip('对参考旋律叠加微音高抖动，避免修音过准显得假')
-        self.cmb_detune.currentIndexChanged.connect(self._on_detune_changed)
-        detune_row.addWidget(self.cmb_detune, stretch=1)
-        layout.addLayout(detune_row)
+            layout.addLayout(self._make_row(key, label, lo, hi, tip))
         foot = QHBoxLayout()
         foot.addStretch()
         btn_reset = QPushButton('重置')
@@ -67,24 +55,23 @@ class AiFollowMixPanel(QFrame):
         layout.addLayout(foot)
         self._load_from_config()
 
-    def _make_row(self, key, label, lo, hi):
+    def _make_row(self, key, label, lo, hi, tip=''):
         row = QHBoxLayout()
         row.addWidget(QLabel(label))
         slider = QSlider(Qt.Orientation.Horizontal)
         slider.setRange(lo, hi)
+        if tip:
+            slider.setToolTip(tip)
         val_lbl = QLabel('')
         val_lbl.setMinimumWidth(36)
         val_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
         def _sync(v):
             if key == 'attenuation_ui':
-                val_lbl.setText('%.1f' % _att_from_slider(v))
+                val_lbl.setText('%.2f' % _att_from_slider(v))
             else:
                 val_lbl.setText(str(v))
             self._emit_change()
-
-        if key == 'attenuation_ui':
-            slider.setToolTip('值越大灵敏度越低：停麦后还跟唱更久；0.1 最灵敏，话筒一停即停')
 
         slider.valueChanged.connect(_sync)
         row.addWidget(slider, stretch=1)
@@ -117,17 +104,9 @@ class AiFollowMixPanel(QFrame):
             slider.setValue(values[key])
             slider.blockSignals(False)
             if key == 'attenuation_ui':
-                val_lbl.setText('%.1f' % _att_from_slider(values[key]))
+                val_lbl.setText('%.2f' % _att_from_slider(values[key]))
             else:
                 val_lbl.setText(str(values[key]))
-        mode = str(pf.get('detune_mode', _DEFAULTS['detune_mode']))
-        idx = self.cmb_detune.findData(mode)
-        self.cmb_detune.blockSignals(True)
-        self.cmb_detune.setCurrentIndex(idx if idx >= 0 else 0)
-        self.cmb_detune.blockSignals(False)
-
-    def _on_detune_changed(self, _idx):
-        self._emit_change()
 
     def _values(self):
         out = {}
@@ -138,7 +117,6 @@ class AiFollowMixPanel(QFrame):
         out['ref_vocal_gain'] = out['orig_ui'] / 100.0
         out['follow_threshold'] = float(out['threshold'])
         out['follow_attenuation'] = _att_from_slider(out['attenuation_ui'])
-        out['detune_mode'] = str(self.cmb_detune.currentData() or 'off')
         return out
 
     def _emit_change(self):
@@ -146,10 +124,5 @@ class AiFollowMixPanel(QFrame):
 
     def _on_reset(self):
         for key, val in _DEFAULTS.items():
-            if key == 'detune_mode':
-                idx = self.cmb_detune.findData(val)
-                if idx >= 0:
-                    self.cmb_detune.setCurrentIndex(idx)
-                continue
             slider, _ = self._rows[key]
             slider.setValue(val)

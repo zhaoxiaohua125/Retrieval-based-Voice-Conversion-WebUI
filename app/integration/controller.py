@@ -1169,7 +1169,6 @@ class ClientController:
                 ref_vocal_gain=p.get('ref_vocal_gain'),
                 follow_threshold=p.get('follow_threshold'),
                 follow_attenuation=p.get('follow_attenuation'),
-                detune_mode=p.get('detune_mode'),
             )
         self._schedule_config_save()
 
@@ -1222,7 +1221,7 @@ class ClientController:
             duration=pf.duration,
             position=pos,
             playing=True,
-            log='AI 跟唱已启动：%s%s\n对着麦克风唱，系统将按 AI 人声旋律修音\n输出=伴奏+修音人声（请在设置中核对音频设备）' % (title, hint),
+            log='AI 跟唱已启动：%s%s\n麦克风检测到声音时播放 AI 人声（按歌曲时间轴）；哼/说/吹气均可触发\n输出=伴奏+VAD 门控 AI 人声' % (title, hint),
         )
 
     def _start_ai_follow(self, payload: dict):
@@ -1319,8 +1318,6 @@ class ClientController:
                 playing=self.state.playback_running,
                 paused=not self.state.playback_running,
             )
-        ref_path = song.get('vocal_path') or ''
-        cache_hit = bool(ref_path and Path(ref_path).with_suffix('.f0.npz').is_file())
         self.state.ai_follow_preparing = True
         self._follow_prepare_cancel.clear()
         self._publish_status(
@@ -1330,7 +1327,7 @@ class ClientController:
             duration=tick_dur,
             playing=self.state.playback_running,
             paused=not self.state.playback_running,
-            log='正在加载伴奏…' if cache_hit else '正在加载伴奏并分析旋律（首次较慢）…',
+            log='正在加载伴奏与 AI 人声…',
         )
         self._follow_prepare_thread = threading.Thread(
             target=self._ai_follow_prepare_worker,
