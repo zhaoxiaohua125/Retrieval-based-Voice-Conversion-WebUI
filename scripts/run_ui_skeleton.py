@@ -157,7 +157,7 @@ def main():
             page.set_playback_state(payload)
         elif action == 'passthrough_started':
             page.set_mode(payload.get('mode') or 'normal_talk', active=True)
-            if (payload.get('mode') or '') == 'reverb_talk':
+            if (payload.get('mode') or '') in ('reverb_talk', 'normal_talk') and float(payload.get('duration', 0) or 0) > 0:
                 page.set_playback_state(payload)
         elif action in ('passthrough_stopped', 'passthrough_blocked'):
             page.set_mode('idle')

@@ -1237,16 +1237,13 @@ python webui.py --noautoopen
 
 ---
 
-## 会话总结 - 2026-08-07 (16)
+## 会话总结 - 2026-08-08
 
-- **会话主要目的**: 修复 AI 唱歌 ↔ 混响说话多次切换后失效
-- **根因**:
-  1. `AudioStreamManager.stop()` 持锁 `abort()`，callback 内 `_read_inst_frames` 抢锁 → 死锁
-  2. 混响→唱歌时提前 `mode=ai_sing`，`stop_passthrough` 误判非混响、跳过 tick 回收
+- **会话主要目的**: 普通说话与混响说话行为一致，切换模式时伴奏不断
 - **完成的主要任务**:
-  1. 音频流 `abort/close` 改为锁外执行（与 WavPlayer 同方案）
-  2. handoff 时保持 mode 至 `stop_passthrough` 完成；handoff 且 `playback_running` 强制 halt tick
-  3. 统一用 `_restart_playback_tick` 避免僵尸 tick
-- **修改的文件列表**: app/audio/stream_manager.py、app/integration/controller.py、README.md
+  1. 普通说话始终加载 instrumental（与混响说话相同），不再依赖 playback_running
+  2. 普通↔混响、普通→AI唱歌/跟唱 均 handoff 播放头；先取 pos 再停流
+  3. 普通说话走 mode-switch 队列；stop_passthrough 对两种 talk 模式统一 tick/时间轴处理
+- **修改的文件列表**: app/integration/controller.py、app/ui/pages/playback_page.py、README.md
 
 ---

@@ -260,37 +260,27 @@ class ClientController:
         if self.state.mode == 'normal_talk':
             self.stop_passthrough()
             return
-        self._start_talk(payload, mode='normal_talk')
+        self._dispatch_mode_switch(self._start_talk, payload, mode='normal_talk')
 
     def _start_talk(self, payload=None, mode: str = 'normal_talk'):
         label = '混响说话' if mode == 'reverb_talk' else '普通说话'
-        if self._is_talk_mode() and self.state.mode != mode:
-            self.stop_passthrough(handoff=(mode == 'reverb_talk' and self.state.mode == 'normal_talk'))
         carry_pos = self._current_song_position()
-        inst_path = ''
-        player_handoff = False
-        if mode == 'normal_talk':
-            self._stop_playback()
-        elif mode == 'reverb_talk':
-            if self.state.mode == 'ai_sing':
-                carry_pos = self._player.position
-                player_handoff = True
-                self.state.mode = 'reverb_talk'
-                self._stop_playback(handoff=True)
-                time.sleep(0.2)
-                logger.info('reverb handoff from ai_sing pos=%.2fs', carry_pos)
-            elif self.state.playback_running and self._player.is_active:
-                carry_pos = self._player.position
-                player_handoff = True
-                self.state.mode = 'reverb_talk'
-                self._stop_playback(handoff=True)
-                time.sleep(0.2)
-            song = self.state.selected_song or {}
-            inst_path = song.get('instrumental_path') or ''
-            if inst_path and not Path(inst_path).is_file():
-                inst_path = ''
-        if self.state.ai_follow_running:
-            self.stop_ai_follow()
+        if self._is_talk_mode() and self.state.mode != mode:
+            self.stop_passthrough(handoff=True)
+        if self.state.mode == 'ai_sing' or (self.state.playback_running and self._player.is_active):
+            carry_pos = self._player.position
+            self._stop_playback(handoff=True)
+            time.sleep(0.15)
+            logger.info('talk handoff from ai_sing pos=%.2fs mode=%s', carry_pos, mode)
+        elif self.state.ai_follow_running or self.state.ai_follow_preparing:
+            carry_pos = self._current_song_position()
+            self.stop_ai_follow(handoff=True)
+            time.sleep(0.15)
+            logger.info('talk handoff from ai_follow pos=%.2fs mode=%s', carry_pos, mode)
+        song = self.state.selected_song or {}
+        inst_path = song.get('instrumental_path') or ''
+        if inst_path and not Path(inst_path).is_file():
+            inst_path = ''
         if self.state.realtime_running:
             self.stop_realtime()
         if self.state.offline_running:
@@ -327,7 +317,8 @@ class ClientController:
         gain = passthrough_gain_from_audio(self.config_store.get('audio', {}) or {})
         inst_hint = ''
         pos, dur, playing, paused = 0.0, 0.0, False, False
-        if mode == 'reverb_talk' and inst_path:
+        has_inst = bool(inst_path)
+        if has_inst and mode in ('reverb_talk', 'normal_talk'):
             self.state.playback_running = True
             self._ensure_playback_lyrics(carry_pos)
             self._restart_playback_tick()
@@ -340,22 +331,26 @@ class ClientController:
                 playing=playing,
                 paused=paused,
             )
-        elif mode == 'reverb_talk':
-            inst_hint = '\n未找到伴奏轨，仅混响麦克风'
+        elif mode in ('reverb_talk', 'normal_talk'):
+            inst_hint = '\n未找到伴奏轨，仅麦克风' if mode == 'reverb_talk' else '\n未找到伴奏轨，仅干声'
         extra = '\n已叠加房间混响（可调 audio.reverb_mix / reverb_decay）' if mode == 'reverb_talk' else ''
+        talk_mode_desc = {
+            'reverb_talk': '伴奏+混响麦' if has_inst else '干声+混响直通',
+            'normal_talk': '伴奏+干声麦' if has_inst else '干声直通已启动（不经 RVC）',
+        }
         self._publish_status(
             'passthrough_started',
             mode=mode,
             input_device=in_dev,
             output_device=out_dev,
-            position=pos if mode == 'reverb_talk' and inst_path else 0.0,
-            duration=dur if mode == 'reverb_talk' and inst_path else 0.0,
-            playing=playing if mode == 'reverb_talk' and inst_path else False,
-            paused=paused if mode == 'reverb_talk' and inst_path else False,
+            position=pos if has_inst else 0.0,
+            duration=dur if has_inst else 0.0,
+            playing=playing if has_inst else False,
+            paused=paused if has_inst else False,
             log='%s：%s\nIN: %s\nOUT: %s\n监听增益: %.1fx（设置里 %s%%）%s%s\n保存设置后需重开本模式；Voicemeeter：H1→B1，VAIO→A1'
             % (
                 label,
-                '伴奏+混响麦' if mode == 'reverb_talk' and inst_path else ('干声+混响直通' if mode == 'reverb_talk' else '干声直通已启动（不经 RVC）'),
+                talk_mode_desc.get(mode, ''),
                 self._device_name(in_dev),
                 self._device_name(out_dev),
                 gain,
@@ -369,8 +364,10 @@ class ClientController:
         if not self.state.passthrough_running and not (self.audio.manager and self.audio.manager.running):
             return
         was_reverb = self.state.mode == 'reverb_talk'
+        was_talk = self.state.mode in ('reverb_talk', 'normal_talk')
         label = '混响说话' if was_reverb else '普通说话'
-        if was_reverb or (handoff and self.state.playback_running):
+        had_timeline = self.state.playback_running and was_talk
+        if had_timeline or (handoff and self.state.playback_running):
             self._halt_playback_tick(wait=0.25 if handoff else 0.4)
         self.audio.stop_stream()
         if handoff:
@@ -378,7 +375,7 @@ class ClientController:
         else:
             time.sleep(0.03)
         self.state.passthrough_running = False
-        if was_reverb and self.state.playback_running and not handoff:
+        if had_timeline and not handoff:
             self.state.playback_running = False
             if self.state.lyrics_running:
                 self.lyrics.stop()
@@ -505,14 +502,27 @@ class ClientController:
             time.sleep(0.15)
             logger.info('ai_sing reverb stream released')
         elif self.state.passthrough_running:
-            self.stop_passthrough()
+            mgr = self.audio.manager
+            if mgr is not None and mgr.inst_duration > 0:
+                carry_pos = mgr.inst_position
+                from_inst_dur = mgr.inst_duration
+            logger.info('ai_sing handoff from talk pos=%.2fs mode=%s', carry_pos, self.state.mode)
+            self.stop_passthrough(handoff=True)
+            self._player.stop()
+            time.sleep(0.15)
         elif carry_pos <= 0:
             carry_pos = self._current_song_position()
         follow_active = self.state.ai_follow_running or self.state.ai_follow_preparing
         if follow_active:
             pf = self._pitch_follow
-            if pf is not None and pf.duration > 0:
-                from_inst_dur = pf.duration
+            if pf is not None:
+                if pf.duration > 0:
+                    from_inst_dur = pf.duration
+                if carry_pos <= 0:
+                    carry_pos = pf.position
+            self.stop_ai_follow(handoff=True)
+            time.sleep(0.15)
+            logger.info('ai_sing handoff from follow pos=%.2fs', carry_pos)
         song = (payload or {}).get('song') or self.state.selected_song or {}
         play_path = song.get('play_path') or song.get('cover_path') or song.get('vocal_path')
         if not play_path:
@@ -531,9 +541,7 @@ class ClientController:
             carry_pos = self._align_timeline(carry_pos, from_inst_dur, duration)
         if carry_pos > 0 and duration > 0:
             self._player.seek_ratio(carry_pos / duration)
-        if follow_active:
-            self.stop_ai_follow(handoff=True)
-        elif self.state.playback_running and not reverb_handoff:
+        elif self.state.playback_running and not reverb_handoff and not follow_active:
             self._stop_playback(handoff=True)
         self.state.playback_running = True
         self.state.mode = 'ai_sing'
@@ -608,7 +616,7 @@ class ClientController:
     def _playback_tick_loop(self, gen: int):
         stuck = 0
         while not self._playback_stop.is_set() and self._tick_generation == gen:
-            if self.state.mode == 'reverb_talk' and self.audio.manager and self.audio.manager.inst_duration > 0:
+            if self.state.mode in ('reverb_talk', 'normal_talk') and self.audio.manager and self.audio.manager.inst_duration > 0:
                 stuck = 0
                 pos, dur, playing, paused = self._reverb_inst_state()
                 self.lyrics.sync_at(pos)
@@ -660,9 +668,10 @@ class ClientController:
         if self.state.ai_follow_running or self.state.ai_follow_preparing:
             self._stop_playback_all()
             return
-        if self.state.mode == 'reverb_talk' and self.audio.manager and self.audio.manager.inst_duration > 0:
+        if self.state.mode in ('reverb_talk', 'normal_talk') and self.audio.manager and self.audio.manager.inst_duration > 0:
             resumed = self.audio.manager.toggle_inst_pause()
             pos, dur, playing, paused = self._reverb_inst_state()
+            self.state.playback_running = playing
             self._publish_status(
                 'playback_paused' if not resumed else 'playback_resumed',
                 playing=playing,
@@ -706,7 +715,7 @@ class ClientController:
             self._pitch_follow.seek(ratio * self._pitch_follow.duration)
             self.lyrics.sync_at(self._pitch_follow.position, force=True)
             return
-        if self.state.mode == 'reverb_talk' and self.audio.manager and self.audio.manager.inst_duration > 0:
+        if self.state.mode in ('reverb_talk', 'normal_talk') and self.audio.manager and self.audio.manager.inst_duration > 0:
             self.audio.manager.seek_instrumental(ratio * self.audio.manager.inst_duration)
             self.lyrics.sync_at(self.audio.manager.inst_position, force=True)
             pos, dur, playing, paused = self._reverb_inst_state()
@@ -789,12 +798,35 @@ class ClientController:
             )
         self._schedule_config_save()
 
+    def _release_playback_source(self, handoff: bool = True) -> float:
+        pos = self._current_song_position()
+        if self.state.mode in ('reverb_talk', 'normal_talk') or (
+            self.state.passthrough_running and self.audio.manager and self.audio.manager.inst_duration > 0
+        ):
+            mgr = self.audio.manager
+            if mgr is not None and mgr.inst_duration > 0:
+                pos = mgr.inst_position
+            self.stop_passthrough(handoff=handoff)
+            time.sleep(0.15)
+        elif self.state.ai_follow_running or self.state.ai_follow_preparing:
+            pf = self._pitch_follow
+            if pf is not None and pf.duration > 0:
+                pos = pf.position
+            self.stop_ai_follow(handoff=handoff)
+            time.sleep(0.15)
+        elif self.state.mode == 'ai_sing' or (self.state.playback_running and self._player.is_active):
+            if self._player.duration > 0 or self._player.is_active:
+                pos = self._player.position
+            self._stop_playback(handoff=handoff)
+            time.sleep(0.15)
+        return pos
+
     def _toggle_ai_follow(self, payload=None):
-        if self.state.ai_follow_running or self.state.ai_follow_preparing:
+        if (payload or {}).get('stop'):
             self._follow_prepare_cancel.set()
             self.stop_ai_follow()
-        else:
-            self._start_ai_follow(payload or {})
+            return
+        self._dispatch_mode_switch(self._start_ai_follow, payload or {})
 
     def _finish_ai_follow_start(self, song: dict, carry_pos: float = 0.0):
         pf = self.pitch_follow
@@ -819,10 +851,19 @@ class ClientController:
         )
 
     def _start_ai_follow(self, payload: dict):
-        if self.state.passthrough_running:
-            self.stop_passthrough()
         carry_pos = float((payload or {}).get('position', 0) or 0)
-        if carry_pos <= 0:
+        need_release = (
+            self.state.passthrough_running
+            or self.state.ai_follow_running
+            or self.state.ai_follow_preparing
+            or self.state.mode == 'ai_sing'
+            or (self.state.playback_running and self._player.is_active)
+        )
+        if need_release:
+            released = self._release_playback_source(handoff=True)
+            if carry_pos <= 0:
+                carry_pos = released
+        elif carry_pos <= 0:
             carry_pos = self._current_song_position()
         handoff_dur = self._player.duration if self.state.playback_running and self._player.duration > 0 else 0.0
         if self.state.realtime_running:
