@@ -1247,3 +1247,12 @@ python webui.py --noautoopen
 - **修改的文件列表**: app/integration/controller.py、app/ui/pages/playback_page.py、README.md
 
 ---
+
+## 会话总结 - 2026-08-08 (2)
+
+- **会话主要目的**: 修复普通说话→混响说话切换后歌曲从头播放
+- **根因**: `_current_song_position()` 仅在 `reverb_talk` 下读伴奏进度，普通说话返回 0
+- **修复**: 两种 talk 模式均从 `audio.manager.inst_position` 取播放头
+- **修改的文件列表**: app/integration/controller.py、README.md
+
+---

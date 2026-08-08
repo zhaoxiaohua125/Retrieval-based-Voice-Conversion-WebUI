@@ -466,7 +466,7 @@ class ClientController:
             pf = self._pitch_follow
             if pf is not None and pf.duration > 0:
                 return pf.position
-        if self.state.mode == 'reverb_talk' and self.audio.manager and self.audio.manager.inst_duration > 0:
+        if self._is_talk_mode() and self.audio.manager and self.audio.manager.inst_duration > 0:
             return self.audio.manager.inst_position
         if self.state.playback_running and self._player.is_active:
             return self._player.position
