@@ -102,6 +102,7 @@ def main():
     bridge.user_action.connect(on_user_action)
 
     window = MainWindow(bridge, project_root=ROOT, config_store=controller.config_store)
+    window.set_controller(controller)
     lyrics = LyricsWindow()
     lyrics.move(window.x() + 40, window.y() + 80)
     controller.set_lyrics_window(lyrics)
@@ -187,6 +188,10 @@ def main():
         elif action == 'lyrics_loaded':
             if payload.get('lines'):
                 page.set_lyrics_lines(payload.get('lines'))
+        elif action == 'play_mode_changed':
+            page.set_play_mode(payload.get('mode', 'sequential'))
+        elif action == 'select_song_ui':
+            page.select_song_by_title(payload.get('title', ''))
         elif action == 'lyric_tick':
             page.set_lyric_tick(payload)
 
@@ -205,6 +210,7 @@ def main():
     bridge.ui_progress.connect(window.page_song_make.apply_offline_progress)
     scheduler.subscribe(SignalType.PROGRESS, on_scheduler_progress)
     window.page_playback.apply_library(controller.library)
+    window.page_playback.set_play_mode(controller.config_store.get('playback.play_mode', 'sequential'))
 
     window.show()
     splash.close()

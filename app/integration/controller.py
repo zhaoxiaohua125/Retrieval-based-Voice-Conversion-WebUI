@@ -23,6 +23,8 @@ from app.scheduler import AppScheduler
 
 logger = logging.getLogger('rvc_client')
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PLAY_MODES = ('sequential', 'repeat_one', 'shuffle')
+PLAY_MODE_LABELS = {'sequential': '顺序播放', 'repeat_one': '单曲循环', 'shuffle': '随机播放'}
 
 
 class ClientController:
@@ -55,6 +57,8 @@ class ClientController:
         self._started = False
         self._lock = threading.RLock()
         self._tick_generation = 0
+        self._track_end_busy = False
+        self._inst_end_sent = False
         self._switch_queue = queue.Queue()
         self._switch_worker = threading.Thread(target=self._switch_worker_loop, name='mode-switch', daemon=True)
         self._switch_worker.start()
@@ -156,6 +160,7 @@ class ClientController:
             'realtime_stop': self.stop_realtime,
             'playback_normal_talk': self._toggle_normal_talk,
             'playback_reverb_talk': self._toggle_reverb_talk,
+            'playback_set_play_mode': self._set_play_mode,
             'ai_toggle': self._toggle_ai,
             'lyrics_load': self._load_lyrics,
             'lyrics_start': lambda p: self.lyrics.start(source=(p or {}).get('clock_source')),
@@ -186,6 +191,79 @@ class ClientController:
 
     def _is_talk_mode(self) -> bool:
         return self.state.mode in ('normal_talk', 'reverb_talk')
+
+    def snapshot_playback(self) -> dict | None:
+        if self.state.mode == 'idle' and not self.state.playback_running and not self.state.passthrough_running:
+            if not self.state.ai_follow_running:
+                return None
+        return {
+            'mode': self.state.mode,
+            'position': self._current_song_position(),
+            'playback_running': self.state.playback_running,
+            'passthrough_running': self.state.passthrough_running,
+            'ai_follow_running': self.state.ai_follow_running,
+        }
+
+    def restore_playback_after_settings(self, snap: dict | None):
+        if not snap:
+            return
+        pos = float(snap.get('position', 0) or 0)
+        mode = snap.get('mode')
+        if snap.get('ai_follow_running') and not (self._pitch_follow and self._pitch_follow.running):
+            song = self.state.selected_song or {}
+            if song.get('instrumental_path') and song.get('vocal_path'):
+                try:
+                    self.pitch_follow.start(song, seek_sec=pos)
+                    self.state.ai_follow_running = True
+                    self.state.mode = 'ai_follow'
+                    self.state.playback_running = True
+                    self._ensure_playback_lyrics(pos)
+                    if not self._follow_tick or not self._follow_tick.is_alive():
+                        self._follow_stop.clear()
+                        self._follow_tick = threading.Thread(target=self._follow_tick_loop, name='ai-follow-tick', daemon=True)
+                        self.scheduler.register_thread('ai-follow-tick', self._follow_tick)
+                        self._follow_tick.start()
+                    logger.info('playback resumed after settings: ai_follow pos=%.2fs', pos)
+                except Exception as exc:
+                    logger.warning('resume ai_follow after settings failed: %s', exc)
+            return
+        if mode == 'ai_sing' and snap.get('playback_running') and not self._player.is_active:
+            try:
+                dur = self._player.duration
+                if dur > 0 and pos > 0:
+                    self._player.seek_ratio(pos / dur)
+                if not self._player.play(on_finish=self._on_playback_finished):
+                    raise RuntimeError('player not started')
+                self.state.playback_running = True
+                self.state.mode = 'ai_sing'
+                self._restart_playback_tick()
+                logger.info('playback resumed after settings: ai_sing pos=%.2fs', pos)
+            except Exception as exc:
+                logger.warning('resume ai_sing after settings failed: %s', exc)
+            return
+        if snap.get('passthrough_running') and mode in ('reverb_talk', 'normal_talk'):
+            if self.audio.manager and self.audio.manager.running:
+                return
+            song = self.state.selected_song or {}
+            inst = song.get('instrumental_path') or ''
+            if inst and not Path(inst).is_file():
+                inst = ''
+            try:
+                self.audio.start_stream(
+                    passthrough=True,
+                    reverb=(mode == 'reverb_talk'),
+                    inst_path=inst or None,
+                    inst_seek=pos,
+                )
+                self.state.mode = mode
+                self.state.passthrough_running = True
+                if inst:
+                    self.state.playback_running = True
+                    self._ensure_playback_lyrics(pos)
+                    self._restart_playback_tick()
+                logger.info('playback resumed after settings: %s pos=%.2fs', mode, pos)
+            except Exception as exc:
+                logger.warning('resume talk after settings failed: %s', exc)
 
     def _switch_worker_loop(self):
         while True:
@@ -319,6 +397,7 @@ class ClientController:
         pos, dur, playing, paused = 0.0, 0.0, False, False
         has_inst = bool(inst_path)
         if has_inst and mode in ('reverb_talk', 'normal_talk'):
+            self._inst_end_sent = False
             self.state.playback_running = True
             self._ensure_playback_lyrics(carry_pos)
             self._restart_playback_tick()
@@ -487,7 +566,9 @@ class ClientController:
         if self.state.offline_running:
             self._publish_status('playback_blocked', log='离线做歌进行中，请稍后再播放')
             return
-        carry_pos = float((payload or {}).get('position', 0) or 0)
+        payload = payload or {}
+        explicit_pos = 'position' in payload
+        carry_pos = float(payload.get('position', 0) or 0)
         from_inst_dur = 0.0
         reverb_handoff = False
         if self.state.mode == 'reverb_talk':
@@ -510,7 +591,7 @@ class ClientController:
             self.stop_passthrough(handoff=True)
             self._player.stop()
             time.sleep(0.15)
-        elif carry_pos <= 0:
+        elif not explicit_pos and carry_pos <= 0:
             carry_pos = self._current_song_position()
         follow_active = self.state.ai_follow_running or self.state.ai_follow_preparing
         if follow_active:
@@ -541,10 +622,13 @@ class ClientController:
             carry_pos = self._align_timeline(carry_pos, from_inst_dur, duration)
         if carry_pos > 0 and duration > 0:
             self._player.seek_ratio(carry_pos / duration)
+        elif duration > 0:
+            self._player.seek_ratio(0)
         elif self.state.playback_running and not reverb_handoff and not follow_active:
             self._stop_playback(handoff=True)
         self.state.playback_running = True
         self.state.mode = 'ai_sing'
+        self._inst_end_sent = False
         pos = self._player.position
         self._ensure_playback_lyrics(pos)
         started = False
@@ -619,6 +703,11 @@ class ClientController:
             if self.state.mode in ('reverb_talk', 'normal_talk') and self.audio.manager and self.audio.manager.inst_duration > 0:
                 stuck = 0
                 pos, dur, playing, paused = self._reverb_inst_state()
+                mgr = self.audio.manager
+                if mgr.inst_finished and not mgr.inst_paused and not self._inst_end_sent:
+                    self._inst_end_sent = True
+                    if self._handle_track_end():
+                        break
                 self.lyrics.sync_at(pos)
                 self._publish_status(
                     'playback_tick',
@@ -652,8 +741,120 @@ class ClientController:
             if self._playback_stop.wait(0.1) or self._tick_generation != gen:
                 break
 
+    def _play_mode(self) -> str:
+        mode = str(self.config_store.get('playback.play_mode', 'sequential') or 'sequential')
+        return mode if mode in PLAY_MODES else 'sequential'
+
+    def _set_play_mode(self, payload=None):
+        if payload and (payload or {}).get('mode'):
+            mode = str(payload.get('mode') or 'sequential')
+        else:
+            cur = self._play_mode()
+            mode = PLAY_MODES[(PLAY_MODES.index(cur) + 1) % len(PLAY_MODES)]
+        if mode not in PLAY_MODES:
+            return
+        self.config_store.set('playback.play_mode', mode)
+        try:
+            self.config_store.save()
+        except OSError as exc:
+            logger.warning('play_mode save failed: %s', exc)
+        self._publish_status('play_mode_changed', mode=mode, log='播放模式：%s' % PLAY_MODE_LABELS[mode])
+
+    def _pick_next_song(self, repeat_same: bool = False):
+        library = self._library or []
+        if not library:
+            return None
+        current = self.state.selected_song or {}
+        if repeat_same and current.get('play_path'):
+            return dict(current)
+        cur_id = current.get('id') or current.get('play_path')
+        mode = self._play_mode()
+        if mode == 'repeat_one':
+            return dict(current) if current.get('play_path') else None
+        if mode == 'shuffle':
+            import random
+            pool = [s for s in library if (s.get('id') or s.get('play_path')) != cur_id] or library
+            return dict(random.choice(pool))
+        idx = 0
+        for i, s in enumerate(library):
+            if (s.get('id') or s.get('play_path')) == cur_id:
+                idx = i
+                break
+        return dict(library[(idx + 1) % len(library)])
+
+    def _continue_mode_with_song(self, mode: str, song: dict, carry_pos: float = 0.0):
+        payload = {'song': song, 'position': carry_pos}
+        if mode == 'ai_sing':
+            self._start_ai_sing(payload)
+        elif mode == 'ai_follow':
+            self.stop_ai_follow(handoff=True)
+            time.sleep(0.1)
+            self._start_ai_follow(payload)
+        elif mode == 'reverb_talk':
+            if self.state.passthrough_running:
+                self.stop_passthrough()
+            time.sleep(0.1)
+            self._dispatch_mode_switch(self._start_talk, payload, mode='reverb_talk')
+        elif mode == 'normal_talk':
+            if self.state.passthrough_running:
+                self.stop_passthrough()
+            time.sleep(0.1)
+            self._dispatch_mode_switch(self._start_talk, payload, mode='normal_talk')
+        else:
+            self._start_ai_sing(payload)
+
+    def _handle_track_end(self, from_follow: bool = False) -> bool:
+        if self._track_end_busy:
+            return True
+        self._track_end_busy = True
+        try:
+            mode = self._play_mode()
+            cur_mode = self.state.mode
+            song = self.state.selected_song or {}
+            title = song.get('title') or Path(song.get('play_path') or '').stem
+            if mode == 'repeat_one' and cur_mode in ('reverb_talk', 'normal_talk'):
+                mgr = self.audio.manager
+                if mgr is not None and mgr.inst_duration > 0:
+                    mgr.replay_instrumental()
+                    self._inst_end_sent = False
+                    self._ensure_playback_lyrics(0)
+                    pos, dur, playing, paused = self._reverb_inst_state()
+                    self._publish_status(
+                        'playback_tick',
+                        position=pos,
+                        duration=dur,
+                        playing=playing,
+                        paused=paused,
+                    )
+                    self._publish_status('track_advance', title=title, log='单曲循环：%s' % title)
+                    return True
+            next_song = self._pick_next_song()
+            if not next_song or not next_song.get('play_path'):
+                return False
+            next_title = next_song.get('title') or Path(next_song.get('play_path') or '').stem
+            if mode == 'repeat_one':
+                hint = '单曲循环：%s' % next_title
+            elif mode == 'shuffle':
+                hint = '随机播放：%s' % next_title
+            else:
+                hint = '下一首：%s' % next_title
+            self._select_song({'song': next_song})
+            self._publish_status('select_song_ui', title=next_title)
+            self._publish_status('track_advance', title=next_title, log=hint)
+            self._inst_end_sent = False
+            active_mode = cur_mode if cur_mode in ('ai_sing', 'ai_follow', 'reverb_talk', 'normal_talk') else 'ai_sing'
+            if from_follow and active_mode == 'ai_follow':
+                self._dispatch_mode_switch(self._continue_mode_with_song, active_mode, next_song, 0.0)
+            else:
+                self._continue_mode_with_song(active_mode, next_song, 0.0)
+            return True
+        finally:
+            self._track_end_busy = False
+
     def _on_playback_finished(self):
         if self.state.ai_follow_running or self.state.ai_follow_preparing or self.state.mode == 'ai_follow':
+            return
+        if self._handle_track_end():
             return
         self.scheduler.publish(
             BusMessage(
@@ -851,7 +1052,9 @@ class ClientController:
         )
 
     def _start_ai_follow(self, payload: dict):
-        carry_pos = float((payload or {}).get('position', 0) or 0)
+        payload = payload or {}
+        explicit_pos = 'position' in payload
+        carry_pos = float(payload.get('position', 0) or 0)
         need_release = (
             self.state.passthrough_running
             or self.state.ai_follow_running
@@ -861,9 +1064,9 @@ class ClientController:
         )
         if need_release:
             released = self._release_playback_source(handoff=True)
-            if carry_pos <= 0:
+            if not explicit_pos and carry_pos <= 0:
                 carry_pos = released
-        elif carry_pos <= 0:
+        elif not explicit_pos and carry_pos <= 0:
             carry_pos = self._current_song_position()
         handoff_dur = self._player.duration if self.state.playback_running and self._player.duration > 0 else 0.0
         if self.state.realtime_running:
@@ -1001,21 +1204,25 @@ class ClientController:
                 if self._follow_stop.wait(0.25):
                     break
         finally:
+            continued = False
             if natural_finish:
-                self.scheduler.publish(
-                    BusMessage(
-                        SignalType.STATUS,
-                        ModuleId.SCHEDULER,
-                        {'action': 'ai_follow_finished', 'log': 'AI 跟唱伴奏已播完'},
+                continued = self._handle_track_end(from_follow=True)
+                if not continued:
+                    self.scheduler.publish(
+                        BusMessage(
+                            SignalType.STATUS,
+                            ModuleId.SCHEDULER,
+                            {'action': 'ai_follow_finished', 'log': 'AI 跟唱伴奏已播完'},
+                        )
                     )
-                )
             self._follow_stop.set()
             self._follow_tick = None
             try:
                 self.scheduler.unregister_thread('ai-follow-tick')
             except Exception:
                 pass
-            self._release_ai_follow(handoff=self._follow_handoff)
+            if not continued:
+                self._release_ai_follow(handoff=self._follow_handoff)
 
     def stop_ai_follow(self, payload=None, handoff=False):
         self._follow_handoff = handoff

@@ -61,8 +61,6 @@ def _tag_device(name: str) -> tuple[list[str], str | None]:
 def list_hostapis():
     import sounddevice as sd
 
-    sd._terminate()
-    sd._initialize()
     return [item['name'] for item in sd.query_hostapis()]
 
 
@@ -70,8 +68,6 @@ def list_devices(hostapi: str | None = None) -> list[AudioDeviceInfo]:
     """枚举音频设备，可选按 HostAPI 过滤。"""
     import sounddevice as sd
 
-    sd._terminate()
-    sd._initialize()
     hostapis = {item['name']: item for item in sd.query_hostapis()}
     hostapi_map = {}
     for api_name, api in hostapis.items():

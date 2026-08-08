@@ -82,6 +82,9 @@ DEFAULT_CONFIG = {
         'reverb_talk': '3',
         'normal_talk': '4',
     },
+    'playback': {
+        'play_mode': 'sequential',
+    },
 }
 
 

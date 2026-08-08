@@ -136,6 +136,16 @@ class PlaybackPage(QWidget):
         self.btn_normal_talk.setToolTip('麦克风干声直通+伴奏（路由同混响说话，无混响）')
         self.btn_normal_talk.clicked.connect(self._on_normal_talk)
         ctrl.addWidget(self.btn_normal_talk)
+        self._play_mode = 'sequential'
+        self.btn_play_mode = QToolButton()
+        self.btn_play_mode.setText('🔁')
+        self.btn_play_mode.setToolTip('顺序播放（点击切换：单曲循环 / 随机播放）')
+        self.btn_play_mode.setStyleSheet(
+            'QToolButton{padding:8px 10px;border-radius:6px;border:1px solid #cbd5e1;background:#fff;font-size:16px;}'
+            'QToolButton:hover{background:#f8fafc;}'
+        )
+        self.btn_play_mode.clicked.connect(lambda: self.bridge.emit_action('playback_set_play_mode'))
+        ctrl.addWidget(self.btn_play_mode)
         self.btn_mix = QToolButton()
         self.btn_mix.setText('🔊')
         self.btn_mix.setToolTip('AI 跟唱混音调节（伴奏/人声/原唱/阈值）')
@@ -393,6 +403,14 @@ class PlaybackPage(QWidget):
             if song.get('title') == title or item.text() == title:
                 self.song_list.setCurrentRow(i)
                 return
+
+    def set_play_mode(self, mode: str):
+        icons = {'sequential': '🔁', 'repeat_one': '🔂', 'shuffle': '🔀'}
+        tips = {'sequential': '顺序播放', 'repeat_one': '单曲循环', 'shuffle': '随机播放'}
+        mode = mode if mode in icons else 'sequential'
+        self._play_mode = mode
+        self.btn_play_mode.setText(icons[mode])
+        self.btn_play_mode.setToolTip('%s（点击切换）' % tips[mode])
 
     def _toggle_mode_button(self, name: str, btn):
         btn.blockSignals(True)

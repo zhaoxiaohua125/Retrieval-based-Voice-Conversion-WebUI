@@ -67,10 +67,13 @@
   },
   "shortcuts": {
     "transport": "Space",
-    "ai_follow": "1",
-    "ai_sing": "2",
-    "reverb_talk": "3",
-    "normal_talk": "4"
+    "ai_follow": "F1",
+    "ai_sing": "F2",
+    "reverb_talk": "F3",
+    "normal_talk": "F4"
+  },
+  "playback": {
+    "play_mode": "repeat_one"
   },
   "pitchfix": {
     "strength": 0.85,

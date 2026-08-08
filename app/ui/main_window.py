@@ -36,6 +36,7 @@ class MainWindow(QMainWindow):
             from app.config_store import ConfigStore
             config_store = ConfigStore().load()
         self.config_store = config_store
+        self._controller = None
         self.setWindowTitle('RVC 声迹客户端 v%s' % self._client_version())
         self.resize(1280, 800)
         self._build_ui()
@@ -100,6 +101,9 @@ class MainWindow(QMainWindow):
     def song_make_page(self):
         return self.page_song_make
 
+    def set_controller(self, controller):
+        self._controller = controller
+
     def _on_nav_changed(self, index: int):
         self.stack.setCurrentIndex(index)
         name = self.TAB_NAMES[index] if 0 <= index < len(self.TAB_NAMES) else ''
@@ -112,22 +116,25 @@ class MainWindow(QMainWindow):
             self.page_playback.select_song_by_title(song_title)
 
     def _open_settings_dialog(self):
+        snap = self._controller.snapshot_playback() if self._controller else None
         dlg = SettingsDialog(
             self.bridge, self.config_store, project_root=self.project_root,
             song_make_page=self.page_song_make, parent=self,
         )
-        if dlg.exec() != QDialog.DialogCode.Accepted:
-            return
-        payload = dlg.collect_payload()
-        layout = load_ui_layout()
-        layout['settings'] = {
-            'osc_port': payload['osc_port'],
-            'update_url': payload['update_url'],
-            'log_dir': payload['log_dir'],
-        }
-        save_ui_layout(layout)
-        self.bridge.emit_action('settings_save', **payload, log='设置已保存到 config/client.json')
-        self._shortcut_binder.apply(self.config_store)
+        accepted = dlg.exec() == QDialog.DialogCode.Accepted
+        if accepted:
+            payload = dlg.collect_payload()
+            layout = load_ui_layout()
+            layout['settings'] = {
+                'osc_port': payload['osc_port'],
+                'update_url': payload['update_url'],
+                'log_dir': payload['log_dir'],
+            }
+            save_ui_layout(layout)
+            self.bridge.emit_action('settings_save', **payload, log='设置已保存到 config/client.json')
+            self._shortcut_binder.apply(self.config_store)
+        if self._controller:
+            self._controller.restore_playback_after_settings(snap)
 
     def append_log(self, text):
         self.log_view.append(text)

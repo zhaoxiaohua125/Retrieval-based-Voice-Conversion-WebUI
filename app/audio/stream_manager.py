@@ -102,6 +102,18 @@ class AudioStreamManager:
     def inst_paused(self) -> bool:
         return bool(self._inst_paused)
 
+    @property
+    def inst_finished(self) -> bool:
+        return bool(self._inst_finished)
+
+    def replay_instrumental(self):
+        with self._lock:
+            if self._inst_data is None:
+                return
+            self._inst_pos = 0
+            self._inst_finished = False
+            self._inst_paused = False
+
     def load_instrumental(self, path: str, seek_sec: float = 0.0):
         import soundfile as sf
 

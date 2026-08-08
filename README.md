@@ -1267,3 +1267,35 @@ python webui.py --noautoopen
 - **修改的文件列表**: app/ui/playback_shortcuts.py、app/ui/settings_dialog.py、app/ui/main_window.py、app/ui/pages/playback_page.py、app/config_store.py、app/integration/controller.py、README.md
 
 ---
+
+## 会话总结 - 2026-08-08 (4)
+
+- **会话主要目的**: 修复打开系统设置后播放停止且关闭后不恢复
+- **根因**: `list_devices()` / `list_hostapis()` 调用 `sd._terminate()`，设置页初始化枚举设备时杀掉所有音频流
+- **修复**: 去掉枚举时的 PortAudio 重初始化；设置关闭前快照播放状态，若流已断则自动恢复
+- **修改的文件列表**: app/audio/devices.py、app/integration/controller.py、app/ui/main_window.py、scripts/run_ui_skeleton.py、README.md
+
+---
+
+## 会话总结 - 2026-08-08 (5)
+
+- **会话主要目的**: 歌曲播完后自动续播，并增加播放模式切换（对标声迹 AI）
+- **完成的主要任务**:
+  1. 控制条「普通说话」与混音按钮之间新增播放模式按钮，点击循环切换：顺序播放 🔁 / 单曲循环 🔂 / 随机播放 🔀
+  2. 配置持久化至 `config/client.json` → `playback.play_mode`
+  3. 播完统一走 `_handle_track_end()`：AI 唱歌、AI 跟唱、混响/普通说话（伴奏轨）三种结束路径均支持续播
+  4. 单曲循环在 talk 模式下直接 `replay_instrumental()` 重播伴奏；切歌时同步更新歌库选中项
+- **关键决策**: AI 跟唱自然结束时通过 mode-switch 队列延迟续播，避免在 follow tick 线程内 stop/start 死锁
+- **技术栈**: PyQt6、sounddevice、soundfile、现有 Controller 模式切换队列
+- **修改的文件列表**: app/audio/stream_manager.py、app/config_store.py、app/integration/controller.py、app/ui/pages/playback_page.py、scripts/run_ui_skeleton.py、README.md
+
+---
+
+## 会话总结 - 2026-08-08 (6)
+
+- **会话主要目的**: 修复单曲循环时播放头未重置、日志显示「从 05:02 继续」的 bug
+- **根因**: 续播传入 `position=0` 时仍被 `_current_song_position()` 覆盖为歌曲末尾；同路径 `load()` 不重置 `_pos`，再 seek 到末尾导致瞬间再次触发结束
+- **修复**: 仅当 payload 未显式带 `position` 时才继承当前进度；显式 `position=0` 时 `seek_ratio(0)` 从头播放；AI 跟唱续播同样处理
+- **修改的文件列表**: app/integration/controller.py、README.md
+
+---
