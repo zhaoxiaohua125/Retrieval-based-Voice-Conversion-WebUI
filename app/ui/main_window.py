@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
 from app.ui.header_bar import HeaderBar
 from app.ui.layout_store import load_ui_layout, save_ui_layout
 from app.ui.pages import AnnouncePage, PlaybackPage, SongMakePage
+from app.ui.playback_shortcuts import PlaybackShortcutBinder
 from app.ui.settings_dialog import SettingsDialog
 
 
@@ -91,6 +92,9 @@ class MainWindow(QMainWindow):
         self.status.addPermanentWidget(self.gpu_label)
         self.status.addPermanentWidget(self.plugin_label)
         self.bridge.log_message.connect(self.append_log)
+        self._shortcut_binder = PlaybackShortcutBinder(
+            self, self.page_playback, self.config_store, playback_tab_index=HeaderBar.TAB_PLAYBACK
+        )
 
     @property
     def song_make_page(self):
@@ -123,6 +127,7 @@ class MainWindow(QMainWindow):
         }
         save_ui_layout(layout)
         self.bridge.emit_action('settings_save', **payload, log='设置已保存到 config/client.json')
+        self._shortcut_binder.apply(self.config_store)
 
     def append_log(self, text):
         self.log_view.append(text)

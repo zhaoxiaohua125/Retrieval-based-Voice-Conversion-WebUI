@@ -1287,6 +1287,9 @@ class ClientController:
             self.config_store.set('paths.log_dir', str(payload['log_dir']).strip())
         if payload.get('sr_type'):
             self.config_store.set('realtime.sr_type', str(payload['sr_type']))
+        shortcuts = payload.get('shortcuts') or {}
+        for key, val in shortcuts.items():
+            self.config_store.set('shortcuts.%s' % key, str(val or '').strip())
         self.config_store.save()
         self._sync_playback_output_device()
         mgr = self.audio.manager

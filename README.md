@@ -1256,3 +1256,14 @@ python webui.py --noautoopen
 - **修改的文件列表**: app/integration/controller.py、README.md
 
 ---
+
+## 会话总结 - 2026-08-08 (3)
+
+- **会话主要目的**: 播放页 5 按钮支持键盘快捷键，映射可配置
+- **完成的主要任务**:
+  1. 默认快捷键：Space 播放/暂停，1～4 对应跟唱/唱歌/混响/普通说话
+  2. 系统设置新增「播放页快捷键」分组，QKeySequenceEdit 可改键或留空禁用
+  3. 配置写入 `config/client.json` 的 `shortcuts` 段；保存后立即重载
+- **修改的文件列表**: app/ui/playback_shortcuts.py、app/ui/settings_dialog.py、app/ui/main_window.py、app/ui/pages/playback_page.py、app/config_store.py、app/integration/controller.py、README.md
+
+---

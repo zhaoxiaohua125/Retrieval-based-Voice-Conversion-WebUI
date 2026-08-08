@@ -65,16 +65,23 @@
     "mtc_port": "",
     "sim_speed": 1.0
   },
+  "shortcuts": {
+    "transport": "Space",
+    "ai_follow": "1",
+    "ai_sing": "2",
+    "reverb_talk": "3",
+    "normal_talk": "4"
+  },
   "pitchfix": {
     "strength": 0.85,
     "inst_gain": 0.42,
     "mic_gain": 1.48,
     "inst_ui": 42,
     "mic_ui": 148,
-    "orig_ui": 5,
+    "orig_ui": 41,
     "threshold": 58,
     "attenuation_ui": 1,
-    "ref_vocal_gain": 0.05,
+    "ref_vocal_gain": 0.41,
     "follow_threshold": 58.0,
     "follow_attenuation": 0.1,
     "detune_mode": "off",

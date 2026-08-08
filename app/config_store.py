@@ -75,6 +75,13 @@ DEFAULT_CONFIG = {
         'mtc_port': '',
         'sim_speed': 1.0,
     },
+    'shortcuts': {
+        'transport': 'Space',
+        'ai_follow': '1',
+        'ai_sing': '2',
+        'reverb_talk': '3',
+        'normal_talk': '4',
+    },
 }
 
 

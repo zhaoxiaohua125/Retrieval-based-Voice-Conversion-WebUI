@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
+    QKeySequenceEdit,
     QLabel,
     QLineEdit,
     QPushButton,
@@ -21,6 +22,7 @@ from PyQt6.QtWidgets import (
 from app.audio.devices import list_devices, list_hostapis, pick_voicemeeter_defaults
 from app.config_store import ConfigStore
 from app.ui.layout_store import load_ui_layout
+from app.ui.playback_shortcuts import DEFAULT_SHORTCUTS, SHORTCUT_KEYS, SHORTCUT_LABELS
 from app.ui.rvc_advanced_dialog import RvcAdvancedDialog
 
 
@@ -124,6 +126,17 @@ class SettingsDialog(QDialog):
         audio_layout.addLayout(pt_row)
         root.addWidget(audio_box)
 
+        sc_box = QGroupBox('播放页快捷键（仅在「播放」Tab 生效）')
+        sc_form = QFormLayout(sc_box)
+        self._key_edits = {}
+        for key in SHORTCUT_KEYS:
+            edit = QKeySequenceEdit()
+            edit.setClearButtonEnabled(True)
+            edit.setToolTip('点击后按下目标键；留空表示禁用')
+            sc_form.addRow(SHORTCUT_LABELS[key], edit)
+            self._key_edits[key] = edit
+        root.addWidget(sc_box)
+
         rvc_row = QHBoxLayout()
         self.lbl_model = QLabel('')
         self.lbl_model.setStyleSheet('color:#334155;font-size:13px;')
@@ -154,6 +167,9 @@ class SettingsDialog(QDialog):
         pt_ui = int(self.config.get('audio.passthrough_ui', 100))
         self.slider_passthrough.setValue(max(50, min(200, pt_ui)))
         self.lbl_passthrough.setText('%s%%' % self.slider_passthrough.value())
+        for key in SHORTCUT_KEYS:
+            val = str((self.config.get('shortcuts', {}) or {}).get(key) or DEFAULT_SHORTCUTS.get(key) or '')
+            self._key_edits[key].setKeySequence(val)
         sr_type = str(self.config.get('realtime.sr_type', 'sr_model'))
         if sr_type == 'sr_device':
             self.radio_sr_device.setChecked(True)
@@ -285,6 +301,10 @@ class SettingsDialog(QDialog):
                 'sample_rate': sample_rate,
                 'passthrough_ui': int(self.slider_passthrough.value()),
                 'passthrough_gain': round(int(self.slider_passthrough.value()) / 50.0, 3),
+            },
+            'shortcuts': {
+                key: self._key_edits[key].keySequence().toString()
+                for key in SHORTCUT_KEYS
             },
         }
         if self._realtime_payload:

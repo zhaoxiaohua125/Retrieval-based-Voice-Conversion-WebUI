@@ -393,3 +393,31 @@ class PlaybackPage(QWidget):
             if song.get('title') == title or item.text() == title:
                 self.song_list.setCurrentRow(i)
                 return
+
+    def _toggle_mode_button(self, name: str, btn):
+        btn.blockSignals(True)
+        btn.setChecked(self._mode != name)
+        btn.blockSignals(False)
+        if name == 'ai_follow':
+            self._on_ai_follow()
+        elif name == 'ai_sing':
+            self._on_ai_sing()
+        elif name == 'reverb_talk':
+            self._on_reverb_talk()
+        elif name == 'normal_talk':
+            self._on_normal_talk()
+
+    def trigger_transport(self):
+        self._on_transport()
+
+    def trigger_ai_follow(self):
+        self._toggle_mode_button('ai_follow', self.btn_ai_follow)
+
+    def trigger_ai_sing(self):
+        self._toggle_mode_button('ai_sing', self.btn_ai_sing)
+
+    def trigger_reverb_talk(self):
+        self._toggle_mode_button('reverb_talk', self.btn_reverb_talk)
+
+    def trigger_normal_talk(self):
+        self._toggle_mode_button('normal_talk', self.btn_normal_talk)
