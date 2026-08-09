@@ -1584,3 +1584,11 @@ python webui.py --noautoopen
 - **会话主要目的**: 解释改回 energy 后进歌仍显示 Whisper 的原因并改文案
 - **关键说明**: 状态栏读的是 LRC 内 [al:whisper] 实际字轴，不是 align_engine；改配置需再点「生成逐字」重写文件
 - **修改的文件列表**: app/lyrics/aligner.py、app/integration/controller.py、README.md
+
+---
+
+## 会话总结 - 2026-08-09 (19)
+
+- **会话主要目的**: 将逐字歌词关键参数做到系统设置 UI，并附文字说明
+- **完成的主要任务**: 新增「逐字歌词」分组：对齐引擎 / Whisper 模型 / Whisper 设备 / 高亮提前 / 整体偏移；保存写入 client.json；改引擎后需再点生成逐字的提示
+- **修改的文件列表**: app/ui/settings_dialog.py、app/integration/controller.py、app/ui/pages/playback_page.py、README.md

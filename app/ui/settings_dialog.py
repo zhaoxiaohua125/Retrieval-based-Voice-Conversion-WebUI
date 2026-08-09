@@ -14,9 +14,11 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QRadioButton,
+    QScrollArea,
     QSlider,
     QSpinBox,
     QVBoxLayout,
+    QWidget,
 )
 
 from app.audio.devices import list_devices, list_hostapis, pick_voicemeeter_defaults
@@ -38,13 +40,19 @@ class SettingsDialog(QDialog):
         self._mic_testing = False
         self._realtime_payload = None
         self.setWindowTitle('系统设置')
-        self.setMinimumWidth(560)
+        self.setMinimumWidth(600)
+        self.setMinimumHeight(640)
         self._build_ui()
         self._load_values()
         self._reload_devices()
 
     def _build_ui(self):
-        root = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        body = QWidget()
+        root = QVBoxLayout(body)
         general = QGroupBox('常规')
         general_form = QFormLayout(general)
         self.spin_osc = QSpinBox()
@@ -55,6 +63,72 @@ class SettingsDialog(QDialog):
         general_form.addRow('更新地址', self.edit_update_url)
         general_form.addRow('日志目录', self.edit_log_dir)
         root.addWidget(general)
+
+        lyrics_box = QGroupBox('逐字歌词（「生成逐字」时生效）')
+        lyrics_form = QFormLayout(lyrics_box)
+        self.cmb_align_engine = QComboBox()
+        self.cmb_align_engine.addItem('人声能量（推荐日常）', 'energy')
+        self.cmb_align_engine.addItem('Whisper 识别（更准、更慢）', 'whisper')
+        self.cmb_align_engine.setToolTip(
+            '决定点「生成逐字」时用哪种算法写进 LRC。\n'
+            '· 人声能量：轻量，几乎不占显存，速度快\n'
+            '· Whisper：整曲语音识别对齐，更贴人声，耗 CPU/可选 GPU\n'
+            '注意：只改这里不会自动重算；已有逐字的歌需再点一次「生成逐字」。'
+        )
+        self.cmb_align_engine.currentIndexChanged.connect(self._sync_lyrics_controls)
+        self.cmb_whisper_model = QComboBox()
+        for size, tip in (
+            ('tiny', '最快最粗'),
+            ('base', '较快'),
+            ('small', '平衡，推荐'),
+            ('medium', '更准更慢，更吃资源'),
+            ('large-v3', '最准最慢，很吃资源'),
+        ):
+            self.cmb_whisper_model.addItem('%s（%s）' % (size, tip), size)
+        self.cmb_whisper_model.setToolTip(
+            '仅 Whisper 引擎使用。模型越大越准也越慢；首次会下载到本机缓存。\n'
+            '一般选 small 即可；对齐不稳可试 medium。'
+        )
+        self.cmb_whisper_device = QComboBox()
+        self.cmb_whisper_device.addItem('CPU（稳定，不占显存，推荐）', 'cpu')
+        self.cmb_whisper_device.addItem('CUDA 显卡（更快，吃显存）', 'cuda')
+        self.cmb_whisper_device.addItem('自动（优先 CUDA，失败再 CPU）', 'auto')
+        self.cmb_whisper_device.setToolTip(
+            '仅 Whisper 引擎使用。\n'
+            '· CPU：稳定，不占显存；本机若 CUDA 报错请用此项\n'
+            '· CUDA：通常更快，但占显存，可能与 RVC 抢 GPU\n'
+            '· 自动：有显卡先试 CUDA，失败自动回退 CPU'
+        )
+        self.spin_lead_ms = QSpinBox()
+        self.spin_lead_ms.setRange(-2000, 2000)
+        self.spin_lead_ms.setSingleStep(20)
+        self.spin_lead_ms.setSuffix(' ms')
+        self.spin_lead_ms.setToolTip(
+            '字高亮相对播放进度的微调。\n'
+            '· 负值：高亮更晚（字比声快时用，如 -100）\n'
+            '· 正值：高亮更早（字比声慢时用）\n'
+            '保存后立即对当前歌词生效，无需重新生成。'
+        )
+        self.spin_offset_ms = QSpinBox()
+        self.spin_offset_ms.setRange(-10000, 10000)
+        self.spin_offset_ms.setSingleStep(50)
+        self.spin_offset_ms.setSuffix(' ms')
+        self.spin_offset_ms.setToolTip(
+            '整份歌词的整体时间偏移（所有行一起平移）。\n'
+            '整首歌歌词都偏早/偏晚时用；微调单字节奏优先改「高亮提前」。'
+        )
+        lyrics_form.addRow('对齐引擎', self.cmb_align_engine)
+        lyrics_form.addRow('Whisper 模型', self.cmb_whisper_model)
+        lyrics_form.addRow('Whisper 设备', self.cmb_whisper_device)
+        lyrics_form.addRow('高亮提前', self.spin_lead_ms)
+        lyrics_form.addRow('整体偏移', self.spin_offset_ms)
+        self.lbl_lyrics_hint = QLabel(
+            '进歌不会自动跑 Whisper；改引擎后请对当前歌曲再点「生成逐字」才会重写 LRC。'
+        )
+        self.lbl_lyrics_hint.setWordWrap(True)
+        self.lbl_lyrics_hint.setStyleSheet('color:#64748b;font-size:12px;')
+        lyrics_form.addRow(self.lbl_lyrics_hint)
+        root.addWidget(lyrics_box)
 
         audio_box = QGroupBox('音频设备')
         audio_layout = QVBoxLayout(audio_box)
@@ -146,6 +220,9 @@ class SettingsDialog(QDialog):
         rvc_row.addWidget(self.lbl_model, stretch=1)
         rvc_row.addWidget(self.btn_advanced)
         root.addLayout(rvc_row)
+        root.addStretch()
+        scroll.setWidget(body)
+        outer.addWidget(scroll, stretch=1)
 
         btn_row = QHBoxLayout()
         btn_row.addStretch()
@@ -155,7 +232,21 @@ class SettingsDialog(QDialog):
         btn_cancel.clicked.connect(self.reject)
         btn_row.addWidget(btn_cancel)
         btn_row.addWidget(btn_save)
-        root.addLayout(btn_row)
+        outer.addLayout(btn_row)
+
+    def _set_combo_data(self, combo: QComboBox, value, default=None):
+        target = value if value is not None else default
+        idx = combo.findData(target)
+        if idx < 0 and default is not None:
+            idx = combo.findData(default)
+        if idx < 0:
+            idx = 0
+        combo.setCurrentIndex(idx)
+
+    def _sync_lyrics_controls(self):
+        use_whisper = str(self.cmb_align_engine.currentData() or '') == 'whisper'
+        self.cmb_whisper_model.setEnabled(use_whisper)
+        self.cmb_whisper_device.setEnabled(use_whisper)
 
     def _load_values(self):
         layout = load_ui_layout().get('settings') or {}
@@ -167,6 +258,20 @@ class SettingsDialog(QDialog):
         pt_ui = int(self.config.get('audio.passthrough_ui', 100))
         self.slider_passthrough.setValue(max(50, min(200, pt_ui)))
         self.lbl_passthrough.setText('%s%%' % self.slider_passthrough.value())
+        engine = str(self.config.get('lyrics.align_engine', 'energy') or 'energy').strip().lower()
+        if engine.startswith('whisper') or engine in ('faster-whisper', 'asr'):
+            engine = 'whisper'
+        else:
+            engine = 'energy'
+        self._set_combo_data(self.cmb_align_engine, engine, 'energy')
+        self._set_combo_data(self.cmb_whisper_model, str(self.config.get('lyrics.whisper_model', 'small') or 'small'), 'small')
+        device = str(self.config.get('lyrics.whisper_device', 'cpu') or 'cpu').strip().lower()
+        if device not in ('cpu', 'cuda', 'auto'):
+            device = 'cpu'
+        self._set_combo_data(self.cmb_whisper_device, device, 'cpu')
+        self.spin_lead_ms.setValue(int(self.config.get('lyrics.lead_ms', -80) or 0))
+        self.spin_offset_ms.setValue(int(self.config.get('lyrics.offset_ms', 0) or 0))
+        self._sync_lyrics_controls()
         for key in SHORTCUT_KEYS:
             val = str((self.config.get('shortcuts', {}) or {}).get(key) or DEFAULT_SHORTCUTS.get(key) or '')
             self._key_edits[key].setKeySequence(val)
@@ -293,6 +398,13 @@ class SettingsDialog(QDialog):
             'update_url': self.edit_update_url.text().strip(),
             'log_dir': self.edit_log_dir.text().strip(),
             'sr_type': sr_type,
+            'lyrics': {
+                'align_engine': str(self.cmb_align_engine.currentData() or 'energy'),
+                'whisper_model': str(self.cmb_whisper_model.currentData() or 'small'),
+                'whisper_device': str(self.cmb_whisper_device.currentData() or 'cpu'),
+                'lead_ms': int(self.spin_lead_ms.value()),
+                'offset_ms': int(self.spin_offset_ms.value()),
+            },
             'audio': {
                 'hostapi': self._hostapi_filter(),
                 'wasapi_exclusive': self.chk_wasapi.isChecked(),

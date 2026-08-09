@@ -1818,6 +1818,18 @@ class ClientController:
             self.config_store.set('rvc.index_rate', float(realtime['index_rate']))
         if payload.get('osc_port') is not None:
             self.config_store.set('lyrics.osc_port', int(payload['osc_port']))
+        lyrics = payload.get('lyrics') or {}
+        for key in ('align_engine', 'whisper_model', 'whisper_device'):
+            if key in lyrics and lyrics[key] is not None:
+                self.config_store.set('lyrics.%s' % key, str(lyrics[key]).strip())
+        if 'lead_ms' in lyrics:
+            self.config_store.set('lyrics.lead_ms', int(lyrics['lead_ms']))
+        if 'offset_ms' in lyrics:
+            self.config_store.set('lyrics.offset_ms', int(lyrics['offset_ms']))
+        if lyrics:
+            off = int(self.config_store.get('lyrics.offset_ms', 0) or 0)
+            lead = int(self.config_store.get('lyrics.lead_ms', 0) or 0)
+            self.lyrics.matcher.set_offset_ms(off + lead)
         if payload.get('update_url') is not None:
             self.config_store.set('update.check_url', str(payload['update_url']).strip())
         if payload.get('log_dir'):

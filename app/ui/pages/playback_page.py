@@ -176,9 +176,8 @@ class PlaybackPage(QWidget):
         right_head.addWidget(QLabel('歌词进度'))
         self.btn_enhance_lrc = QPushButton('生成逐字')
         self.btn_enhance_lrc.setToolTip(
-            '按 lyrics.align_engine 生成逐字并写入 LRC。'
-            '进歌只会快速能量补齐或沿用文件缓存；Whisper 需点此按钮。'
-            'energy=轻量 / whisper=更准更慢'
+            '按系统设置里的「逐字歌词」参数生成并写入 LRC。'
+            '进歌只会快速补齐或沿用文件缓存；改引擎后需再点此按钮才会重算。'
         )
         self.btn_enhance_lrc.clicked.connect(lambda: self.bridge.emit_action('lyrics_enhance'))
         right_head.addStretch()
