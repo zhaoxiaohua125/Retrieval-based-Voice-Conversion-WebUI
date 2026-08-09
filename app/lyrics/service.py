@@ -31,6 +31,7 @@ class LyricsService:
         self._worker = None
         self._running = False
         self._last_index = -1
+        self._last_word = -1
         self._loaded_path = ''
         self._hook_registered = False
         self._tick_handler = None
@@ -47,18 +48,34 @@ class LyricsService:
     def _load_cfg(self):
         return self.config_store.get('lyrics', {}) or {}
 
-    def load_lrc(self, path: str | Path, offset_ms: int | None = None):
+    def load_lrc(self, path: str | Path, offset_ms: int | None = None, force: bool = False, vocal_path: str | Path | None = None):
         resolved = str(Path(path).resolve())
-        if resolved == self._loaded_path and self.document.lines:
+        if not force and resolved == self._loaded_path and self.document.lines:
             return self.document
         doc = load_lrc_file(path)
+        from app.lyrics.aligner import prepare_word_timing
+
+        # 文件已含字级时间（Whisper/Enhanced）则保留；否则快速补齐
+        if not doc.has_words:
+            prepare_word_timing(doc, vocal_path=vocal_path)
         self.document = doc
         self._loaded_path = resolved
         self.matcher.set_document(doc)
-        off = int(offset_ms if offset_ms is not None else self._load_cfg().get('offset_ms', 0))
-        self.matcher.set_offset_ms(off)
+        cfg = self._load_cfg()
+        off = int(offset_ms if offset_ms is not None else cfg.get('offset_ms', 0))
+        lead = int(cfg.get('lead_ms', 0))
+        self.matcher.set_offset_ms(off + lead)
         self._last_index = -1
-        self._publish(SignalType.STATUS, {'action': 'lyrics_loaded', 'count': len(doc.lines), 'title': doc.title})
+        self._last_word = -1
+        self._publish(
+            SignalType.STATUS,
+            {
+                'action': 'lyrics_loaded',
+                'count': len(doc.lines),
+                'title': doc.title,
+                'has_words': doc.has_words,
+            },
+        )
         return doc
 
     def clear(self):
@@ -66,11 +83,13 @@ class LyricsService:
         self.matcher.set_document(self.document)
         self._loaded_path = ''
         self._last_index = -1
+        self._last_word = -1
 
     def set_offset_ms(self, offset_ms: int):
-        self.matcher.set_offset_ms(int(offset_ms))
         self.config_store.set('lyrics.offset_ms', int(offset_ms))
         self.config_store.save()
+        lead = int(self._load_cfg().get('lead_ms', 0))
+        self.matcher.set_offset_ms(int(offset_ms) + lead)
 
     @property
     def running(self):
@@ -123,8 +142,9 @@ class LyricsService:
             self._clock.set_time(time_sec)
         try:
             hit = self.matcher.match(time_sec)
-            if force or hit.index != self._last_index:
+            if force or hit.index != self._last_index or hit.word_index != self._last_word:
                 self._last_index = hit.index
+                self._last_word = hit.word_index
                 payload = {'action': 'lyric_tick', **hit.to_dict()}
                 self._publish(SignalType.STATUS, payload)
                 if self._tick_handler:
@@ -160,8 +180,9 @@ class LyricsService:
             try:
                 t = self._clock.current_time()
                 hit = self.matcher.match(t)
-                if hit.index != self._last_index:
+                if hit.index != self._last_index or hit.word_index != self._last_word:
                     self._last_index = hit.index
+                    self._last_word = hit.word_index
                     payload = {'action': 'lyric_tick', **hit.to_dict()}
                     self._publish(SignalType.STATUS, payload)
                     if self._tick_handler:

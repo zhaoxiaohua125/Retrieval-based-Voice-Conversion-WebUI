@@ -83,7 +83,7 @@ class ClientController:
 
     def set_lyrics_window(self, window):
         self._lyrics_window = window
-        self.lyrics.set_tick_handler(lambda payload: window.set_line(payload.get('text', ''), highlight=True))
+        self.lyrics.set_tick_handler(lambda payload: window.set_lyric_tick(payload))
 
     @property
     def library(self):
@@ -168,6 +168,8 @@ class ClientController:
             'lyrics_start': lambda p: self.lyrics.start(source=(p or {}).get('clock_source')),
             'lyrics_stop': lambda p: self.lyrics.stop(),
             'lyrics_set_offset': lambda p: self.lyrics.set_offset_ms(int((p or {}).get('offset_ms', 0))),
+            'lyrics_enhance': self._enhance_lyrics,
+            'lyrics_rewrite': self._rewrite_lyrics,
             'check_update': self._check_update,
             'settings_save': self._save_settings,
             'audio_test_mic': self._test_mic,
@@ -665,7 +667,10 @@ class ClientController:
         lrc = song.get('lrc_path') or find_lrc_in_dir(song.get('dir') or Path(song.get('play_path', '')).parent, song.get('title', ''))
         if lrc and Path(lrc).is_file():
             prev_lrc = self.lyrics._loaded_path
-            self.lyrics.load_lrc(lrc)
+            from app.lyrics.aligner import find_vocal_for_song
+
+            vocal = find_vocal_for_song(song.get('dir') or Path(lrc).parent, song.get('title') or '', song)
+            self.lyrics.load_lrc(lrc, vocal_path=vocal, force=True)
             self.state.loaded_lyrics = True
             self.state.selected_song['lrc_path'] = lrc
             if switching or self.lyrics._loaded_path != prev_lrc:
@@ -673,7 +678,13 @@ class ClientController:
                 self._publish_status(
                     'lyrics_loaded',
                     lines=[ln.text for ln in doc.lines],
-                    log='已加载歌词：%s（%s 行）' % (doc.title or song.get('title', ''), len(doc.lines)),
+                    has_words=doc.has_words,
+                    log='已加载歌词：%s（%s 行%s）'
+                    % (
+                        doc.title or song.get('title', ''),
+                        len(doc.lines),
+                        '，人声能量逐字' if vocal and doc.has_words else ('，逐字' if doc.has_words else ''),
+                    ),
                 )
         else:
             self.lyrics.clear()
@@ -954,7 +965,7 @@ class ClientController:
                         self._player.position,
                         self.state.mode,
                     )
-            if self._playback_stop.wait(0.1) or self._tick_generation != gen:
+            if self._playback_stop.wait(0.03) or self._tick_generation != gen:
                 break
 
     def _play_mode(self) -> str:
@@ -1385,7 +1396,7 @@ class ClientController:
                     break
                 if pf.running or pf.position > 0:
                     pos = pf.position
-                    self.lyrics.tick_at(pos)
+                    self.lyrics.sync_at(pos, force=False)
                     self._publish_status(
                         'playback_tick',
                         position=pos,
@@ -1396,7 +1407,7 @@ class ClientController:
                 if not pf.running and pf.duration > 0 and pf.position >= max(0.0, pf.duration - 0.2):
                     natural_finish = True
                     break
-                if self._follow_stop.wait(0.25):
+                if self._follow_stop.wait(0.03):
                     break
         finally:
             continued = False
@@ -1508,7 +1519,7 @@ class ClientController:
         if not path:
             self._publish_error('歌词路径为空')
             return
-        self.lyrics.load_lrc(path, offset_ms=(payload or {}).get('offset_ms'))
+        self.lyrics.load_lrc(path, offset_ms=(payload or {}).get('offset_ms'), force=True)
         self.state.loaded_lyrics = True
         if self._lyrics_window:
             self._lyrics_window.show()
@@ -1517,7 +1528,105 @@ class ClientController:
         self._publish_status(
             'lyrics_loaded',
             lines=lines,
-            log='已加载歌词：%s（%s 行）' % (doc.title or Path(path).name, len(doc.lines)),
+            has_words=doc.has_words,
+            log='已加载歌词：%s（%s 行%s）'
+            % (doc.title or Path(path).name, len(doc.lines), '，逐字' if doc.has_words else ''),
+        )
+
+    def _enhance_lyrics(self, payload: dict = None):
+        payload = payload or {}
+        song = dict(self.state.selected_song or {})
+        lrc = song.get('lrc_path') or ''
+        if not lrc or not Path(lrc).is_file():
+            self._publish_error('当前歌曲没有可增强的 LRC')
+            return
+        if getattr(self, '_enhance_busy', False):
+            self._publish_status('lyrics_enhance_busy', log='逐字歌词生成中，请稍候…')
+            return
+        self._enhance_busy = True
+        # payload 显式指定优先；否则读 lyrics.align_engine（energy|whisper）
+        if 'use_whisper' in payload:
+            use_whisper = bool(payload.get('use_whisper'))
+        else:
+            engine = str(self.config_store.get('lyrics.align_engine', 'energy') or 'energy').lower()
+            use_whisper = engine in ('whisper', 'faster-whisper', 'asr')
+        model_size = str(payload.get('model_size') or self.config_store.get('lyrics.whisper_model', 'small') or 'small')
+        device_pref = str(payload.get('device') or self.config_store.get('lyrics.whisper_device', 'auto') or 'auto')
+
+        def _work():
+            try:
+                from app.lyrics.aligner import enhance_lrc_file, find_vocal_for_song, whisper_available
+
+                vocal = find_vocal_for_song(song.get('dir') or Path(lrc).parent, song.get('title') or '', song)
+                if use_whisper and not whisper_available():
+                    self._publish_status(
+                        'lyrics_enhance_progress',
+                        log='未安装 faster-whisper，回退人声能量对齐（可: pip install faster-whisper）',
+                    )
+                elif use_whisper:
+                    self._publish_status(
+                        'lyrics_enhance_progress',
+                        log='Whisper 对齐中（模型 %s，首次会下载）…' % model_size,
+                    )
+                else:
+                    self._publish_status('lyrics_enhance_progress', log='人声能量对齐中…')
+                out, mode = enhance_lrc_file(
+                    lrc,
+                    vocal_path=vocal,
+                    use_whisper=use_whisper,
+                    model_size=model_size,
+                    device_pref=device_pref,
+                )
+                self.state.selected_song['lrc_path'] = str(out.resolve())
+                self.lyrics.load_lrc(out, force=True, vocal_path=None)
+                self.state.loaded_lyrics = True
+                doc = self.lyrics.document
+                mode_label = {'whisper': 'Whisper', 'energy': '人声能量', 'even': '均分'}.get(mode, mode)
+                if use_whisper and mode != 'whisper':
+                    self._publish_status(
+                        'lyrics_enhance_progress',
+                        log='Whisper 未成功（模型/网络），已回退为 %s' % mode_label,
+                    )
+                self._publish_status(
+                    'lyrics_loaded',
+                    lines=[ln.text for ln in doc.lines],
+                    has_words=doc.has_words,
+                    log='已生成逐字歌词：%s（%s 行，%s）' % (out.name, len(doc.lines), mode_label),
+                )
+            except Exception as exc:
+                logger.error('lyrics enhance failed:\n%s', traceback.format_exc())
+                self._publish_error('生成逐字歌词失败: %s' % exc, exc)
+            finally:
+                self._enhance_busy = False
+
+        threading.Thread(target=_work, name='lyrics-enhance', daemon=True).start()
+
+    def _rewrite_lyrics(self, payload: dict = None):
+        payload = payload or {}
+        song = self.state.selected_song or {}
+        lrc = song.get('lrc_path') or self.lyrics._loaded_path
+        if not lrc or not Path(lrc).is_file():
+            self._publish_error('没有可保存的歌词文件')
+            return
+        idx = int(payload.get('line_index', -1))
+        text = str(payload.get('text', ''))
+        if idx < 0:
+            self._publish_error('请先选中要修改的歌词行')
+            return
+        from app.lyrics.rewrite import save_rewrite
+
+        try:
+            save_rewrite(self.lyrics.document, lrc, idx, text)
+            self.lyrics.load_lrc(lrc, force=True)
+        except Exception as exc:
+            self._publish_error('保存改词失败: %s' % exc, exc)
+            return
+        doc = self.lyrics.document
+        self._publish_status(
+            'lyrics_loaded',
+            lines=[ln.text for ln in doc.lines],
+            has_words=doc.has_words,
+            log='已保存改词：第 %s 行' % (idx + 1),
         )
 
     def _start_offline_cover(self, payload: dict):
@@ -1595,9 +1704,13 @@ class ClientController:
                     out_lrc = Path(output_dir) / ('%s.lrc' % stem)
                     try:
                         shutil.copy2(lrc_src, out_lrc)
+                        from app.lyrics.aligner import enhance_lrc_file, find_vocal_for_song
+
+                        vocal = find_vocal_for_song(output_dir, stem)
+                        enhance_lrc_file(out_lrc, vocal_path=vocal, use_whisper=False)
                         result_dict['lrc_path'] = str(out_lrc.resolve())
                     except Exception as exc:
-                        logger.warning('copy lrc failed: %s', exc)
+                        logger.warning('copy/enhance lrc failed: %s', exc)
                 self._publish_status(
                     'offline_finished',
                     log='离线做歌完成：%s' % (cover or output_dir),

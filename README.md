@@ -1410,3 +1410,121 @@ python webui.py --noautoopen
 - **关键决策**: 推荐全链路统一 48000；人声不足部分保持静音填充
 - **技术栈**: sounddevice duplex、NumPy 切片、VoiceMeeter WASAPI
 - **修改的文件列表**: app/pitchfix/service.py、README.md
+
+---
+
+## 会话总结 - 2026-08-09 (2)
+
+- **会话主要目的**: 按开发大纲分段任务 8 落地 Enhanced LRC / 逐字歌词
+- **完成的主要任务**:
+  1. 新增 enhanced_lrc / ligner / ewrite；扩展 LyricWord 与字级 matcher
+  2. 加载行级 LRC 时内存均分字时间轴；「生成逐字」写回 Enhanced LRC；离线做歌复制 LRC 后自动增强
+  3. 播放页与悬浮窗逐字高亮；右栏改词保存；验收脚本 scripts/test_task8_lyrics_enhanced.py
+- **关键决策**: 主路径为均分字轴（无需网上找 Enhanced LRC）；Whisper 为可选 use_whisper
+- **技术栈**: Enhanced LRC、PyQt6 RichText、faster-whisper（可选）
+- **修改的文件列表**: app/lyrics/*、app/ui/lyrics_window.py、app/ui/pages/playback_page.py、app/integration/controller.py、scripts/test_task8_lyrics_enhanced.py、开发大纲.md、README.md
+
+---
+
+## 会话总结 - 2026-08-09 (3)
+
+- **会话主要目的**: 修复逐字高亮相对歌曲进度滞后
+- **完成的主要任务**:
+  1. 字轴压缩到行前约 58%（避免句尾空白拖慢）
+  2. 加载时自动刷新旧「全行均分」字轴；播放/跟唱 tick 改为 50ms
+  3. 增加 lyrics.lead_ms 默认 150ms 提前量
+- **修改的文件列表**: app/lyrics/aligner.py、service.py、__init__.py、app/integration/controller.py、app/config_store.py、config/client.json、README.md
+
+---
+
+## 会话总结 - 2026-08-09 (4)
+
+- **会话主要目的**: 修正逐字高亮过快（抢在歌声前）
+- **完成的主要任务**: 字轴压缩比 0.58→0.78；默认 lead_ms 改为 0；自动重算过度压缩的旧字轴
+- **修改的文件列表**: app/lyrics/aligner.py、service.py、app/config_store.py、config/client.json、README.md
+
+---
+
+## 会话总结 - 2026-08-09 (5)
+
+- **会话主要目的**: 解决逐字高亮时准时不准（均分字轴不稳定）
+- **完成的主要任务**: 改用人声能量在行内分配字时间；选歌/生成逐字自动用 converted_vocal 等干声轨；无音频时回退均分
+- **关键决策**: 不以固定 sing_ratio/lead 硬调；对齐跟歌声能量走
+- **修改的文件列表**: app/lyrics/aligner.py、service.py、__init__.py、app/integration/controller.py、app/ui/pages/playback_page.py、scripts/test_task8_lyrics_enhanced.py、README.md
+
+---
+
+## 会话总结 - 2026-08-09 (6)
+
+- **会话主要目的**: 修复 AI 跟唱时逐字歌词偶发严重滞后
+- **完成的主要任务**:
+  1. pitchfix 播放头改为墙钟外推 + PortAudio 输出延迟补偿（不再卡在整块末尾）
+  2. 跟唱 block_ms 200→100；歌词 tick 30ms
+- **修改的文件列表**: app/pitchfix/service.py、app/integration/controller.py、config/client.json、README.md
+
+---
+
+## 会话总结 - 2026-08-09 (7)
+
+- **会话主要目的**: 修复 AI 跟唱歌词卡在某一字不走
+- **完成的主要任务**:
+  1. 播放头外推不再死顶在已写样本末尾（回调抖动时不再卡进度/歌词）
+  2. 过滤异常 output latency；有声区间内改时间均分 + 单字最长 1.25s
+- **修改的文件列表**: app/pitchfix/service.py、app/lyrics/aligner.py、README.md
+
+---
+
+## 会话总结 - 2026-08-09 (8)
+
+- **会话主要目的**: 澄清歌词问题不限 AI 跟唱；给 AI 唱歌 WavPlayer 同步平滑播放头
+- **完成的主要任务**: WavPlayer 墙钟外推 + latency 过滤；播放 tick 30ms；暂停/seek 重置时钟
+- **关键说明**: 跟唱音频是 pitchfix 双工，唱歌是 WavPlayer；歌词 matcher 共用，两边播放头都需平滑
+- **修改的文件列表**: app/playback/player.py、app/integration/controller.py、README.md
+
+---
+
+## 会话总结 - 2026-08-09 (9)
+
+- **会话主要目的**: 修复「空凝眸…」处逐字卡住（AI 唱歌/跟唱共用歌词）
+- **根因**: 句间 LRC 空白过大时字轴被拉长，单字停留数秒像卡死
+- **修复**: 按字数压缩演唱窗（约 0.4s/字）；唱完整句高亮收束；到达即切字
+- **修改的文件列表**: app/lyrics/aligner.py、matcher.py、types.py、scripts/test_task8_lyrics_enhanced.py、README.md
+
+---
+
+## 会话总结 - 2026-08-09 (10)
+
+- **会话主要目的**: 字高亮略快于歌声，放慢字轴
+- **完成的主要任务**: 每字时长 0.40→0.52s；默认 lead_ms=-80 略延后高亮
+- **修改的文件列表**: app/lyrics/aligner.py、app/config_store.py、config/client.json、scripts/test_task8_lyrics_enhanced.py、README.md
+
+---
+
+## 会话总结 - 2026-08-09 (11)
+
+- **会话主要目的**: 实现第 4 档 faster-whisper 字级歌词对齐
+- **完成的主要任务**:
+  1. lign_with_whisper：ASR 词片拆字 + SequenceMatcher 映射到 LRC 行文本并写 Enhanced LRC
+  2. 「生成逐字」默认 Whisper、后台线程、失败回退能量/均分；加载时保留文件内字轴
+  3. 安装 faster-whisper；requirements 增加依赖；配置 lyrics.whisper_model=small
+- **修改的文件列表**: app/lyrics/aligner.py、service.py、__init__.py、app/integration/controller.py、app/ui/pages/playback_page.py、app/config_store.py、config/client.json、requirments_*.txt、scripts/test_task8_lyrics_enhanced.py、开发大纲.md、README.md
+
+---
+
+## 会话总结 - 2026-08-09 (12)
+
+- **会话主要目的**: 排查 Whisper 与能量对齐效果差不多的原因并修复
+- **根因**: HuggingFace 模型下载失败 / CUDA cuBLAS 失败后静默回退能量，UI 仍显示 Whisper
+- **修复**:
+  1. 默认 HF_ENDPOINT=hf-mirror.com；模型已下载 small
+  2. CUDA 失败自动 CPU 重试；回报真实 mode（whisper/energy）
+  3. ASR 文本不准时改用 Whisper 时间轴加权铺字
+- **修改的文件列表**: app/lyrics/aligner.py、app/runtime_env.py、app/integration/controller.py、app/config_store.py、scripts/test_task8_lyrics_enhanced.py、README.md
+
+---
+
+## 会话总结 - 2026-08-09 (13)
+
+- **会话主要目的**: 增加歌词对齐引擎配置，默认人声能量，可选 Whisper
+- **完成的主要任务**: 新增 lyrics.align_engine（energy/whisper）；生成逐字读取该配置；按钮 tooltip 说明
+- **修改的文件列表**: config/client.json、app/config_store.py、app/integration/controller.py、app/ui/pages/playback_page.py、README.md

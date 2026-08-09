@@ -1,3 +1,5 @@
 # 客户端桌面 UI 依赖（在 rvc312 环境中额外安装）
 PyQt6>=6.6.0,<6.8
 python-osc>=1.8.0,<2
+
+faster-whisper>=1.0.0,<2

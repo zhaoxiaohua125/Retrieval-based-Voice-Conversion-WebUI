@@ -18,6 +18,8 @@ def _prepend_path_dir(path: Path) -> bool:
 
 def bootstrap_runtime(project_root=None) -> dict:
     """启动最早调用：把 tools/ffmpeg 加入 PATH，供 subprocess / ffmpeg-python 使用。"""
+    # 国内环境下载 Whisper 模型常用镜像（已设置则不覆盖）
+    os.environ.setdefault('HF_ENDPOINT', 'https://hf-mirror.com')
     root = Path(project_root or Path.cwd()).resolve()
     ffmpeg_dir = root / 'tools' / 'ffmpeg'
     ffmpeg_exe = ffmpeg_dir / 'ffmpeg.exe'

@@ -2,6 +2,7 @@
 
 import logging
 import threading
+import time
 
 import numpy as np
 import sounddevice as sd
@@ -25,6 +26,10 @@ class WavPlayer:
         self._on_finish = None
         self._duration = 0.0
         self._path = ''
+        self._clock_origin_frame = 0
+        self._clock_origin_mono = 0.0
+        self._out_latency = 0.05
+        self._clock_active = False
 
     @property
     def path(self):
@@ -36,8 +41,17 @@ class WavPlayer:
 
     @property
     def position(self):
+        """墙钟外推可听位置，与跟唱共用同一套歌词时钟思路。"""
         with self._lock:
-            return self._pos / self._sr if self._sr else 0.0
+            if not self._sr:
+                return 0.0
+            written = self._pos / self._sr
+            if not self._playing or self._paused or not self._clock_active:
+                return written
+            elapsed = time.monotonic() - self._clock_origin_mono
+            est = self._clock_origin_frame / self._sr + elapsed - self._out_latency
+            hi = min(self._duration, written + 0.4)
+            return max(0.0, min(est, hi))
 
     @property
     def is_playing(self):
@@ -67,6 +81,12 @@ class WavPlayer:
             return self._target_sr
         return int(file_sr)
 
+    def _reset_clock_locked(self, frame: int | None = None, active: bool = False):
+        fr = self._pos if frame is None else int(frame)
+        self._clock_origin_frame = fr
+        self._clock_origin_mono = time.monotonic()
+        self._clock_active = bool(active)
+
     @staticmethod
     def _close_stream(stream):
         if stream is None:
@@ -95,6 +115,7 @@ class WavPlayer:
         out_sr = self._playback_sr(sr)
         if out_sr != sr:
             import librosa
+
             data = librosa.resample(data.T, orig_sr=sr, target_sr=out_sr).T
             sr = out_sr
         with self._lock:
@@ -103,6 +124,7 @@ class WavPlayer:
             self._pos = 0
             self._duration = len(data) / sr if sr else 0.0
             self._path = path
+            self._reset_clock_locked(0, active=False)
         return self._duration
 
     def play(self, path: str | None = None, on_finish=None):
@@ -118,12 +140,14 @@ class WavPlayer:
             self._on_finish = on_finish
             self._paused = False
             self._playing = True
+            self._reset_clock_locked(self._pos, active=False)
         try:
             gen = self._start_stream()
         except Exception:
             with self._lock:
                 self._playing = False
                 self._on_finish = None
+                self._clock_active = False
             raise
         logger.info('wav play started gen=%s dev=%s pos=%.2fs dur=%.2fs', gen, self._output_device, self.position, self.duration)
         return True
@@ -137,21 +161,35 @@ class WavPlayer:
             sr = self._sr
             out_dev = self._output_device
 
-            def callback(outdata, frames, _time, status):
-                del _time, status
+            def callback(outdata, frames, time_info, status):
+                del status
+                lat = None
+                try:
+                    if time_info is not None:
+                        lat = float(time_info.outputBufferDacTime) - float(time_info.currentTime)
+                except Exception:
+                    lat = None
                 with self._lock:
                     if self._stream_gen != gen or self._paused or not self._playing or self._data is None:
                         outdata.fill(0)
                         return
-                    end = self._pos + frames
-                    chunk = self._data[self._pos:end]
+                    start = self._pos
+                    end = start + frames
+                    chunk = self._data[start:end]
                     if len(chunk) < frames:
                         outdata[: len(chunk)] = chunk
                         outdata[len(chunk) :] = 0
+                        self._pos = start + len(chunk)
+                        self._reset_clock_locked(self._pos, active=False)
                         self._playing = False
                         raise sd.CallbackStop()
                     outdata[:] = chunk
                     self._pos = end
+                    self._clock_origin_frame = start
+                    self._clock_origin_mono = time.monotonic()
+                    if lat is not None and lat == lat and 0.005 <= float(lat) <= 0.22:
+                        self._out_latency = 0.65 * self._out_latency + 0.35 * float(lat)
+                    self._clock_active = True
 
             def finished_callback():
                 self._on_stream_finished(gen)
@@ -161,6 +199,7 @@ class WavPlayer:
                 channels=channels,
                 callback=callback,
                 finished_callback=finished_callback,
+                blocksize=0,
             )
             if out_dev is not None:
                 kwargs['device'] = out_dev
@@ -177,6 +216,7 @@ class WavPlayer:
                 logger.info('ignore stale stream finished gen=%s current=%s', gen, self._stream_gen)
                 return
             self._playing = False
+            self._clock_active = False
             self._stream = None
             cb = self._on_finish
             self._on_finish = None
@@ -189,17 +229,23 @@ class WavPlayer:
     def pause(self):
         with self._lock:
             self._paused = True
+            self._clock_active = False
 
     def resume(self):
         with self._lock:
             if self._playing:
                 self._paused = False
+                self._reset_clock_locked(self._pos, active=True)
 
     def toggle_pause(self):
         with self._lock:
             if not self._playing:
                 return False
             self._paused = not self._paused
+            if self._paused:
+                self._clock_active = False
+            else:
+                self._reset_clock_locked(self._pos, active=True)
             return not self._paused
 
     def seek_ratio(self, ratio: float):
@@ -209,6 +255,7 @@ class WavPlayer:
             ratio = max(0.0, min(1.0, float(ratio)))
             self._pos = int(ratio * self._duration * self._sr)
             self._pos = min(self._pos, max(0, len(self._data) - 1))
+            self._reset_clock_locked(self._pos, active=self._playing and not self._paused)
 
     def stop(self):
         with self._lock:
@@ -216,6 +263,7 @@ class WavPlayer:
             self._playing = False
             self._paused = False
             self._on_finish = None
+            self._clock_active = False
             stream = self._take_stream_locked()
         self._close_stream(stream)
 
@@ -223,3 +271,4 @@ class WavPlayer:
         self.stop()
         with self._lock:
             self._pos = 0
+            self._reset_clock_locked(0, active=False)

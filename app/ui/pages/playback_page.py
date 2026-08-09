@@ -85,6 +85,7 @@ class PlaybackPage(QWidget):
         self.lyric_main = QLabel('暂无歌词')
         self.lyric_main.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lyric_main.setWordWrap(True)
+        self.lyric_main.setTextFormat(Qt.TextFormat.RichText)
         self.lyric_main.setStyleSheet('font-size:32px;font-weight:700;color:#2563eb;padding:8px 0;')
         self.lyric_next = QLabel('')
         self.lyric_next.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -171,14 +172,32 @@ class PlaybackPage(QWidget):
 
         right = QWidget()
         right_layout = QVBoxLayout(right)
-        right_layout.addWidget(QLabel('歌词进度'))
+        right_head = QHBoxLayout()
+        right_head.addWidget(QLabel('歌词进度'))
+        self.btn_enhance_lrc = QPushButton('生成逐字')
+        self.btn_enhance_lrc.setToolTip(
+            '生成 Enhanced LRC 逐字时间轴。引擎见 config/client.json → lyrics.align_engine：'
+            'energy（默认，轻量）/ whisper（faster-whisper，更准更吃机器）'
+        )
+        self.btn_enhance_lrc.clicked.connect(lambda: self.bridge.emit_action('lyrics_enhance'))
+        right_head.addStretch()
+        right_head.addWidget(self.btn_enhance_lrc)
+        right_layout.addLayout(right_head)
         self.lyrics_list = QListWidget()
         self.lyrics_list.setStyleSheet('font-size:13px;color:#64748b;')
+        self.lyrics_list.currentRowChanged.connect(self._on_lyric_row)
         right_layout.addWidget(self.lyrics_list)
+        self.lyric_edit = QLineEdit()
+        self.lyric_edit.setPlaceholderText('改词：选中一行后编辑')
+        right_layout.addWidget(self.lyric_edit)
+        self.btn_save_lyric = QPushButton('保存改词')
+        self.btn_save_lyric.clicked.connect(self._on_save_rewrite)
+        right_layout.addWidget(self.btn_save_lyric)
         splitter.addWidget(right)
         splitter.setStretchFactor(1, 1)
-        splitter.setSizes([220, 760, 180])
+        splitter.setSizes([220, 760, 220])
         self._lyric_lines = []
+        self._lyric_row = -1
 
     def apply_library(self, songs: list):
         keep = self._selected
@@ -323,7 +342,10 @@ class PlaybackPage(QWidget):
     def set_lyric_tick(self, payload: dict):
         text = (payload or {}).get('text', '')
         index = int((payload or {}).get('index', -1))
-        if text:
+        html = (payload or {}).get('html_light') or ''
+        if html and (payload or {}).get('has_words'):
+            self.lyric_main.setText(html)
+        elif text:
             self.lyric_main.setText(text)
         if index < 0 or not self._lyric_lines:
             return
@@ -336,19 +358,37 @@ class PlaybackPage(QWidget):
         if item:
             self.lyrics_list.scrollToItem(item)
 
+    def _on_lyric_row(self, row: int):
+        self._lyric_row = row
+        if 0 <= row < len(self._lyric_lines):
+            self.lyric_edit.setText(self._lyric_lines[row])
+
+    def _on_save_rewrite(self):
+        if self._lyric_row < 0:
+            return
+        self.bridge.emit_action(
+            'lyrics_rewrite',
+            line_index=self._lyric_row,
+            text=self.lyric_edit.text(),
+        )
+
     def set_lyrics_lines(self, lines: list):
         self._lyric_lines = list(lines or [])
         self.lyrics_list.clear()
         for i, line in enumerate(self._lyric_lines, 1):
             self.lyrics_list.addItem('%02d %s' % (i, line))
+        self._lyric_row = 0 if self._lyric_lines else -1
         if self._lyric_lines:
             self.lyric_main.setText(self._lyric_lines[0])
             self.lyric_prev.setText('')
             self.lyric_next.setText(self._lyric_lines[1] if len(self._lyric_lines) > 1 else '')
+            self.lyric_edit.setText(self._lyric_lines[0])
+            self.lyrics_list.setCurrentRow(0)
         else:
             self.lyric_main.setText('暂无歌词')
             self.lyric_prev.setText('')
             self.lyric_next.setText('')
+            self.lyric_edit.clear()
 
     def set_ai_follow_busy(self, busy: bool):
         self.btn_ai_follow.setEnabled(not busy)

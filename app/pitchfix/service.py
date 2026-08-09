@@ -44,6 +44,10 @@ class PitchFollowService:
         self._cfg = {}
         self._cache_key = ''
         self._vad_above = 0
+        self._clock_origin_frame = 0
+        self._clock_origin_mono = 0.0
+        self._out_latency = 0.05
+        self._clock_active = False
 
     def _publish(self, action, **payload):
         self.scheduler.publish(BusMessage(SignalType.STATUS, ModuleId.RVC, {'action': action, **payload}))
@@ -53,7 +57,7 @@ class PitchFollowService:
         audio = self.config_store.get('audio', {}) or {}
         return {
             'sr': int(audio.get('sample_rate', 48000)),
-            'block_ms': int(pf.get('block_ms', audio.get('block_ms', 200))),
+            'block_ms': int(pf.get('block_ms', audio.get('block_ms', 100))),
             'inst_gain': float(pf.get('inst_gain', 0.77)),
             'mic_gain': float(pf.get('mic_gain', 0.77)),
             'ref_vocal_gain': float(pf.get('ref_vocal_gain', 0.0)),
@@ -76,8 +80,17 @@ class PitchFollowService:
 
     @property
     def position(self):
+        """墙钟外推当前可听位置；允许略超过已写样本，避免回调抖动时歌词/进度卡死。"""
         with self._pos_lock:
-            return self._pos / self._sr if self._sr else 0.0
+            if not self._sr:
+                return 0.0
+            written = self._pos / self._sr
+            if not self._running or not self._clock_active:
+                return written
+            elapsed = time.monotonic() - self._clock_origin_mono
+            est = self._clock_origin_frame / self._sr + elapsed - self._out_latency
+            hi = min(self._duration, written + 0.4)
+            return max(0.0, min(est, hi))
 
     @property
     def duration(self):
@@ -93,6 +106,9 @@ class PitchFollowService:
                 return self
             sec = max(0.0, min(float(seconds), self._duration))
             self._pos = int(sec * self._sr)
+            self._clock_origin_frame = self._pos
+            self._clock_origin_mono = time.monotonic()
+            self._clock_active = bool(self._running)
         return self
 
     def _load_wav_mono(self, path, sr):
@@ -156,7 +172,12 @@ class PitchFollowService:
         self._pos = 0
         if seek_sec > 0:
             self.seek(seek_sec)
-        block = max(1, int(sr * max(100, min(500, self._cfg['block_ms'])) / 1000))
+        else:
+            with self._pos_lock:
+                self._clock_origin_frame = 0
+                self._clock_origin_mono = time.monotonic()
+                self._clock_active = False
+        block = max(1, int(sr * max(50, min(500, self._cfg['block_ms'])) / 1000))
         cap = block * 8
         self._in_ring = RingBuffer(cap, 1)
         in_dev = self._cfg['input_device']
@@ -184,13 +205,22 @@ class PitchFollowService:
         logger.info('ai follow vad started title=%s duration=%.1fs pos=%.2fs', self._title, self._duration, self.position)
         return self
 
-    def _playback_chunks(self, frames: int):
+    def _playback_chunks(self, frames: int, out_latency: float | None = None):
+        now = time.monotonic()
         with self._pos_lock:
             start = self._pos
             end = min(start + frames, len(self._inst))
             got = max(0, end - start)
             self._pos = end
             finished = end >= len(self._inst)
+            self._clock_origin_frame = start
+            self._clock_origin_mono = now
+            if out_latency is not None and out_latency == out_latency:
+                lat = float(out_latency)
+                # WASAPI/Voicemeeter 偶发离谱 latency，会把播放头按死在块尾
+                if 0.005 <= lat <= 0.22:
+                    self._out_latency = 0.65 * self._out_latency + 0.35 * lat
+            self._clock_active = True
         inst = np.zeros((frames, 1), dtype=np.float32)
         ref = np.zeros((frames, 1), dtype=np.float32)
         if got > 0:
@@ -203,13 +233,18 @@ class PitchFollowService:
         return inst, ref, finished
 
     def _callback(self, indata, outdata, frames, time_info, status):
-        del time_info
         if status:
             logger.debug('pitchfix stream status: %s', status)
+        lat = None
+        try:
+            if time_info is not None:
+                lat = float(time_info.outputBufferDacTime) - float(time_info.currentTime)
+        except Exception:
+            lat = None
         try:
             mic = np.asarray(indata, dtype=np.float32).reshape(-1, 1)
             self._in_ring.write(mic)
-            inst, ref, finished = self._playback_chunks(frames)
+            inst, ref, finished = self._playback_chunks(frames, out_latency=lat)
             with self._gate_lock:
                 gate = self._voice_gate
             cfg = self._cfg
@@ -274,6 +309,8 @@ class PitchFollowService:
 
     def stop(self, keep_cache: bool = False, fast: bool = False):
         self._running = False
+        with self._pos_lock:
+            self._clock_active = False
         with self._gate_lock:
             self._voice_gate = 0.0
         if self._stream is not None:
