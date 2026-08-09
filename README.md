@@ -1528,3 +1528,16 @@ python webui.py --noautoopen
 - **ä¼šè¯ä¸»è¦ç›®çš„**: å¢åŠ æ­Œè¯å¯¹é½å¼•æ“é…ç½®ï¼Œé»˜è®¤äººå£°èƒ½é‡ï¼Œå¯é€‰ Whisper
 - **å®Œæˆçš„ä¸»è¦ä»»åŠ¡**: æ–°å¢ lyrics.align_engineï¼ˆenergy/whisperï¼‰ï¼›ç”Ÿæˆé€å­—è¯»å–è¯¥é…ç½®ï¼›æŒ‰é’® tooltip è¯´æ˜
 - **ä¿®æ”¹çš„æ–‡ä»¶åˆ—è¡¨**: config/client.jsonã€app/config_store.pyã€app/integration/controller.pyã€app/ui/pages/playback_page.pyã€README.md
+
+---
+
+## »á»°×Ü½á - 2026-08-09 (14)
+
+- **»á»°Ö÷ÒªÄ¿µÄ**: ÅÅ²é small Whisper Óë energy Ğ§¹ûÏàÍ¬µÄÔ­Òò²¢ĞŞ¸´
+- **Íê³ÉµÄÖ÷ÒªÈÎÎñ**:
+  1. ·¢ÏÖ config ÎóĞ´ align_engine=whispera£¬Î´ÃüÖĞ Whisper Êµ¼Ê×ß energy£»¼æÈİ whisper* Ç°×º
+  2. ĞŞ¸´¾ä¼ä´ó¿Õ°×Ê± Whisper ´°¿ÚÍÌ½øºóĞøÈËÉùµ¼ÖÂÄ©×ÖÍÏµ½¼¸Ê®Ãë£»Ó²½Ø¶Ï + ¾²Òô¼äÏ¶ÇĞ¾ä + µ¥×ÖÊ±³¤ÉÏÏŞ
+  3. client.json ÉèÎª align_engine=whisper ±ãÓÚ¸´²â
+- **¹Ø¼ü¾ö²ß**: ´°¿ÚÉÏÏŞÔ¼ max(6s, ×ÖÊı*0.85)£¬¾²Òô>0.75s ÇĞ¾ä£»×ÖÊ±³¤·â¶¥ 1.8s
+- **¼¼ÊõÕ»**: Python¡¢faster-whisper¡¢Enhanced LRC
+- **ĞŞ¸ÄµÄÎÄ¼şÁĞ±í**: app/lyrics/aligner.py¡¢app/integration/controller.py¡¢config/client.json¡¢README.md

@@ -63,7 +63,7 @@
     ],
     "offset_ms": 0,
     "lead_ms": -100,
-    "align_engine": "whispera",
+    "align_engine": "whisper",
     "whisper_model": "small",
     "whisper_device": "auto",
     "mtc_port": "",

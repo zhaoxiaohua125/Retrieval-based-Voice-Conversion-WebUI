@@ -1548,8 +1548,9 @@ class ClientController:
         if 'use_whisper' in payload:
             use_whisper = bool(payload.get('use_whisper'))
         else:
-            engine = str(self.config_store.get('lyrics.align_engine', 'energy') or 'energy').lower()
-            use_whisper = engine in ('whisper', 'faster-whisper', 'asr')
+            engine = str(self.config_store.get('lyrics.align_engine', 'energy') or 'energy').strip().lower()
+            # 兼容误拼 whispera / whisper_asr
+            use_whisper = engine.startswith('whisper') or engine in ('faster-whisper', 'asr')
         model_size = str(payload.get('model_size') or self.config_store.get('lyrics.whisper_model', 'small') or 'small')
         device_pref = str(payload.get('device') or self.config_store.get('lyrics.whisper_device', 'auto') or 'auto')
 

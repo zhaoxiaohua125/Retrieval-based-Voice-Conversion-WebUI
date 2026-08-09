@@ -228,6 +228,8 @@ def _words_from_weighted_timeline(tokens: list[str], timed_units: list[tuple[flo
             words.append(LyricWord(t, t + 0.01, tok, i))
             continue
         s, e = edges[ci], edges[ci + 1]
+        if e - s > 1.8:
+            e = s + 1.8
         words.append(LyricWord(s, max(e, s + 0.03), tok, i))
         ci += 1
     return words
@@ -368,14 +370,28 @@ def _fill_none_times(starts: list, ends: list, t0: float, t1: float):
             ends[i] = min(ends[i], max(starts[i] + 0.03, starts[i + 1]))
 
 
-def _line_whisper_window(line: LyricLine, timed_units: list[tuple[float, float, str]]) -> list[tuple[float, float, str]]:
-    """取中点落在本句时间窗内的 Whisper 片（避免句间空白吞进下一句）。"""
-    lo, hi = line.start_sec - 0.2, line.end_sec
-    window = [u for u in timed_units if lo <= (u[0] + u[1]) * 0.5 < hi]
-    if window:
-        return window
-    lo2, hi2 = line.start_sec - 0.5, min(line.end_sec + 0.5, line.start_sec + 12.0)
-    window = [u for u in timed_units if lo2 <= (u[0] + u[1]) * 0.5 < hi2]
+def _line_whisper_window(
+    line: LyricLine,
+    timed_units: list[tuple[float, float, str]],
+    n_content: int,
+) -> list[tuple[float, float, str]]:
+    """取本句附近的 Whisper 片；硬截断句间大空白，并按静音间隙切开乐句。"""
+    # 绝不能用「下一句之前」整段当窗口，否则句间伴奏空白会吞进后面所有人声
+    hard_hi = min(line.end_sec, line.start_sec + max(6.0, n_content * 0.85))
+    lo = line.start_sec - 0.2
+    candidates = [u for u in timed_units if lo <= (u[0] + u[1]) * 0.5 < hard_hi]
+    if not candidates:
+        lo2 = line.start_sec - 0.4
+        hi2 = min(line.end_sec, line.start_sec + max(8.0, n_content * 1.0))
+        candidates = [u for u in timed_units if lo2 <= (u[0] + u[1]) * 0.5 < hi2]
+    if not candidates:
+        return []
+    # 从句首起，遇到 >0.75s 静音则视为本句唱完
+    window = [candidates[0]]
+    for u in candidates[1:]:
+        if u[0] - window[-1][1] > 0.75:
+            break
+        window.append(u)
     return window
 
 
@@ -386,14 +402,14 @@ def _align_line_with_whisper(line: LyricLine, timed_units: list[tuple[float, flo
     lyric_units = [tok for tok in tokens if not tok.isspace()]
     if not lyric_units:
         return _even_line_words(line, tokens, 0.78)
-    window = _line_whisper_window(line, timed_units)
+    window = _line_whisper_window(line, timed_units, len(lyric_units))
     if not window:
         return _even_line_words(line, tokens, 0.78)
     a = [_norm_unit(u) for u in lyric_units]
     b = [_norm_unit(u[2]) for u in window]
     sm = SequenceMatcher(None, a, b, autojunk=False)
     ratio = sm.ratio()
-    # 唱歌 ASR 常错字：文本匹配差时仍用 Whisper 时间轴（这才是相对能量对齐的增益）
+    # 唱歌 ASR 常错字：文本匹配差时仍用 Whisper 时间轴（相对能量对齐的增益）
     if ratio < 0.45:
         return _words_from_weighted_timeline(tokens, window)
     starts: list = [None] * len(lyric_units)
@@ -416,10 +432,11 @@ def _align_line_with_whisper(line: LyricLine, timed_units: list[tuple[float, flo
                     ends[i] = ws + (k + 1) * step
     t0, t1 = float(window[0][0]), float(window[-1][1])
     _fill_none_times(starts, ends, t0, t1)
-    # 若有效命中过少，改走时间轴加权
     hit = sum(1 for s in starts if s is not None)
     if hit < max(2, len(lyric_units) // 3):
         return _words_from_weighted_timeline(tokens, window)
+    # 禁止单字拖到下一句（句间大空白）
+    max_end = t1 + 0.15
     words: list[LyricWord] = []
     ci = 0
     for i, tok in enumerate(tokens):
@@ -428,6 +445,9 @@ def _align_line_with_whisper(line: LyricLine, timed_units: list[tuple[float, flo
             words.append(LyricWord(float(t), float(t) + 0.01, tok, i))
             continue
         s, e = float(starts[ci]), float(ends[ci])
+        e = min(e, max_end)
+        if e - s > 1.8:
+            e = s + 1.8
         words.append(LyricWord(s, max(e, s + 0.03), tok, i))
         ci += 1
     return words
