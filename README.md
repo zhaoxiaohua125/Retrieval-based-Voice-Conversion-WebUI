@@ -1398,3 +1398,15 @@ python webui.py --noautoopen
 - **修改的文件列表**: app/pitchfix/service.py、app/ui/ai_follow_mix_panel.py、README.md
 
 ---
+
+---
+
+## 会话总结 - 2026-08-09
+
+- **会话主要目的**: 排查 AI 跟唱启动失败，并修复播完时 callback 崩溃
+- **完成的主要任务**:
+  1. 定位 PortAudio -9993/-9997 为本地设备组合与采样率不一致（VoiceMeeter/Windows 共享格式）
+  2. 修复 _playback_chunks：人声轨短于伴奏时按 ef_got 切片，避免结尾 ValueError
+- **关键决策**: 推荐全链路统一 48000；人声不足部分保持静音填充
+- **技术栈**: sounddevice duplex、NumPy 切片、VoiceMeeter WASAPI
+- **修改的文件列表**: app/pitchfix/service.py、README.md

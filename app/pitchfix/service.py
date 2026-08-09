@@ -196,7 +196,10 @@ class PitchFollowService:
         if got > 0:
             inst[:got, 0] = self._inst[start:end, 0]
             if self._ref_vocal is not None and start < len(self._ref_vocal):
-                ref[:got, 0] = self._ref_vocal[start:min(end, len(self._ref_vocal)), 0]
+                ref_end = min(end, len(self._ref_vocal))
+                ref_got = max(0, ref_end - start)
+                if ref_got > 0:
+                    ref[:ref_got, 0] = self._ref_vocal[start:ref_end, 0]
         return inst, ref, finished
 
     def _callback(self, indata, outdata, frames, time_info, status):
