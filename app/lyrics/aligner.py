@@ -17,6 +17,8 @@ logger = logging.getLogger('rvc_client.lyrics.aligner')
 _CJK_RE = re.compile(r'[\u4e00-\u9fff\u3400-\u4dbf\u3040-\u30ff\uac00-\ud7af]')
 _WHISPER_MODEL = None
 _WHISPER_KEY = None
+_WHISPER_CUDA_OK = None  # None未知 / True可用 / False已证实失败（本进程不再尝试）
+_WHISPER_UNITS_CACHE: dict = {}
 
 
 def tokenize_lyric_text(text: str) -> list[str]:
@@ -47,17 +49,45 @@ def _content_count(tokens: list[str]) -> int:
 
 
 def _clamp_sing_window(t0: float, t1: float, n_content: int, line_end: float) -> tuple[float, float]:
-    """把字轴压到合理演唱时长，避免句间大空白把逐字拉成「卡住」。"""
+    """压缩句间大空白；保留慢歌可唱速度（约 0.8s/字），避免字跳过快。"""
     t0 = float(t0)
     t1 = max(t0 + 0.05, float(t1))
     n = max(1, int(n_content))
-    ideal = max(0.7, min(10.0, n * 0.52))
+    ideal = max(1.2, min(14.0, n * 0.82))
     span = t1 - t0
     if span > ideal:
         t1 = t0 + ideal
     if t1 > line_end:
         t1 = max(t0 + 0.05, line_end)
     return t0, t1
+
+
+def normalize_line_words(line: LyricLine, min_char_sec: float = 0.28) -> None:
+    """修复过密字轴与末字吞进句间空白（Enhanced LRC 只存字起点时尤甚）。"""
+    content = [w for w in line.words if not (w.text or '').isspace()]
+    if not content:
+        return
+    n = len(content)
+    gaps = [content[i + 1].start_sec - content[i].start_sec for i in range(n - 1)]
+    gaps = [g for g in gaps if g > 1e-6]
+    med = sorted(gaps)[len(gaps) // 2] if gaps else float(content[0].end_sec - content[0].start_sec)
+    t0 = float(content[0].start_sec)
+    line_end = float(line.end_sec)
+    # 仅修复病态过密（如 0.1s/字）；正常 0.4~0.5s 间隔不动
+    if n >= 2 and med < min_char_sec:
+        budget = max(min_char_sec * n, min(n * 0.82, max(0.05, line_end - t0)))
+        step = budget / n
+        for i, w in enumerate(content):
+            w.start_sec = t0 + i * step
+            w.end_sec = t0 + (i + 1) * step
+        med = step
+    else:
+        for i in range(n - 1):
+            content[i].end_sec = max(content[i].start_sec + 0.03, content[i + 1].start_sec)
+    last_dur = max(0.25, min(2.0, med if med > 0 else 0.8))
+    content[-1].end_sec = min(line_end, content[-1].start_sec + last_dur)
+    if content[-1].end_sec <= content[-1].start_sec:
+        content[-1].end_sec = min(line_end, content[-1].start_sec + 0.25)
 
 
 def _words_from_window(tokens: list[str], t0: float, t1: float, clamp: bool = True) -> list[LyricWord]:
@@ -94,7 +124,7 @@ def _even_line_words(line: LyricLine, tokens: list[str], sing_ratio: float) -> l
     t0 = line.start_sec
     t1 = line.start_sec + max(0.05, line.end_sec - line.start_sec)
     t0, t1 = _clamp_sing_window(t0, t1, n, line.end_sec)
-    return _words_from_window(tokens, t0, t1)
+    return _finalize_words(line, _words_from_window(tokens, t0, t1))
 
 
 def fill_even_words(doc: LyricDocument, sing_ratio: float = 0.78) -> LyricDocument:
@@ -126,8 +156,11 @@ def _line_energy_words(line: LyricLine, mono: np.ndarray, sr: int, hop: int, sin
     tokens = tokenize_lyric_text(line.text)
     if not tokens:
         return []
+    # 句间大空白时只取行首一段，避免把后面副歌能量算进来
+    nc = _content_count(tokens)
+    max_scan = min(float(line.end_sec), float(line.start_sec) + max(8.0, nc * 1.2))
     i0 = max(0, int(line.start_sec * sr))
-    i1 = min(len(mono), int(line.end_sec * sr))
+    i1 = min(len(mono), int(max_scan * sr))
     seg = mono[i0:i1]
     if seg.size < hop * 2:
         return _even_line_words(line, tokens, sing_ratio)
@@ -143,16 +176,25 @@ def _line_energy_words(line: LyricLine, mono: np.ndarray, sr: int, hop: int, sin
     active = np.flatnonzero(rms >= thr)
     if active.size == 0:
         return _even_line_words(line, tokens, sing_ratio)
+    # 取第一段连续有声（中间长静音不跨段）
+    gap_max = max(3, int(0.45 * sr / hop))
     a0 = int(active[0])
-    a1 = int(active[-1]) + 1
+    a1 = a0
+    for x in active[1:]:
+        if int(x) - a1 > gap_max:
+            break
+        a1 = int(x)
+    a1 = a1 + 1
     pad = max(0, min(2, (a1 - a0) // 10))
     a0 = min(a0 + pad, a1 - 1)
     a1 = max(a1 - pad, a0 + 1)
     t0 = line.start_sec + a0 * hop / sr
     t1 = line.start_sec + a1 * hop / sr
-    nc = _content_count(tokens)
     t0, t1 = _clamp_sing_window(t0, t1, nc, line.end_sec)
-    return _words_from_window(tokens, t0, t1)
+    words = _words_from_window(tokens, t0, t1)
+    tmp = LyricLine(line.start_sec, line.end_sec, line.text, line.index, words)
+    normalize_line_words(tmp)
+    return tmp.words
 
 
 def align_words_by_energy(doc: LyricDocument, audio_path: str | Path, hop_ms: float = 20.0, sing_ratio: float = 0.78) -> LyricDocument:
@@ -172,15 +214,52 @@ def prepare_word_timing(
     vocal_path: str | Path | None = None,
     sing_ratio: float = 0.78,
 ) -> LyricDocument:
-    """优先人声能量对齐，否则压缩均分。"""
+    """优先人声能量对齐，否则压缩均分。进歌快速路径，不跑 Whisper。"""
     if vocal_path and Path(vocal_path).is_file():
         try:
-            return align_words_by_energy(doc, vocal_path, sing_ratio=sing_ratio)
+            align_words_by_energy(doc, vocal_path, sing_ratio=sing_ratio)
+            doc.align_mode = 'energy'
+            return doc
         except Exception as exc:
             logger.warning('energy align failed, fallback even: %s', exc)
     for ln in doc.lines:
         ln.words = []
-    return fill_even_words(doc, sing_ratio=sing_ratio)
+    fill_even_words(doc, sing_ratio=sing_ratio)
+    doc.align_mode = 'even'
+    return doc
+
+
+def word_timing_label(
+    align_mode: str = '',
+    has_words: bool = False,
+    from_file: bool = False,
+    config_engine: str = '',
+) -> str:
+    """状态栏逐字来源文案（显示文件实际算法，不是当前 config 意向）。"""
+    mode = (align_mode or '').strip().lower()
+    cfg = (config_engine or '').strip().lower()
+    cfg_whisper = cfg.startswith('whisper') or cfg in ('faster-whisper', 'asr')
+    if mode.startswith('whisper'):
+        base = '，文件内 Whisper 逐字' if from_file else '，Whisper 逐字'
+    elif mode == 'energy':
+        base = '，人声能量逐字' + ('（进歌快速补齐）' if not from_file else '（文件）')
+    elif mode == 'even':
+        base = '，均分逐字'
+    elif has_words:
+        base = '，逐字（文件缓存）'
+    else:
+        return ''
+    # 配置与文件不一致时说明：改 align_engine 不会自动改已生成的 LRC
+    if has_words and cfg:
+        if cfg_whisper and not mode.startswith('whisper'):
+            base += '；配置 Whisper，点「生成逐字」重算'
+        elif (not cfg_whisper) and mode.startswith('whisper'):
+            base += '；配置已是 energy，点「生成逐字」可重算为能量'
+        elif (not cfg_whisper) and mode == 'energy' and cfg == 'energy':
+            pass
+        elif cfg == 'even' and mode != 'even':
+            base += '；点「生成逐字」按当前配置重算'
+    return base
 
 
 def refresh_karaoke_timing(doc: LyricDocument, sing_ratio: float = 0.78, vocal_path: str | Path | None = None) -> LyricDocument:
@@ -235,8 +314,39 @@ def _words_from_weighted_timeline(tokens: list[str], timed_units: list[tuple[flo
     return words
 
 
+def _finalize_words(line: LyricLine, words: list[LyricWord]) -> list[LyricWord]:
+    tmp = LyricLine(line.start_sec, line.end_sec, line.text, line.index, words)
+    normalize_line_words(tmp)
+    return tmp.words
+
+
+def resolve_local_whisper_dir(model_size: str = 'small') -> Path | None:
+    """若本机已有 faster-whisper 权重目录则返回（含 model.bin），避免反复访问 Hub。"""
+    name = (model_size or 'small').strip()
+    if not name:
+        return None
+    direct = Path(name)
+    if direct.is_dir() and (direct / 'model.bin').is_file():
+        return direct.resolve()
+    root = Path(__file__).resolve().parents[2]
+    for cand in (root / 'assets' / 'whisper' / name, root / 'assets' / 'faster-whisper' / name):
+        if (cand / 'model.bin').is_file():
+            return cand.resolve()
+    hub = Path.home() / '.cache' / 'huggingface' / 'hub' / ('models--Systran--faster-whisper-%s' % name) / 'snapshots'
+    if hub.is_dir():
+        snaps = sorted([p for p in hub.iterdir() if p.is_dir()], key=lambda p: p.stat().st_mtime, reverse=True)
+        for snap in snaps:
+            if (snap / 'model.bin').is_file():
+                return snap.resolve()
+    return None
+
+
+def local_whisper_ready(model_size: str = 'small') -> bool:
+    return resolve_local_whisper_dir(model_size) is not None
+
+
 def _get_whisper_model(model_size: str = 'small', force_cpu: bool = False, device_pref: str = 'auto'):
-    global _WHISPER_MODEL, _WHISPER_KEY
+    global _WHISPER_MODEL, _WHISPER_KEY, _WHISPER_CUDA_OK
     import os
 
     os.environ.setdefault('HF_ENDPOINT', 'https://hf-mirror.com')
@@ -244,7 +354,7 @@ def _get_whisper_model(model_size: str = 'small', force_cpu: bool = False, devic
 
     device, compute = 'cpu', 'int8'
     pref = (device_pref or 'auto').lower()
-    if force_cpu or pref == 'cpu':
+    if force_cpu or pref == 'cpu' or _WHISPER_CUDA_OK is False:
         device, compute = 'cpu', 'int8'
     elif pref == 'cuda':
         device, compute = 'cuda', 'float16'
@@ -252,21 +362,47 @@ def _get_whisper_model(model_size: str = 'small', force_cpu: bool = False, devic
         try:
             import torch
 
-            if torch.cuda.is_available():
+            if torch.cuda.is_available() and _WHISPER_CUDA_OK is not False:
                 device, compute = 'cuda', 'float16'
         except Exception:
             pass
-    key = (model_size, device, compute)
-    if _WHISPER_MODEL is None or _WHISPER_KEY != key:
-        logger.info(
-            'loading faster-whisper model=%s device=%s compute=%s hf_endpoint=%s',
-            model_size,
-            device,
-            compute,
-            os.environ.get('HF_ENDPOINT', ''),
-        )
-        _WHISPER_MODEL = WhisperModel(model_size, device=device, compute_type=compute)
+    local_dir = resolve_local_whisper_dir(model_size)
+    model_id = str(local_dir) if local_dir else model_size
+    key = (model_id, device, compute)
+    if _WHISPER_MODEL is not None and _WHISPER_KEY == key:
+        return _WHISPER_MODEL
+    # 已有同尺寸 CPU 模型时，不要因 auto→cuda 失败路径反复卸载
+    if (
+        _WHISPER_MODEL is not None
+        and _WHISPER_KEY
+        and _WHISPER_KEY[0] == model_id
+        and _WHISPER_KEY[1] == 'cpu'
+        and device == 'cuda'
+    ):
+        logger.info('reuse cached whisper CPU model (skip flaky CUDA reload)')
+        return _WHISPER_MODEL
+    logger.info(
+        'loading faster-whisper model=%s device=%s compute=%s local=%s',
+        model_size,
+        device,
+        compute,
+        bool(local_dir),
+    )
+    kwargs = {'device': device, 'compute_type': compute}
+    if local_dir:
+        kwargs['local_files_only'] = True
+    try:
+        _WHISPER_MODEL = WhisperModel(model_id, **kwargs)
         _WHISPER_KEY = key
+        if device == 'cuda':
+            _WHISPER_CUDA_OK = True
+    except Exception as exc:
+        msg = str(exc)
+        if device == 'cuda' and ('CUBLAS' in msg or 'CUDA' in msg or 'cuda' in msg.lower()):
+            _WHISPER_CUDA_OK = False
+            logger.warning('whisper CUDA load failed (%s), fall back CPU', msg)
+            return _get_whisper_model(model_size, force_cpu=True, device_pref='cpu')
+        raise
     return _WHISPER_MODEL
 
 
@@ -285,12 +421,25 @@ def _expand_timed_units(start: float, end: float, text: str) -> list[tuple[float
     return [(s + i * step, s + (i + 1) * step, u) for i, u in enumerate(units)]
 
 
+def _whisper_units_cache_key(audio_path: str, model_size: str) -> tuple:
+    p = Path(audio_path)
+    st = p.stat()
+    return (str(p.resolve()), int(st.st_mtime_ns), int(st.st_size), model_size)
+
+
 def _whisper_timed_units(
     audio_path: str,
     language: str | None,
     model_size: str,
     device_pref: str = 'auto',
 ) -> list[tuple[float, float, str]]:
+    global _WHISPER_MODEL, _WHISPER_KEY, _WHISPER_CUDA_OK, _WHISPER_UNITS_CACHE
+    cache_key = _whisper_units_cache_key(audio_path, model_size)
+    cached = _WHISPER_UNITS_CACHE.get(cache_key)
+    if cached is not None:
+        logger.info('whisper units cache hit path=%s n=%s', audio_path, len(cached))
+        return list(cached)
+
     def _run(force_cpu: bool = False):
         model = _get_whisper_model(model_size, force_cpu=force_cpu, device_pref=device_pref)
         segments, info = model.transcribe(
@@ -322,9 +471,10 @@ def _whisper_timed_units(
         msg = str(exc)
         if 'CUBLAS' in msg or 'CUDA' in msg or 'cuda' in msg.lower():
             logger.warning('whisper CUDA failed (%s), retry on CPU', msg)
-            global _WHISPER_MODEL, _WHISPER_KEY
-            _WHISPER_MODEL = None
-            _WHISPER_KEY = None
+            _WHISPER_CUDA_OK = False
+            if _WHISPER_KEY and _WHISPER_KEY[1] == 'cuda':
+                _WHISPER_MODEL = None
+                _WHISPER_KEY = None
             units, info = _run(force_cpu=True)
         else:
             raise
@@ -335,6 +485,7 @@ def _whisper_timed_units(
         float(getattr(info, 'duration', 0) or 0),
         model_size,
     )
+    _WHISPER_UNITS_CACHE[cache_key] = list(units)
     return units
 
 
@@ -377,21 +528,31 @@ def _line_whisper_window(
 ) -> list[tuple[float, float, str]]:
     """取本句附近的 Whisper 片；硬截断句间大空白，并按静音间隙切开乐句。"""
     # 绝不能用「下一句之前」整段当窗口，否则句间伴奏空白会吞进后面所有人声
-    hard_hi = min(line.end_sec, line.start_sec + max(6.0, n_content * 0.85))
+    hard_hi = min(line.end_sec, line.start_sec + max(10.0, n_content * 1.15))
     lo = line.start_sec - 0.2
     candidates = [u for u in timed_units if lo <= (u[0] + u[1]) * 0.5 < hard_hi]
     if not candidates:
         lo2 = line.start_sec - 0.4
-        hi2 = min(line.end_sec, line.start_sec + max(8.0, n_content * 1.0))
+        hi2 = min(line.end_sec, line.start_sec + max(12.0, n_content * 1.3))
         candidates = [u for u in timed_units if lo2 <= (u[0] + u[1]) * 0.5 < hi2]
     if not candidates:
         return []
-    # 从句首起，遇到 >0.75s 静音则视为本句唱完
+    min_span = max(1.5, n_content * 0.55)
     window = [candidates[0]]
     for u in candidates[1:]:
-        if u[0] - window[-1][1] > 0.75:
+        gap = u[0] - window[-1][1]
+        span = window[-1][1] - window[0][0]
+        # 已够唱时长后才允许按静音切句；过短窗口会把整句字挤到 0.1s 级
+        if gap > 1.25 and span >= min_span:
+            break
+        if gap > 2.8:
             break
         window.append(u)
+    # 仍过短则尽量多取候选，保证可唱跨度
+    if window[-1][1] - window[0][0] < min_span:
+        window = list(candidates)
+        while len(window) > 1 and window[-1][1] - window[0][0] > max(min_span * 1.8, n_content * 1.2):
+            window.pop()
     return window
 
 
@@ -411,7 +572,7 @@ def _align_line_with_whisper(line: LyricLine, timed_units: list[tuple[float, flo
     ratio = sm.ratio()
     # 唱歌 ASR 常错字：文本匹配差时仍用 Whisper 时间轴（相对能量对齐的增益）
     if ratio < 0.45:
-        return _words_from_weighted_timeline(tokens, window)
+        return _finalize_words(line, _words_from_weighted_timeline(tokens, window))
     starts: list = [None] * len(lyric_units)
     ends: list = [None] * len(lyric_units)
     for tag, i1, i2, j1, j2 in sm.get_opcodes():
@@ -434,7 +595,7 @@ def _align_line_with_whisper(line: LyricLine, timed_units: list[tuple[float, flo
     _fill_none_times(starts, ends, t0, t1)
     hit = sum(1 for s in starts if s is not None)
     if hit < max(2, len(lyric_units) // 3):
-        return _words_from_weighted_timeline(tokens, window)
+        return _finalize_words(line, _words_from_weighted_timeline(tokens, window))
     # 禁止单字拖到下一句（句间大空白）
     max_end = t1 + 0.15
     words: list[LyricWord] = []
@@ -450,7 +611,7 @@ def _align_line_with_whisper(line: LyricLine, timed_units: list[tuple[float, flo
             e = s + 1.8
         words.append(LyricWord(s, max(e, s + 0.03), tok, i))
         ci += 1
-    return words
+    return _finalize_words(line, words)
 
 
 def align_with_whisper(
@@ -510,6 +671,7 @@ def align_with_whisper(
         tokens = tokenize_lyric_text(line.text)
         line.words = _align_line_with_whisper(line, timed)
         line.text = ''.join(tokens) if tokens else line.text
+    document.align_mode = 'whisper'
     logger.info('whisper align mapped lines=%s path=%s units=%s', len(document.lines), audio_path, len(timed))
     return document, True
 
@@ -539,6 +701,7 @@ def enhance_lrc_file(
             logger.warning('use_whisper requested but faster-whisper missing')
         doc = prepare_word_timing(doc, vocal_path=vocal_path)
         mode = 'energy' if vocal_path and Path(str(vocal_path)).is_file() else 'even'
+    doc.align_mode = mode
     dest = Path(out_path) if out_path else lrc_path
     save_enhanced_lrc(doc, dest)
     logger.info('enhance_lrc mode=%s out=%s', mode, dest)

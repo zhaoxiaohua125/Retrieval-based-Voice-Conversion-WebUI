@@ -56,8 +56,11 @@ def test_long_gap_compress(errors):
     doc = fill_even_words(parse_enhanced_lrc('[00:10.00]空凝眸情字深浅无解\n[00:40.00]下一句\n'))
     words = [w for w in doc.lines[0].words if not w.text.isspace()]
     span = words[-1].end_sec - words[0].start_sec
-    if span > 6.0:
+    # 9 字慢歌约 0.82s/字 → 上限约 7.4s，且不得拖到 30s 句间空白
+    if span > 9.0:
         errors.append('long gap line not compressed: %.2fs' % span)
+    if words[-1].end_sec - words[-1].start_sec > 2.5:
+        errors.append('last word still swallows gap: %.2fs' % (words[-1].end_sec - words[-1].start_sec))
     hit = LyricMatcher(doc).match(10.0 + span + 0.5)
     if hit.word_index < len(doc.lines[0].words):
         errors.append('after sing window should mark line done, got word_index=%s' % hit.word_index)

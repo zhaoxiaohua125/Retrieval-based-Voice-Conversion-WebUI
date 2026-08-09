@@ -63,6 +63,8 @@ class LyricDocument:
     title: str = ''
     artist: str = ''
     lines: list[LyricLine] = field(default_factory=list)
+    # whisper | energy | even | ''（未知/仅行级）
+    align_mode: str = ''
 
     @property
     def has_words(self) -> bool:
@@ -73,5 +75,6 @@ class LyricDocument:
             'title': self.title,
             'artist': self.artist,
             'has_words': self.has_words,
+            'align_mode': self.align_mode,
             'lines': [line.to_dict() for line in self.lines],
         }

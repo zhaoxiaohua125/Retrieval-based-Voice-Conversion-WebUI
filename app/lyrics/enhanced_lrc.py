@@ -64,6 +64,8 @@ def parse_enhanced_lrc(text: str, default_tail_sec: float = 5.0) -> LyricDocumen
                 doc.title = value
             elif key == 'ar':
                 doc.artist = value
+            elif key in ('al', 'align', 'align_mode'):
+                doc.align_mode = value.lower().strip()
             continue
         tags = list(LINE_TAG_RE.finditer(line))
         if not tags:
@@ -77,9 +79,12 @@ def parse_enhanced_lrc(text: str, default_tail_sec: float = 5.0) -> LyricDocumen
         end = raw[i + 1][0] if i + 1 < len(raw) else start + default_tail_sec
         end = max(end, start + 0.05)
         plain, words = _parse_words(content, end)
-        if words and words[-1].end_sec > end:
-            words[-1].end_sec = end
-        doc.lines.append(LyricLine(start_sec=start, end_sec=end, text=plain, index=i, words=words))
+        line = LyricLine(start_sec=start, end_sec=end, text=plain, index=i, words=words)
+        if words:
+            from app.lyrics.aligner import normalize_line_words
+
+            normalize_line_words(line)
+        doc.lines.append(line)
     return doc
 
 
@@ -89,6 +94,8 @@ def dump_enhanced_lrc(doc: LyricDocument) -> str:
         out.append('[ti:%s]' % doc.title)
     if doc.artist:
         out.append('[ar:%s]' % doc.artist)
+    if doc.align_mode:
+        out.append('[al:%s]' % doc.align_mode)
     for line in doc.lines:
         head = '[%s]' % format_timestamp(line.start_sec)
         if line.words:

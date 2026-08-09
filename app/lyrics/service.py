@@ -33,6 +33,7 @@ class LyricsService:
         self._last_index = -1
         self._last_word = -1
         self._loaded_path = ''
+        self._timing_from_file = False
         self._hook_registered = False
         self._tick_handler = None
 
@@ -53,13 +54,18 @@ class LyricsService:
         if not force and resolved == self._loaded_path and self.document.lines:
             return self.document
         doc = load_lrc_file(path)
-        from app.lyrics.aligner import prepare_word_timing
+        from app.lyrics.aligner import normalize_line_words, prepare_word_timing
 
-        # 文件已含字级时间（Whisper/Enhanced）则保留；否则快速补齐
+        # 进歌：已有字级则保留；否则只做 energy/even 快速补齐（Whisper 仅「生成逐字」）
+        from_file = bool(doc.has_words)
         if not doc.has_words:
             prepare_word_timing(doc, vocal_path=vocal_path)
+        else:
+            for ln in doc.lines:
+                normalize_line_words(ln)
         self.document = doc
         self._loaded_path = resolved
+        self._timing_from_file = from_file
         self.matcher.set_document(doc)
         cfg = self._load_cfg()
         off = int(offset_ms if offset_ms is not None else cfg.get('offset_ms', 0))
@@ -74,6 +80,8 @@ class LyricsService:
                 'count': len(doc.lines),
                 'title': doc.title,
                 'has_words': doc.has_words,
+                'align_mode': doc.align_mode,
+                'timing_from_file': from_file,
             },
         )
         return doc
@@ -82,6 +90,7 @@ class LyricsService:
         self.document = LyricDocument()
         self.matcher.set_document(self.document)
         self._loaded_path = ''
+        self._timing_from_file = False
         self._last_index = -1
         self._last_word = -1
 

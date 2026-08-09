@@ -63,9 +63,9 @@
     ],
     "offset_ms": 0,
     "lead_ms": -100,
-    "align_engine": "whisper",
+    "align_engine": "energy",
     "whisper_model": "small",
-    "whisper_device": "auto",
+    "whisper_device": "cpu",
     "mtc_port": "",
     "sim_speed": 1.0
   },
@@ -99,8 +99,8 @@
   },
   "ui": {
     "geometry": [
-      71,
-      79,
+      51,
+      69,
       1280,
       880
     ],

@@ -75,7 +75,7 @@ DEFAULT_CONFIG = {
         'lead_ms': -80,
         'align_engine': 'energy',
         'whisper_model': 'small',
-        'whisper_device': 'auto',
+        'whisper_device': 'cpu',
         'mtc_port': '',
         'sim_speed': 1.0,
     },

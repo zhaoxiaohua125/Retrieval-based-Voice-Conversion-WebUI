@@ -1541,3 +1541,46 @@ python webui.py --noautoopen
 - **关键决策**: 窗口上限约 max(6s, 字数*0.85)，静音>0.75s 切句；字时长封顶 1.8s
 - **技术栈**: Python、faster-whisper、Enhanced LRC
 - **修改的文件列表**: app/lyrics/aligner.py、app/integration/controller.py、config/client.json、README.md
+
+---
+
+## 会话总结 - 2026-08-09 (15)
+
+- **会话主要目的**: 排查「生成逐字每次像重新下载模型」的体感问题
+- **根因**: 模型已在 HF 本地缓存；每次 auto 先加载 CUDA→cuBLAS 失败→清空→再加载 CPU，并对整首歌做 ASR（约 20s），UI 还提示「首次会下载」
+- **完成的主要任务**:
+  1. 优先用本地 snapshot + local_files_only，避免反复访问 Hub
+  2. 记住 CUDA 失败，本进程不再重试；默认 whisper_device=cpu
+  3. 同曲 ASR 结果内存缓存；修正进度文案
+- **技术栈**: faster-whisper、HuggingFace Hub 本地缓存
+- **修改的文件列表**: app/lyrics/aligner.py、app/integration/controller.py、app/config_store.py、config/client.json、README.md
+
+---
+
+## 会话总结 - 2026-08-09 (16)
+
+- **会话主要目的**: 修复「空凝」行起字高亮跳得过快（energy/whisper 皆有）
+- **根因**:
+  1. Whisper 静音切窗过狠，字间隔被挤到约 0.1s
+  2. Enhanced LRC 只存字起点，末字 end 被解析成下一句起点（可拖到几十秒）
+  3. 句间大空白压缩过猛（0.52s/字）对慢歌偏快
+- **完成的主要任务**: 放宽窗口/字速；normalize 修复过密与末字拖尾；加载时自动校正；已重写当前春庭雪 LRC
+- **技术栈**: Enhanced LRC、energy/Whisper 对齐
+- **修改的文件列表**: app/lyrics/aligner.py、enhanced_lrc.py、service.py、scripts/test_task8_lyrics_enhanced.py、opt/...lrc、README.md
+
+---
+
+## 会话总结 - 2026-08-09 (17)
+
+- **会话主要目的**: 修正进歌状态栏误显示「人声能量逐字」（配置已是 whisper）
+- **根因**: 选歌加载文案写死；进歌本身不会跑 Whisper（只沿用文件或快速 energy）
+- **完成的主要任务**: 按 align_mode/来源显示文案；LRC 写入 [al:whisper|energy|even]；配置 Whisper 但当前非 Whisper 时提示点「生成逐字」
+- **修改的文件列表**: app/lyrics/types.py、enhanced_lrc.py、aligner.py、service.py、app/integration/controller.py、app/ui/pages/playback_page.py、README.md
+
+---
+
+## 会话总结 - 2026-08-09 (18)
+
+- **会话主要目的**: 解释改回 energy 后进歌仍显示 Whisper 的原因并改文案
+- **关键说明**: 状态栏读的是 LRC 内 [al:whisper] 实际字轴，不是 align_engine；改配置需再点「生成逐字」重写文件
+- **修改的文件列表**: app/lyrics/aligner.py、app/integration/controller.py、README.md
