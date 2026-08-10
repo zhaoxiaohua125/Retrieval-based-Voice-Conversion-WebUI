@@ -1675,3 +1675,42 @@ ewrite；扩展 LyricWord 与字级 matcher
   3. 若删当前播放项则停播并刷新歌库
 - **修改的文件列表**: app/playback/library.py、app/integration/controller.py、app/ui/pages/playback_page.py、scripts/run_ui_skeleton.py、README.md
 
+---
+
+## 会话总结 - 2026-08-10 (8)
+
+- **会话主要目的**: 修复打包后双击「启动声迹客户端.bat」闪退（splash 消失、主界面不出现）
+- **完成的主要任务**:
+  1. `StartClient.bat` 由 `start /B pythonw` 改为 `start /wait`，失败时 pause 并提示查看 `logs/client/startup.log`
+  2. `run_ui_skeleton.py` 增加分阶段 startup 日志、启动异常 QMessageBox、打包目录 Qt 插件/DLL 路径补齐
+  3. 主窗口 `show()` 后 `raise_`/`activateWindow` 确保前台显示
+- **关键决策**: 原后台 detached 启动导致 pythonw 崩溃无可见错误；先让失败可观测再定位根因
+- **使用的技术栈**: PyQt6、CondaPack 打包、bat 启动器
+- **修改的文件列表**: scripts/run_ui_skeleton.py、scripts/build_client_package.py、README.md
+
+---
+
+## 会话总结 - 2026-08-10 (9)
+
+- **会话主要目的**: 继续修复打包启动闪退（日志停在 `main window created`）
+- **根因分析**: 启动卡在主窗口 show 之前；可能原因包括托盘无图标、splash 关闭触发 `quitOnLastWindowClosed`、窗口几何在屏幕外
+- **完成的主要任务**:
+  1. `setQuitOnLastWindowClosed(False)`，先 show 主窗口再关 splash、再创建托盘
+  2. 内嵌 fallback 托盘/窗口图标（Windows 托盘必须有 icon）
+  3. 恢复几何时检测并拉回屏幕内
+  4. 分步 startup.log（hooks ready / ui wired / main window shown / tray ready）并 flush
+  5. 启动阶段 `apply_library(auto_select=False)` 避免 show 前触发切歌
+- **修改的文件列表**: scripts/run_ui_skeleton.py、app/ui/tray.py、app/ui/main_window.py、app/ui/pages/playback_page.py、scripts/build_client_package.py、README.md
+
+---
+
+## 会话总结 - 2026-08-10 (10)
+
+- **会话主要目的**: 修复「StartClient_Debug.bat 正常、启动声迹客户端.bat 不行」
+- **根因**: `StartClient.bat` 优先用 `pythonw.exe`（无控制台，`sys.stderr is None`）；Qt 日志过滤器与 logging 仍写 stderr，触发异常导致进程退出；Debug 用 `python.exe` 故正常
+- **完成的主要任务**:
+  1. 启动最早 `_ensure_stdio()`，pythonw 下重定向到 `logs/client/stderr.log`
+  2. Qt 日志 handler 写 stderr 前判空
+  3. `rotating_log` 在 stderr 为空时不挂控制台 Handler
+  4. 统一 StartClient 启动变量 `LAUNCH`（pythonw 优先，逻辑与 Debug 一致）
+- **修改的文件列表**: scripts/run_ui_skeleton.py、app/ops/rotating_log.py、scripts/build_client_package.py、README.md

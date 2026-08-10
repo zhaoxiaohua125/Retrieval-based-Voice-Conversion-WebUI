@@ -16,10 +16,11 @@ def setup_rotating_logging(
     if not getattr(logger, '_ops_rotating_configured', False):
         logger.setLevel(logging.DEBUG)
         logger.propagate = False
-        console = logging.StreamHandler(sys.stderr)
-        console.setLevel(console_level)
-        console.setFormatter(fmt)
-        logger.addHandler(console)
+        if sys.stderr is not None:
+            console = logging.StreamHandler(sys.stderr)
+            console.setLevel(console_level)
+            console.setFormatter(fmt)
+            logger.addHandler(console)
         logger._ops_rotating_configured = True
     path = Path(log_dir)
     path.mkdir(parents=True, exist_ok=True)

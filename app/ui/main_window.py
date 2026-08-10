@@ -156,7 +156,18 @@ class MainWindow(QMainWindow):
         layout = load_ui_layout()
         geo = layout.get('geometry')
         if isinstance(geo, list) and len(geo) == 4:
-            self.setGeometry(*geo)
+            x, y, w, h = [int(v) for v in geo]
+            from PyQt6.QtGui import QGuiApplication
+            screen = QGuiApplication.primaryScreen()
+            if screen is not None:
+                avail = screen.availableGeometry()
+                w = max(640, min(w, avail.width()))
+                h = max(480, min(h, avail.height()))
+                off_screen = x + 40 < avail.left() or x > avail.right() - 40 or y + 40 < avail.top() or y > avail.bottom() - 40
+                if off_screen:
+                    x = avail.x() + max(0, (avail.width() - w) // 2)
+                    y = avail.y() + max(0, (avail.height() - h) // 2)
+            self.setGeometry(x, y, w, h)
         tab = layout.get('active_nav_tab', layout.get('active_tab', HeaderBar.TAB_SONG_MAKE))
         if isinstance(tab, int) and 0 <= tab < self.stack.count():
             self.header.set_active_tab(tab)

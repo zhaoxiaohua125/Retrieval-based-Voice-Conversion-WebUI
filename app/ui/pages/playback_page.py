@@ -205,10 +205,10 @@ class PlaybackPage(QWidget):
         self._lyric_lines = []
         self._lyric_row = -1
 
-    def apply_library(self, songs: list):
+    def apply_library(self, songs: list, auto_select: bool = True):
         keep = self._selected
         self._songs = list(songs or [])
-        self._filter_songs(self.search_box.text(), auto_select=not keep)
+        self._filter_songs(self.search_box.text(), auto_select=auto_select and not keep)
 
     def _filter_songs(self, keyword: str, auto_select: bool = True):
         keyword = (keyword or '').strip().lower()
