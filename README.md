@@ -1390,7 +1390,14 @@ python webui.py --noautoopen
 
 ---
 
-## 会话总结 - 2026-08-08 (16)
+## 会话总结 - 2026-08-09 (1)
+
+- **会话主要目的**: 修复 AI 跟唱运行一段时间后 callback 广播 shape 报错
+- **根因**: `converted_vocal` 比 `instrumental` 短，播放到末尾时 `ref[:got]` 与切片长度不一致
+- **修复**: 加载时对齐两轨长度（短则补零、长则截断）；`_playback_chunks` 按实际 `ref_got` 写入
+- **修改的文件列表**: app/pitchfix/service.py、README.md
+
+---
 
 - **会话主要目的**: 修复跟唱过程中 AI 人声偶发停顿
 - **根因**: 字间电平回落触发关门；衰减 0.10 时释放仅 ~0.15s；重开需 2 块造成断句
@@ -1406,7 +1413,8 @@ python webui.py --noautoopen
 - **会话主要目的**: 排查 AI 跟唱启动失败，并修复播完时 callback 崩溃
 - **完成的主要任务**:
   1. 定位 PortAudio -9993/-9997 为本地设备组合与采样率不一致（VoiceMeeter/Windows 共享格式）
-  2. 修复 _playback_chunks：人声轨短于伴奏时按 ef_got 切片，避免结尾 ValueError
+  2. 修复 _playback_chunks：人声轨短于伴奏时按 
+ef_got 切片，避免结尾 ValueError
 - **关键决策**: 推荐全链路统一 48000；人声不足部分保持静音填充
 - **技术栈**: sounddevice duplex、NumPy 切片、VoiceMeeter WASAPI
 - **修改的文件列表**: app/pitchfix/service.py、README.md
@@ -1417,7 +1425,8 @@ python webui.py --noautoopen
 
 - **会话主要目的**: 按开发大纲分段任务 8 落地 Enhanced LRC / 逐字歌词
 - **完成的主要任务**:
-  1. 新增 enhanced_lrc / ligner / ewrite；扩展 LyricWord 与字级 matcher
+  1. 新增 enhanced_lrc / ligner / 
+ewrite；扩展 LyricWord 与字级 matcher
   2. 加载行级 LRC 时内存均分字时间轴；「生成逐字」写回 Enhanced LRC；离线做歌复制 LRC 后自动增强
   3. 播放页与悬浮窗逐字高亮；右栏改词保存；验收脚本 scripts/test_task8_lyrics_enhanced.py
 - **关键决策**: 主路径为均分字轴（无需网上找 Enhanced LRC）；Whisper 为可选 use_whisper
@@ -1531,64 +1540,83 @@ python webui.py --noautoopen
 
 ---
 
-## �Ự�ܽ� - 2026-08-09 (14)
+## �Ự�ܽ� - 2026-08-09 (14)
 
-- **�Ự��ҪĿ��**: �Ų� small Whisper �� energy Ч����ͬ��ԭ���޸�
-- **��ɵ���Ҫ����**:
-  1. ���� config ��д align_engine=whispera��δ���� Whisper ʵ���� energy������ whisper* ǰ׺
-  2. �޸�����հ�ʱ Whisper �����̽�������������ĩ���ϵ���ʮ�룻Ӳ�ض� + ������϶�о� + ����ʱ������
-  3. client.json ��Ϊ align_engine=whisper ���ڸ���
-- **�ؼ�����**: ��������Լ max(6s, ����*0.85)������>0.75s �о䣻��ʱ���ⶥ 1.8s
-- **����ջ**: Python��faster-whisper��Enhanced LRC
-- **�޸ĵ��ļ��б�**: app/lyrics/aligner.py��app/integration/controller.py��config/client.json��README.md
-
----
-
-## �Ự�ܽ� - 2026-08-09 (15)
-
-- **�Ự��ҪĿ��**: �Ų顸��������ÿ������������ģ�͡����������
-- **����**: ģ������ HF ���ػ��棻ÿ�� auto �ȼ��� CUDA��cuBLAS ʧ�ܡ���ա��ټ��� CPU���������׸��� ASR��Լ 20s����UI ����ʾ���״λ����ء�
-- **��ɵ���Ҫ����**:
-  1. �����ñ��� snapshot + local_files_only�����ⷴ������ Hub
-  2. ��ס CUDA ʧ�ܣ������̲������ԣ�Ĭ�� whisper_device=cpu
-  3. ͬ�� ASR ����ڴ滺�棻���������İ�
-- **����ջ**: faster-whisper��HuggingFace Hub ���ػ���
-- **�޸ĵ��ļ��б�**: app/lyrics/aligner.py��app/integration/controller.py��app/config_store.py��config/client.json��README.md
+- **�Ự��ҪĿ��**: �Ų� small Whisper �� energy Ч����ͬ��ԭ���޸�
+- **��ɵ���Ҫ����**:
+  1. ���� config ��д align_engine=whispera��δ���� Whisper ʵ���� energy������ whisper* ǰ׺
+  2. �޸�����հ�ʱ Whisper �����̽�������������ĩ���ϵ���ʮ�룻Ӳ�ض� + ������϶�о� + ����ʱ������
+  3. client.json ��Ϊ align_engine=whisper ���ڸ���
+- **�ؼ�����**: ��������Լ max(6s, ����*0.85)������>0.75s �о䣻��ʱ���ⶥ 1.8s
+- **����ջ**: Python��faster-whisper��Enhanced LRC
+- **�޸ĵ��ļ��б�**: app/lyrics/aligner.py��app/integration/controller.py��config/client.json��README.md
 
 ---
 
-## �Ự�ܽ� - 2026-08-09 (16)
+## �Ự�ܽ� - 2026-08-09 (15)
 
-- **�Ự��ҪĿ��**: �޸��������������ָ������ù��죨energy/whisper ���У�
-- **����**:
-  1. Whisper �����д����ݣ��ּ��������Լ 0.1s
-  2. Enhanced LRC ֻ������㣬ĩ�� end ����������һ����㣨���ϵ���ʮ�룩
-  3. ����հ�ѹ�����ͣ�0.52s/�֣�������ƫ��
-- **��ɵ���Ҫ����**: �ſ�����/���٣�normalize �޸�������ĩ����β������ʱ�Զ�У��������д��ǰ��ͥѩ LRC
-- **����ջ**: Enhanced LRC��energy/Whisper ����
-- **�޸ĵ��ļ��б�**: app/lyrics/aligner.py��enhanced_lrc.py��service.py��scripts/test_task8_lyrics_enhanced.py��opt/...lrc��README.md
-
----
-
-## �Ự�ܽ� - 2026-08-09 (17)
-
-- **�Ự��ҪĿ��**: ��������״̬������ʾ�������������֡����������� whisper��
-- **����**: ѡ������İ�д�������豾�������� Whisper��ֻ�����ļ������ energy��
-- **��ɵ���Ҫ����**: �� align_mode/��Դ��ʾ�İ���LRC д�� [al:whisper|energy|even]������ Whisper ����ǰ�� Whisper ʱ��ʾ�㡸�������֡�
-- **�޸ĵ��ļ��б�**: app/lyrics/types.py��enhanced_lrc.py��aligner.py��service.py��app/integration/controller.py��app/ui/pages/playback_page.py��README.md
+- **�Ự��ҪĿ��**: �Ų顸��������ÿ������������ģ�͡����������
+- **����**: ģ������ HF ���ػ��棻ÿ�� auto �ȼ��� CUDA��cuBLAS ʧ�ܡ���ա��ټ��� CPU���������׸��� ASR��Լ 20s����UI ����ʾ���״λ����ء�
+- **��ɵ���Ҫ����**:
+  1. �����ñ��� snapshot + local_files_only�����ⷴ������ Hub
+  2. ��ס CUDA ʧ�ܣ������̲������ԣ�Ĭ�� whisper_device=cpu
+  3. ͬ�� ASR ����ڴ滺�棻���������İ�
+- **����ջ**: faster-whisper��HuggingFace Hub ���ػ���
+- **�޸ĵ��ļ��б�**: app/lyrics/aligner.py��app/integration/controller.py��app/config_store.py��config/client.json��README.md
 
 ---
 
-## �Ự�ܽ� - 2026-08-09 (18)
+## �Ự�ܽ� - 2026-08-09 (16)
 
-- **�Ự��ҪĿ��**: ���͸Ļ� energy ���������ʾ Whisper ��ԭ�򲢸��İ�
-- **�ؼ�˵��**: ״̬�������� LRC �� [al:whisper] ʵ�����ᣬ���� align_engine�����������ٵ㡸�������֡���д�ļ�
-- **�޸ĵ��ļ��б�**: app/lyrics/aligner.py��app/integration/controller.py��README.md
+- **�Ự��ҪĿ��**: �޸��������������ָ������ù��죨energy/whisper ���У�
+- **����**:
+  1. Whisper �����д����ݣ��ּ��������Լ 0.1s
+  2. Enhanced LRC ֻ������㣬ĩ�� end ����������һ����㣨���ϵ���ʮ�룩
+  3. ����հ�ѹ�����ͣ�0.52s/�֣�������ƫ��
+- **��ɵ���Ҫ����**: �ſ���/���٣�normalize �޸�������ĩ����β������ʱ�Զ�У��������д��ǰ��ͥѩ LRC
+- **����ջ**: Enhanced LRC��energy/Whisper ����
+- **�޸ĵ��ļ��б�**: app/lyrics/aligner.py��enhanced_lrc.py��service.py��scripts/test_task8_lyrics_enhanced.py��opt/...lrc��README.md
 
 ---
 
-## �Ự�ܽ� - 2026-08-09 (19)
+## �Ự�ܽ� - 2026-08-09 (17)
 
-- **�Ự��ҪĿ��**: �����ָ�ʹؼ���������ϵͳ���� UI����������˵��
-- **��ɵ���Ҫ����**: ���������ָ�ʡ����飺�������� / Whisper ģ�� / Whisper �豸 / ������ǰ / ����ƫ�ƣ�����д�� client.json������������ٵ��������ֵ���ʾ
-- **�޸ĵ��ļ��б�**: app/ui/settings_dialog.py��app/integration/controller.py��app/ui/pages/playback_page.py��README.md
+- **�Ự��ҪĿ��**: ��������״̬������ʾ�������������֡����������� whisper��
+- **����**: ѡ������İ�д�������豾������ Whisper��ֻ�����ļ������ energy��
+- **��ɵ���Ҫ����**: �� align_mode/��Դ��ʾ�İ���LRC д�� [al:whisper|energy|even]������ Whisper ����ǰ�� Whisper ʱ��ʾ�㡸�������֡�
+- **�޸ĵ��ļ��б�**: app/lyrics/types.py��enhanced_lrc.py��aligner.py��service.py��app/integration/controller.py��app/ui/pages/playback_page.py��README.md
+
+---
+
+## �Ự�ܽ� - 2026-08-09 (18)
+
+- **�Ự��ҪĿ��**: ���͸Ļ� energy ���������ʾ Whisper ��ԭ�򲢸��İ�
+- **�ؼ�˵��**: ״̬�������� LRC �� [al:whisper] ʵ�����ᣬ���� align_engine�����������ٵ㡸�������֡���д�ļ�
+- **�޸ĵ��ļ��б�**: app/lyrics/aligner.py��app/integration/controller.py��README.md
+
+---
+
+## �Ự�ܽ� - 2026-08-09 (19)
+
+- **�Ự��ҪĿ��**: �����ָ�ʹؼ���������ϵͳ���� UI����������˵��
+- **��ɵ���Ҫ����**: ���������ָ�ʡ����飺�������� / Whisper ģ�� / Whisper �豸 / ������ǰ / ����ƫ�ƣ�����д�� client.json������������ٵ��������ֵ���ʾ
+- **�޸ĵ��ļ��б�**: app/ui/settings_dialog.py��app/integration/controller.py��app/ui/pages/playback_page.py��README.md
+## 会话总结 - 2026-08-10
+
+- **会话主要目的**: 评估播放页「保存改词」功能是否有用
+- **完成的主要任务**: 梳理 UI → lyrics_rewrite → save_rewrite → 写回 LRC 的完整链路，并给出使用边界结论
+- **关键结论**: 有用，定位为单行纠错（保留行时间轴、重映射字时间）；不替代整体偏移/重新生成逐字
+- **技术栈**: PySide UI、Enhanced LRC、lyrics.rewrite
+- **修改的文件列表**: README.md（仅追加本总结）
+
+---
+
+## 会话总结 - 2026-08-10 (2)
+
+- **会话主要目的**: 歌库切歌改为双击，并增加切换中提示防重复点击
+- **完成的主要任务**:
+  1. 歌库单击仅高亮，双击才切换歌曲
+  2. 切换中禁用列表/搜索/刷新，标题显示「切换中：歌名…」
+  3. 预加载或 mode-switch 完成后 `song_switched` 解除锁定
+- **修改的文件列表**: app/ui/pages/playback_page.py、app/integration/controller.py、scripts/run_ui_skeleton.py、README.md
+

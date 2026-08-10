@@ -277,8 +277,13 @@ class ClientController:
             try:
                 fn(*args, **kwargs)
                 logger.info('mode switch done: %s mode=%s player_active=%s', name, self.state.mode, self._player.is_active)
+                if name == '_continue_mode_with_song_impl':
+                    song = args[1] if len(args) > 1 else {}
+                    self._publish_status('song_switched', title=(song or {}).get('title', ''))
             except Exception:
                 logger.error('mode switch failed (%s):\n%s', name, traceback.format_exc())
+                if name == '_continue_mode_with_song_impl':
+                    self._publish_status('song_switched', title='')
             finally:
                 self._switch_queue.task_done()
 
@@ -709,9 +714,14 @@ class ClientController:
                 self._continue_mode_with_song(mode, dict(self.state.selected_song), 0.0)
                 self._publish_status('track_advance', title=title, log='切换歌曲：%s' % title)
                 return
+        def _preload_done():
+            try:
+                self._preload_song_assets(dict(self.state.selected_song))
+            finally:
+                t = (self.state.selected_song or {}).get('title') or ''
+                self._publish_status('song_switched', title=t)
         threading.Thread(
-            target=self._preload_song_assets,
-            args=(dict(self.state.selected_song),),
+            target=_preload_done,
             name='song-preload',
             daemon=True,
         ).start()

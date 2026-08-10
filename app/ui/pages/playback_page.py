@@ -41,6 +41,7 @@ class PlaybackPage(QWidget):
         self.bridge = bridge
         self._songs = []
         self._selected = None
+        self._switching = False
         self._mode = 'idle'
         self._build_ui()
 
@@ -63,7 +64,8 @@ class PlaybackPage(QWidget):
         self.search_box.textChanged.connect(self._filter_songs)
         lib_layout.addWidget(self.search_box)
         self.song_list = QListWidget()
-        self.song_list.currentRowChanged.connect(self._on_row_changed)
+        self.song_list.setToolTip('双击歌曲切换；切换完成前请勿重复点击')
+        self.song_list.itemDoubleClicked.connect(self._on_song_double_clicked)
         lib_layout.addWidget(self.song_list)
         splitter.addWidget(lib)
 
@@ -225,12 +227,20 @@ class PlaybackPage(QWidget):
         self.song_list.blockSignals(True)
         self.song_list.setCurrentRow(0)
         self.song_list.blockSignals(False)
-        self._apply_row_song(0, resume_if_playing=False)
+        self._apply_row_song(0, resume_if_playing=False, show_switching=False)
 
-    def _on_row_changed(self, row: int):
-        self._apply_row_song(row, resume_if_playing=True)
+    def _on_song_double_clicked(self, item: QListWidgetItem):
+        if self._switching or not item:
+            return
+        song = item.data(Qt.ItemDataRole.UserRole) or {}
+        cur_id = (self._selected or {}).get('id') or (self._selected or {}).get('play_path')
+        new_id = song.get('id') or song.get('play_path')
+        if cur_id and new_id and cur_id == new_id:
+            return
+        row = self.song_list.row(item)
+        self._apply_row_song(row, resume_if_playing=True, show_switching=True)
 
-    def _apply_row_song(self, row: int, resume_if_playing: bool = True):
+    def _apply_row_song(self, row: int, resume_if_playing: bool = True, show_switching: bool = False):
         if row < 0:
             self._selected = None
             return
@@ -239,11 +249,28 @@ class PlaybackPage(QWidget):
             return
         song = item.data(Qt.ItemDataRole.UserRole) or {}
         self._selected = song
-        self.title_label.setText(song.get('title', '未命名'))
+        if show_switching:
+            self.set_song_switching(True, song.get('title', '未命名'))
+        elif not self._switching:
+            self.title_label.setText(song.get('title', '未命名'))
+            self.title_label.setStyleSheet('font-size:18px;color:#64748b;')
         play_path = song.get('play_path') or song.get('cover_path') or song.get('vocal_path')
         self.waveform.load_file(play_path or '')
         self.waveform.set_position_ratio(0.0)
         self.bridge.emit_action('playback_select_song', song=song, resume_if_playing=resume_if_playing)
+
+    def set_song_switching(self, busy: bool, title: str = ''):
+        self._switching = bool(busy)
+        self.song_list.setEnabled(not busy)
+        self.search_box.setEnabled(not busy)
+        self.btn_refresh.setEnabled(not busy)
+        if busy:
+            name = title or (self._selected or {}).get('title', '未命名')
+            self.title_label.setText('切换中：%s…' % name)
+            self.title_label.setStyleSheet('font-size:18px;color:#2563eb;')
+        elif self._selected:
+            self.title_label.setText(self._selected.get('title', '未命名'))
+            self.title_label.setStyleSheet('font-size:18px;color:#64748b;')
 
     def _on_wave_seek(self, ratio: float):
         self.bridge.emit_action('playback_seek', ratio=ratio)
@@ -449,7 +476,8 @@ class PlaybackPage(QWidget):
                 continue
             song = item.data(Qt.ItemDataRole.UserRole) or {}
             if song.get('title') == title or item.text() == title:
-                self.song_list.setCurrentRow(i)
+                self.set_song_switching(True, title)
+                self._apply_row_song(i, resume_if_playing=True, show_switching=False)
                 return
 
     def set_play_mode(self, mode: str):

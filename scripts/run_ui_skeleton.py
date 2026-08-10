@@ -211,6 +211,8 @@ def main():
             page.set_play_mode(payload.get('mode', 'sequential'))
         elif action == 'select_song_ui':
             page.select_song_by_title(payload.get('title', ''))
+        elif action == 'song_switched':
+            page.set_song_switching(False)
         elif action == 'lyric_tick':
             page.set_lyric_tick(payload)
 
