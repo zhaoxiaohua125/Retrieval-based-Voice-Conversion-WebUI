@@ -8,6 +8,8 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMenu,
+    QMessageBox,
     QPushButton,
     QSlider,
     QSplitter,
@@ -64,7 +66,9 @@ class PlaybackPage(QWidget):
         self.search_box.textChanged.connect(self._filter_songs)
         lib_layout.addWidget(self.search_box)
         self.song_list = QListWidget()
-        self.song_list.setToolTip('双击歌曲切换；切换完成前请勿重复点击')
+        self.song_list.setToolTip('双击切换歌曲；右键可删除')
+        self.song_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.song_list.customContextMenuRequested.connect(self._on_song_context_menu)
         self.song_list.itemDoubleClicked.connect(self._on_song_double_clicked)
         lib_layout.addWidget(self.song_list)
         splitter.addWidget(lib)
@@ -228,6 +232,29 @@ class PlaybackPage(QWidget):
         self.song_list.setCurrentRow(0)
         self.song_list.blockSignals(False)
         self._apply_row_song(0, resume_if_playing=False, show_switching=False)
+
+    def _on_song_context_menu(self, pos):
+        if self._switching:
+            return
+        item = self.song_list.itemAt(pos)
+        if not item:
+            return
+        song = item.data(Qt.ItemDataRole.UserRole) or {}
+        title = song.get('title') or item.text() or '未命名'
+        menu = QMenu(self)
+        act_del = menu.addAction('删除歌曲')
+        if menu.exec(self.song_list.mapToGlobal(pos)) != act_del:
+            return
+        ok = QMessageBox.question(
+            self,
+            '确认删除',
+            '确定删除「%s」及其本地音频/歌词文件？\n此操作不可恢复。' % title,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if ok != QMessageBox.StandardButton.Yes:
+            return
+        self.bridge.emit_action('playback_delete_song', song=song)
 
     def _on_song_double_clicked(self, item: QListWidgetItem):
         if self._switching or not item:
@@ -465,6 +492,17 @@ class PlaybackPage(QWidget):
 
     def selected_song(self):
         return self._selected
+
+    def clear_current_song(self):
+        self._selected = None
+        self._switching = False
+        self.song_list.setEnabled(True)
+        self.search_box.setEnabled(True)
+        self.btn_refresh.setEnabled(True)
+        self.title_label.setText('请从歌库选择歌曲')
+        self.title_label.setStyleSheet('font-size:18px;color:#64748b;')
+        self.waveform.load_file('')
+        self.set_lyrics_lines([])
 
     def select_song_by_title(self, title: str):
         title = (title or '').strip()

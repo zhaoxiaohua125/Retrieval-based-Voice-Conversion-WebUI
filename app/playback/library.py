@@ -76,3 +76,60 @@ def scan_song_library(project_root, dirs=None):
                         songs[entry['id']] = entry
                     break
     return sorted(songs.values(), key=lambda s: s['title'])
+
+
+def collect_song_related_paths(song: dict):
+    """收集一首歌在 output 目录下的关联文件（wav/lrc/f0 等）。"""
+    folder = Path(song.get('dir') or Path(song.get('play_path', '')).parent)
+    stem = song.get('title') or _stem_from_wav_name(Path(song.get('play_path', '')).stem)
+    if not folder.is_dir() or not stem:
+        return []
+    paths = []
+    for suf in (
+        '_cover.wav', '_cover.mp3', '_cover.flac',
+        '_converted_vocal.wav',
+        '_instrumental.wav',
+        '_vocals.wav',
+        '_vocals_noreverb.wav',
+        '_harmony.wav',
+    ):
+        p = folder / ('%s%s' % (stem, suf))
+        if p.is_file():
+            paths.append(p)
+    for name in (f'{stem}.lrc', f'{stem}.LRC', f'{stem}_cover.lrc', f'{stem}_cover.LRC', f'{stem}_vocals.lrc'):
+        p = folder / name
+        if p.is_file():
+            paths.append(p)
+    f0 = folder / ('%s_converted_vocal.f0.npz' % stem)
+    if f0.is_file():
+        paths.append(f0)
+    for key in ('cover_path', 'vocal_path', 'instrumental_path', 'play_path', 'lrc_path'):
+        p = song.get(key)
+        if p:
+            fp = Path(p)
+            if fp.is_file():
+                paths.append(fp)
+    out = []
+    seen = set()
+    for p in paths:
+        key = str(p.resolve())
+        if key not in seen:
+            seen.add(key)
+            out.append(p)
+    return out
+
+
+def delete_song_from_disk(song: dict, project_root=None):
+    """删除歌曲关联本地文件，返回已删路径列表。"""
+    root = Path(project_root).resolve() if project_root else None
+    deleted = []
+    for path in collect_song_related_paths(song):
+        try:
+            resolved = path.resolve()
+            if root is not None:
+                resolved.relative_to(root)
+            resolved.unlink()
+            deleted.append(str(resolved))
+        except (OSError, ValueError):
+            continue
+    return deleted

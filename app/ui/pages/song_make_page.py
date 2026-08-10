@@ -251,12 +251,12 @@ class SongMakePage(QWidget):
         self.offline_model = QComboBox()
         self.offline_model.setToolTip('选择 assets/weights 下的 .pth 模型')
         self._reload_model_combo()
-        self.btn_import_model = QPushButton('导入…')
-        self.btn_import_model.setToolTip('导入 .pth 到 assets/weights，.index 到 assets/indices')
-        self.btn_import_model.clicked.connect(self.import_models)
+        self.btn_refresh_model = QPushButton('刷新')
+        self.btn_refresh_model.setToolTip('重新扫描 assets/weights 下的 .pth 模型')
+        self.btn_refresh_model.clicked.connect(self._refresh_model_list)
         model_row = QHBoxLayout()
         model_row.addWidget(self.offline_model, stretch=1)
-        model_row.addWidget(self.btn_import_model)
+        model_row.addWidget(self.btn_refresh_model)
         model_wrap = QWidget()
         model_wrap.setLayout(model_row)
         self.lbl_index_status = QLabel('')
@@ -279,14 +279,22 @@ class SongMakePage(QWidget):
         layout.addWidget(mode_box)
 
         self.p_f0_key = QSlider(Qt.Orientation.Horizontal)
-        self.p_f0_key.setRange(-24, 24)
+        self.p_f0_key.setRange(-12, 12)
         self.p_f0_key.setValue(0)
         self.lbl_f0_key = QLabel('0')
+        self.lbl_f0_key.setMinimumWidth(28)
+        self.lbl_f0_key.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.p_f0_key.valueChanged.connect(lambda v: self.lbl_f0_key.setText(str(v)))
+        layout.addWidget(QLabel('音高调整(半音):(男转女 +12, 女转男 -12)'))
         f0_row = QHBoxLayout()
-        f0_row.addWidget(self.p_f0_key)
+        lbl_f0_min = QLabel('-12')
+        lbl_f0_min.setStyleSheet('color:#64748b;')
+        lbl_f0_max = QLabel('+12')
+        lbl_f0_max.setStyleSheet('color:#64748b;')
+        f0_row.addWidget(lbl_f0_min)
+        f0_row.addWidget(self.p_f0_key, stretch=1)
+        f0_row.addWidget(lbl_f0_max)
         f0_row.addWidget(self.lbl_f0_key)
-        layout.addWidget(QLabel('音高调整(半音)'))
         layout.addLayout(f0_row)
 
         adv = QGroupBox('高级参数（骨架）')
@@ -345,10 +353,19 @@ class SongMakePage(QWidget):
             for path in sorted(root.glob('*.pth')):
                 self.offline_model.addItem(path.name)
 
+    def _refresh_model_list(self):
+        prev = self.offline_model.currentText()
+        self._reload_model_combo()
+        if prev:
+            idx = self.offline_model.findText(prev)
+            if idx >= 0:
+                self.offline_model.setCurrentIndex(idx)
+        self._update_index_hint()
+
     def _update_index_hint(self):
         model = self.offline_model.currentText()
         if not model:
-            self.lbl_index_status.setText('暂无模型，请点击「导入…」添加 .pth')
+            self.lbl_index_status.setText('暂无模型，请在「高级参数设置」中导入 .pth，或放入 assets/weights 后点刷新')
             self.lbl_index_status.setStyleSheet('color:#64748b;font-size:12px;')
             return
         try:
@@ -358,8 +375,7 @@ class SongMakePage(QWidget):
                 self.lbl_index_status.setText('已匹配 Index：%s' % Path(index_path).name)
                 self.lbl_index_status.setStyleSheet('color:#16a34a;font-size:12px;')
             else:
-                self.lbl_index_status.setText('未匹配 Index（可选；建议导入与模型同名的 .index）')
-                self.lbl_index_status.setStyleSheet('color:#94a3b8;font-size:12px;')
+                self.lbl_index_status.setText('')
         except Exception:
             self.lbl_index_status.setText('Index 状态检测失败')
             self.lbl_index_status.setStyleSheet('color:#94a3b8;font-size:12px;')
@@ -479,7 +495,7 @@ class SongMakePage(QWidget):
             return
         model = self.offline_model.currentText()
         if not model:
-            QMessageBox.information(self, '提示', '请先点击「导入…」添加 RVC 模型（.pth）')
+            QMessageBox.information(self, '提示', '请先在「高级参数设置」中导入 RVC 模型，或放入 assets/weights 后点刷新')
             return
         preset = 'powerful' if self.btn_preset_powerful.isChecked() else 'normal'
         payload = {

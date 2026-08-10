@@ -81,16 +81,16 @@
   },
   "pitchfix": {
     "strength": 0.85,
-    "inst_gain": 0.63,
-    "mic_gain": 1.5,
-    "inst_ui": 63,
-    "mic_ui": 150,
-    "orig_ui": 0,
+    "inst_gain": 0.4,
+    "mic_gain": 1.0,
+    "inst_ui": 40,
+    "mic_ui": 100,
+    "orig_ui": 5,
     "threshold": 100,
-    "attenuation_ui": 1,
-    "ref_vocal_gain": 0.0,
+    "attenuation_ui": 3,
+    "ref_vocal_gain": 0.05,
     "follow_threshold": 100.0,
-    "follow_attenuation": 0.1,
+    "follow_attenuation": 0.12000000000000001,
     "detune_mode": "off",
     "block_ms": 100,
     "f0_min": 50,
@@ -99,7 +99,7 @@
   },
   "ui": {
     "geometry": [
-      402,
+      591,
       280,
       1280,
       880

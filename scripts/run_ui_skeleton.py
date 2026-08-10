@@ -167,6 +167,8 @@ def main():
             make.show_offline_cancelled(payload.get('message', ''))
         elif action == 'library_updated':
             page.apply_library(payload.get('songs', []))
+        elif action == 'song_deleted':
+            page.clear_current_song()
         elif action == 'playback_tick':
             page.set_playback_state(payload)
         elif action == 'playback_started':

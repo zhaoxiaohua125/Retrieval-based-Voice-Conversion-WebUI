@@ -15,8 +15,8 @@ from app.events import BusMessage, ModuleId, SignalType
 from app.integration.state import ClientState
 from app.lyrics import LyricsService
 from app.ops.exceptions import classify_exception
-from app.playback import WavPlayer, scan_song_library
-from app.playback.library import find_lrc_in_dir
+from app.playback import WavPlayer
+from app.playback.library import delete_song_from_disk, find_lrc_in_dir, scan_song_library
 from app.rvc.types import RvcInferParams
 from app.rvc.vc_context import discover_first_model, resolve_index_for_model
 from app.scheduler import AppScheduler
@@ -149,6 +149,7 @@ class ClientController:
             'offline_cover': self._start_offline_cover,
             'offline_cancel': lambda p: self._cancel_offline_user(),
             'playback_refresh_library': lambda p: self._refresh_library(),
+            'playback_delete_song': self._delete_song,
             'playback_select_song': self._select_song,
             'playback_select_mode': self._select_mode,
             'playback_transport': self._playback_transport,
@@ -504,6 +505,41 @@ class ClientController:
             except Exception:
                 logger.error('library refresh failed:\n%s', traceback.format_exc())
         threading.Thread(target=_work, name='library-scan', daemon=True).start()
+
+    def _delete_song(self, payload: dict = None):
+        payload = payload or {}
+        song = payload.get('song') or {}
+        if not song.get('dir') and not song.get('play_path'):
+            self._publish_error('无法删除：无效歌曲')
+            return
+        title = song.get('title') or Path(song.get('play_path') or '').stem or '未命名'
+        cur = self.state.selected_song or {}
+        cur_id = cur.get('id') or cur.get('play_path')
+        del_id = song.get('id') or song.get('play_path')
+        if cur_id and del_id and cur_id == del_id:
+            self._stop_playback_all({})
+            self.stop_ai_follow()
+            if self._is_talk_mode():
+                self.stop_passthrough()
+        deleted = delete_song_from_disk(song, project_root=self.project_root)
+        if not deleted:
+            self._publish_error('删除失败：未找到可删文件')
+            return
+        if cur_id and del_id and cur_id == del_id:
+            self.state.selected_song = None
+            self.state.playback_running = False
+            self.lyrics.clear()
+            self.state.loaded_lyrics = False
+            self._publish_status('lyrics_loaded', lines=[])
+            self._publish_status('playback_stopped', log='当前歌曲已删除')
+        self._scan_library_blocking()
+        self._publish_status(
+            'library_updated',
+            songs=self._library,
+            log='已删除「%s」（%s 个文件）' % (title, len(deleted)),
+        )
+        if cur_id and del_id and cur_id == del_id:
+            self._publish_status('song_deleted', title=title)
 
     def _is_timeline_playing(self) -> bool:
         if self.state.ai_follow_running:

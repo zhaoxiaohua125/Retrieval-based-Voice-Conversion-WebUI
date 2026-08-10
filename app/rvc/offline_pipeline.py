@@ -290,20 +290,21 @@ class OfflineSongPipeline:
             if self._is_cancelled():
                 yield {'event': 'cancelled', 'message': '用户已取消制作'}
                 return
-            emit({'event': 'phase', 'phase': 'mix', 'percent': 96, 'message': '正在生成 AI 跟唱参考旋律…'})
-            from app.pitchfix.f0_curve import build_f0_cache_isolated, f0_cache_path
-            try:
-                build_f0_cache_isolated(
-                    converted_vocal_path,
-                    cancel_check=self._is_cancelled,
-                    proc_holder=self._f0_proc,
-                )
-                f0_path = f0_cache_path(converted_vocal_path)
-                lines.append('跟唱 F0 缓存：%s' % f0_path)
-                logger.info('offline pitchfix f0 cache=%s', f0_path)
-            except Exception:
-                logger.warning('offline F0 cache failed:\n%s', traceback.format_exc())
-                lines.append('跟唱 F0 缓存失败（AI 跟唱首次启动会较慢）')
+            # Phase 1 AI 跟唱为 VAD 门控，不依赖 F0 缓存；Phase 2 修音再取消注释
+            # emit({'event': 'phase', 'phase': 'mix', 'percent': 96, 'message': '正在生成 AI 跟唱参考旋律…'})
+            # from app.pitchfix.f0_curve import build_f0_cache_isolated, f0_cache_path
+            # try:
+            #     build_f0_cache_isolated(
+            #         converted_vocal_path,
+            #         cancel_check=self._is_cancelled,
+            #         proc_holder=self._f0_proc,
+            #     )
+            #     f0_path = f0_cache_path(converted_vocal_path)
+            #     lines.append('跟唱 F0 缓存：%s' % f0_path)
+            #     logger.info('offline pitchfix f0 cache=%s', f0_path)
+            # except Exception:
+            #     logger.warning('offline F0 cache failed:\n%s', traceback.format_exc())
+            #     lines.append('跟唱 F0 缓存失败（AI 跟唱首次启动会较慢）')
 
             result = OfflineCoverResult(
                 preset_id=preset_id,

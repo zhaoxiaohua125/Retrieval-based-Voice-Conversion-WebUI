@@ -1620,3 +1620,58 @@ ewrite；扩展 LyricWord 与字级 matcher
   3. 预加载或 mode-switch 完成后 `song_switched` 解除锁定
 - **修改的文件列表**: app/ui/pages/playback_page.py、app/integration/controller.py、scripts/run_ui_skeleton.py、README.md
 
+---
+
+## 会话总结 - 2026-08-10 (3)
+
+- **会话主要目的**: 制作歌曲页音高滑条增加 -12/+12 说明（对标声迹）
+- **修改**: 标题改为「音高调整(半音):(男转女 +12, 女转男 -12)」；滑条两端标注 -12 / +12；范围改为 -12~12
+- **修改的文件列表**: app/ui/pages/song_make_page.py、README.md
+
+
+---
+
+## 会话总结 - 2026-08-10 (3)
+
+- **会话主要目的**: 对比声迹AI旧版安装目录与新授权版安装目录差异
+- **完成的主要任务**:
+  1. 对比 F:\zxh\ProgramFiles\SoundTrail (5.1.5) 与 D:\Program Files\SoundTrail2\SoundTrail (5.2.7.4)
+  2. 确认新版已内置 msst-reflow（约 9.8GB）及完整 AI 引擎/模型
+  3. 梳理壳程序新增依赖（ffmpeg/winrt/opencc 等）与代理分发配置
+- **关键决策与解决方案**: 以只读目录对比为主，不涉及授权破解
+- **使用的技术栈**: PowerShell 目录/版本信息对比、配置 JSON 读取、二进制关键字检索
+- **修改的文件列表**: README.md（仅追加本总结）
+
+---
+
+## 会话总结 - 2026-08-10 (4)
+
+- **会话主要目的**: 制作页 RVC 模型旁「导入…」改为「刷新」
+- **修改**: 刷新重扫 assets/weights；导入保留在高级参数设置；更新无模型提示文案
+- **修改的文件列表**: app/ui/pages/song_make_page.py、README.md
+
+---
+
+## 会话总结 - 2026-08-10 (6)
+
+- **会话主要目的**: 暂时关闭做歌末尾 F0 `.npz` 生成（加速做歌）
+- **原因**: AI 跟唱 Phase 1 为 VAD 门控，不依赖参考旋律缓存
+- **修改**: 注释 `offline_pipeline.py` 中「正在生成 AI 跟唱参考旋律…」整段；Phase 2 修音可取消注释恢复
+- **修改的文件列表**: app/rvc/offline_pipeline.py、README.md
+
+
+- **会话主要目的**: 去掉制作页「未匹配 Index」灰色提示
+- **修改**: 无 Index 时不显示说明；已匹配时仍显示绿色提示
+- **修改的文件列表**: app/ui/pages/song_make_page.py、README.md
+
+---
+
+## 会话总结 - 2026-08-10 (7)
+
+- **会话主要目的**: 歌库右键删除歌曲及本地关联文件
+- **完成的主要任务**:
+  1. 歌库列表右键「删除歌曲」，二次确认
+  2. 删除 cover/converted_vocal/instrumental/vocals/harmony/lrc/f0.npz 等关联文件
+  3. 若删当前播放项则停播并刷新歌库
+- **修改的文件列表**: app/playback/library.py、app/integration/controller.py、app/ui/pages/playback_page.py、scripts/run_ui_skeleton.py、README.md
+
