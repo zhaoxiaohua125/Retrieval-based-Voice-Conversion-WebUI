@@ -1905,3 +1905,13 @@ ewrite；扩展 LyricWord 与字级 matcher
 - **会话目的**: 去掉智能混响时波形上的文字提示，保留琥珀色 playhead
 - **修改**: `waveform_widget.py` 移除「智能混响」drawText，playhead 琥珀色 `#d97706` 不变
 - **修改的文件列表**: app/ui/waveform_widget.py、README.md
+
+---
+
+## 会话总结 - 2026-08-11 (15)
+
+- **问题**: 智能切从混响切回唱段偏慢约 0.5s
+- **修复**:
+  1. 切回防抖 `vocal_hold` 从 `min_hold×0.25`（约 0.75s）降至 `min_hold×0.08`（约 0.24s），上限 0.25s
+  2. 智能混响态下增加 0.25s 唱段前瞻，人声将起时提前累计
+- **修改的文件列表**: app/integration/controller.py、README.md

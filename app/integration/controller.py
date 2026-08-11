@@ -429,12 +429,15 @@ class ClientController:
         if self._smart_peaks is None or self._smart_peaks_dur <= 0:
             return
         min_hold = float(self.config_store.get('playback.smart_switch_min_gap_sec', 3.0) or 3.0)
-        vocal_hold = min(1.0, max(0.35, min_hold * 0.25))
+        vocal_hold = min(0.25, max(0.12, min_hold * 0.08))
         thresh = self._smart_peaks_thresh
         in_vocal = is_vocal_energy_region(pos, self._smart_peaks, self._smart_peaks_dur, thresh)
         if self._smart_reverb_active:
             if self.state.mode != 'reverb_talk':
                 return
+            if not in_vocal:
+                ahead = min(pos + 0.25, max(0.0, self._smart_peaks_dur - 0.01))
+                in_vocal = is_vocal_energy_region(ahead, self._smart_peaks, self._smart_peaks_dur, thresh)
             if in_vocal:
                 self._smart_vocal_acc += 0.03
             else:

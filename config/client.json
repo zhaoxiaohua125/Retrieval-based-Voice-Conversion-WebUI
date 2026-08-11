@@ -78,7 +78,7 @@
   },
   "playback": {
     "play_mode": "repeat_one",
-    "smart_switch": false,
+    "smart_switch": true,
     "smart_switch_min_gap_sec": 1.0
   },
   "pitchfix": {
@@ -89,10 +89,10 @@
     "mic_ui": 101,
     "orig_ui": 3,
     "threshold": 100,
-    "attenuation_ui": 3,
+    "attenuation_ui": 2,
     "ref_vocal_gain": 0.03,
     "follow_threshold": 100.0,
-    "follow_attenuation": 0.12000000000000001,
+    "follow_attenuation": 0.11,
     "detune_mode": "off",
     "block_ms": 100,
     "f0_min": 50,
