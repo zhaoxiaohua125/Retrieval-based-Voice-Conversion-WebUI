@@ -236,7 +236,7 @@ def main():
                 make.set_offline_running(True)
             elif action == 'offline_finished':
                 make.show_offline_result(payload.get('result') or {})
-                page.apply_library(controller.library)
+                page.apply_library(controller.library, inst_songs=controller.library_inst)
                 title = payload.get('title') or ''
                 if title:
                     window.switch_to_playback(title)
@@ -369,7 +369,11 @@ def main():
 
         bridge.ui_progress.connect(window.page_song_make.apply_offline_progress)
         scheduler.subscribe(SignalType.PROGRESS, on_scheduler_progress)
-        window.page_playback.apply_library(controller.library, auto_select=False)
+        window.page_playback.apply_library(
+            controller.library,
+            inst_songs=controller.library_inst,
+            auto_select=False,
+        )
         window.page_playback.set_play_mode(controller.config_store.get('playback.play_mode', 'sequential'))
         _startup_log('ui wired')
 

@@ -107,6 +107,10 @@ class ClientController:
     def library(self):
         return list(self._library_sing)
 
+    @property
+    def library_inst(self):
+        return list(self._library_inst)
+
     def start(self):
         if self._started:
             return self

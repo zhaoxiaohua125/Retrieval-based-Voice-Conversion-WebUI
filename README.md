@@ -2010,6 +2010,15 @@ ewrite；扩展 LyricWord 与字级 matcher
 
 ---
 
+## 会话总结 - 2026-08-11 (26)
+
+- **问题**: 切到「原唱」Tab 列表为空，需手动刷新
+- **根因**: 启动时 `apply_library` 只传唱歌列表，未传 `inst_songs`
+- **修复**: 启动与离线做歌完成时一并传入 `controller.library_inst`
+- **修改的文件列表**: app/integration/controller.py、scripts/run_ui_skeleton.py、README.md
+
+---
+
 ## 会话总结 - 2026-08-11 (21)
 
 - **会话目的**: P0 发布与稳定性 — 完成客户端自动更新完整流程，后台服务与 `app/` 分离
