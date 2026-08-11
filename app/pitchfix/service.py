@@ -40,6 +40,8 @@ class PitchFollowService:
         self._voice_off_at = None
         self._gate_lock = threading.Lock()
         self._voice_gate = 0.0
+        self._voice_gate_smooth = 0.0
+        self._voice_on_at = None
         self._hook = False
         self._cfg = {}
         self._cache_key = ''
@@ -160,8 +162,10 @@ class PitchFollowService:
         sr = self._cfg['sr']
         self._sr = sr
         self._voice_off_at = None
+        self._voice_on_at = None
         with self._gate_lock:
             self._voice_gate = 0.0
+            self._voice_gate_smooth = 0.0
         self._vad_above = 0
         if key != self._cache_key or self._inst is None:
             self._inst = self._load_wav_mono(inst_path, sr)
@@ -232,6 +236,19 @@ class PitchFollowService:
                     ref[:ref_got, 0] = self._ref_vocal[start:ref_end, 0]
         return inst, ref, finished
 
+    def _smooth_follow_gate(self) -> float:
+        with self._gate_lock:
+            tgt = self._voice_gate
+            g = self._voice_gate_smooth
+        if tgt >= 0.5:
+            g = g + (1.0 - g) * 0.5
+        else:
+            g *= 0.78
+        g = max(0.0, min(1.0, g))
+        with self._gate_lock:
+            self._voice_gate_smooth = g
+            return g
+
     def _callback(self, indata, outdata, frames, time_info, status):
         if status:
             logger.debug('pitchfix stream status: %s', status)
@@ -245,8 +262,7 @@ class PitchFollowService:
             mic = np.asarray(indata, dtype=np.float32).reshape(-1, 1)
             self._in_ring.write(mic)
             inst, ref, finished = self._playback_chunks(frames, out_latency=lat)
-            with self._gate_lock:
-                gate = self._voice_gate
+            gate = self._smooth_follow_gate()
             cfg = self._cfg
             ai_vocal = ref * gate * cfg['mic_gain']
             monitor = ref * cfg.get('ref_vocal_gain', 0.0)
@@ -274,18 +290,19 @@ class PitchFollowService:
                 mic = self._in_ring.read(block)[:, 0]
                 thr = float(self._cfg.get('follow_threshold', 75))
                 open_gate = max(0.001, (thr / 100.0) * 0.006)
-                close_gate = open_gate * 0.35
+                close_gate = open_gate * 0.22
                 att = min(0.2, max(0.1, float(self._cfg.get('follow_attenuation', 0.1))))
-                hangover = max(0.25, att * 2.5)
+                hangover = max(0.55, att * 4.5)
                 mic_rms = float(np.sqrt(np.mean(mic * mic))) if mic.size else 0.0
                 now = time.monotonic()
                 if mic_rms >= open_gate:
-                    self._vad_above = min(3, self._vad_above + 1)
+                    self._vad_above = min(4, self._vad_above + 1)
                 else:
                     self._vad_above = max(0, self._vad_above - 1)
                 with self._gate_lock:
                     was_open = self._voice_gate >= 0.5
                 in_grace = self._voice_off_at is not None and (now - self._voice_off_at) < hangover
+                recent_on = self._voice_on_at is not None and (now - self._voice_on_at) < 1.2
                 if was_open:
                     if mic_rms >= close_gate:
                         self._voice_off_at = None
@@ -294,13 +311,15 @@ class PitchFollowService:
                         if self._voice_off_at is None:
                             self._voice_off_at = now
                         active = in_grace
-                elif self._vad_above >= 2 or (in_grace and self._vad_above >= 1 and mic_rms >= open_gate):
+                elif self._vad_above >= (1 if (in_grace or recent_on) else 2) or (in_grace and mic_rms >= close_gate):
                     self._voice_off_at = None
                     active = True
                 else:
                     active = False
                     if not in_grace:
                         self._voice_off_at = None
+                if active:
+                    self._voice_on_at = now
                 with self._gate_lock:
                     self._voice_gate = 1.0 if active else 0.0
             except Exception:
@@ -313,6 +332,7 @@ class PitchFollowService:
             self._clock_active = False
         with self._gate_lock:
             self._voice_gate = 0.0
+            self._voice_gate_smooth = 0.0
         if self._stream is not None:
             try:
                 self._stream.stop()

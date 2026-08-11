@@ -9,7 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / 'packaging' / 'manifest.json'
-LAUNCHER_BAT = ROOT / 'packaging' / 'launcher' / '启动声迹客户端.bat'
+LAUNCHER_BAT = ROOT / 'packaging' / 'launcher' / '启动唱歌伴侣客户端.bat'
 
 
 def load_manifest():
@@ -137,7 +137,7 @@ def write_launcher(out_dir: Path):
     for name, content in (
         ('StartClient.bat', bat),
         ('StartClient_Debug.bat', debug_bat),
-        ('启动声迹客户端.bat', wrapper),
+        ('启动唱歌伴侣客户端.bat', wrapper),
         ('repair_bundled_torch.bat', repair_bat),
         ('verify_client_package.bat', verify_bat),
     ):

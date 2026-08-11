@@ -38,7 +38,7 @@ setup_conda_cu128.bat
 
 ## 客户侧
 
-解压 → 双击 `启动声迹客户端.bat`，包内 `python/` 已含对应 CUDA 版 PyTorch。
+解压 → 双击 `启动唱歌伴侣客户端.bat`，包内 `python/` 已含对应 CUDA 版 PyTorch。
 
 ## 前置条件（打包机）
 

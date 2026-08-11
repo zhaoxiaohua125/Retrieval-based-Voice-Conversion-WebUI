@@ -1679,7 +1679,7 @@ ewrite；扩展 LyricWord 与字级 matcher
 
 ## 会话总结 - 2026-08-10 (8)
 
-- **会话主要目的**: 修复打包后双击「启动声迹客户端.bat」闪退（splash 消失、主界面不出现）
+- **会话主要目的**: 修复打包后双击「启动唱歌伴侣客户端.bat」闪退（splash 消失、主界面不出现）
 - **完成的主要任务**:
   1. `StartClient.bat` 由 `start /B pythonw` 改为 `start /wait`，失败时 pause 并提示查看 `logs/client/startup.log`
   2. `run_ui_skeleton.py` 增加分阶段 startup 日志、启动异常 QMessageBox、打包目录 Qt 插件/DLL 路径补齐
@@ -1706,7 +1706,7 @@ ewrite；扩展 LyricWord 与字级 matcher
 
 ## 会话总结 - 2026-08-10 (10)
 
-- **会话主要目的**: 修复「StartClient_Debug.bat 正常、启动声迹客户端.bat 不行」
+- **会话主要目的**: 修复「StartClient_Debug.bat 正常、启动唱歌伴侣客户端.bat 不行」
 - **根因**: `StartClient.bat` 优先用 `pythonw.exe`（无控制台，`sys.stderr is None`）；Qt 日志过滤器与 logging 仍写 stderr，触发异常导致进程退出；Debug 用 `python.exe` 故正常
 - **完成的主要任务**:
   1. 启动最早 `_ensure_stdio()`，pythonw 下重定向到 `logs/client/stderr.log`
@@ -1721,7 +1721,7 @@ ewrite；扩展 LyricWord 与字级 matcher
 
 - **会话主要目的**: 消除正常启动后 CMD 黑窗口一直驻留
 - **根因**: `StartClient.bat` 使用 `start /wait`，bat 会阻塞到客户端退出才关闭控制台
-- **完成的主要任务**: 改为 `pythonw` + `start` 不等待、立即 `exit`；「启动声迹客户端.bat」直接 detached 启动 pythonw
+- **完成的主要任务**: 改为 `pythonw` + `start` 不等待、立即 `exit`；「启动唱歌伴侣客户端.bat」直接 detached 启动 pythonw
 - **修改的文件列表**: scripts/build_client_package.py、README.md
 
 ---
@@ -1928,3 +1928,11 @@ ewrite；扩展 LyricWord 与字级 matcher
   1. 新增 `_session_playback_mode()`（含暂停/混响覆盖），切歌时用它决定是否重启当前模式
   2. `carry_pos=None` 才沿用进度，显式传 `0.0` 从头播
 - **修改的文件列表**: app/integration/controller.py、README.md
+
+---
+
+## 会话总结 - 2026-08-11 (17)
+
+- **会话目的**: 用户确认当前功能稳定，暂无新问题
+- **状态**: 智能切/波形、切回唱段、歌单双击切歌等近期修复经用户验证通过
+- **修改的文件列表**: README.md

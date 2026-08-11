@@ -76,6 +76,8 @@ class AudioStreamManager:
         self._ref_vocal_data = None
         self._ref_vocal_path = ''
         self._voice_gate = 0.0
+        self._voice_gate_smooth = 0.0
+        self._voice_on_at = None
         self._gate_lock = threading.Lock()
         self._vad_stop = threading.Event()
         self._vad_thread = None
@@ -282,14 +284,29 @@ class AudioStreamManager:
                 self._voice_gate = 1.0 if cfg.playback_mode == 'ai_sing' else 0.0
         return self
 
+    def _smooth_follow_gate(self) -> float:
+        with self._gate_lock:
+            tgt = self._voice_gate
+            g = self._voice_gate_smooth
+        if tgt >= 0.5:
+            g = g + (1.0 - g) * 0.5
+        else:
+            g *= 0.78
+        g = max(0.0, min(1.0, g))
+        with self._gate_lock:
+            self._voice_gate_smooth = g
+            return g
+
     def _start_vad_worker(self):
         if self._vad_thread is not None and self._vad_thread.is_alive():
             return
         self._vad_stop.clear()
         self._voice_off_at = None
+        self._voice_on_at = None
         self._vad_above = 0
         with self._gate_lock:
             self._voice_gate = 0.0
+            self._voice_gate_smooth = 0.0
         self._vad_thread = threading.Thread(target=self._vad_loop, name='stream-vad', daemon=True)
         self._vad_thread.start()
 
@@ -300,6 +317,7 @@ class AudioStreamManager:
         if th is not None and th.is_alive() and threading.current_thread() is not th:
             th.join(timeout=0.05)
         self._voice_off_at = None
+        self._voice_on_at = None
         self._vad_above = 0
 
     def _vad_loop(self):
@@ -314,18 +332,19 @@ class AudioStreamManager:
                 mic = self.input_ring.read(block)[:, 0]
                 thr = float(self.config.follow_threshold or 75)
                 open_gate = max(0.001, (thr / 100.0) * 0.006)
-                close_gate = open_gate * 0.35
+                close_gate = open_gate * 0.22
                 att = min(0.2, max(0.1, float(self.config.follow_attenuation or 0.1)))
-                hangover = max(0.25, att * 2.5)
+                hangover = max(0.55, att * 4.5)
                 mic_rms = float(np.sqrt(np.mean(mic * mic))) if mic.size else 0.0
                 now = time.monotonic()
                 if mic_rms >= open_gate:
-                    self._vad_above = min(3, self._vad_above + 1)
+                    self._vad_above = min(4, self._vad_above + 1)
                 else:
                     self._vad_above = max(0, self._vad_above - 1)
                 with self._gate_lock:
                     was_open = self._voice_gate >= 0.5
                 in_grace = self._voice_off_at is not None and (now - self._voice_off_at) < hangover
+                recent_on = self._voice_on_at is not None and (now - self._voice_on_at) < 1.2
                 if was_open:
                     if mic_rms >= close_gate:
                         self._voice_off_at = None
@@ -334,13 +353,15 @@ class AudioStreamManager:
                         if self._voice_off_at is None:
                             self._voice_off_at = now
                         active = in_grace
-                elif self._vad_above >= 2 or (in_grace and self._vad_above >= 1 and mic_rms >= open_gate):
+                elif self._vad_above >= (1 if (in_grace or recent_on) else 2) or (in_grace and mic_rms >= close_gate):
                     self._voice_off_at = None
                     active = True
                 else:
                     active = False
                     if not in_grace:
                         self._voice_off_at = None
+                if active:
+                    self._voice_on_at = now
                 with self._gate_lock:
                     self._voice_gate = 1.0 if active else 0.0
             except Exception:
@@ -453,8 +474,7 @@ class AudioStreamManager:
             mg = float(self.config.mic_gain or 0.77)
             mix = inst.reshape(-1, 1) * ig + ref.reshape(-1, 1) * mg
         elif mode == 'ai_follow':
-            with self._gate_lock:
-                gate = self._voice_gate
+            gate = self._smooth_follow_gate()
             mg = float(self.config.mic_gain or 0.77)
             rg = float(self.config.ref_vocal_gain or 0.0)
             vocal = ref.reshape(-1, 1)
