@@ -1974,6 +1974,15 @@ ewrite；扩展 LyricWord 与字级 matcher
 
 ---
 
+## 会话总结 - 2026-08-11 (22)
+
+- **诉求**: 按 Git 提交记录自动生成增量更新 zip，避免手工复制易错
+- **实现**: `scripts/make_update_zip.py` — 传入 `--since`（tag/commit）对比 `HEAD`，自动筛选 manifest 内客户端路径，打 zip；可选 `--publish` 发布到 server
+- **技术栈**: git diff、packaging/manifest.json 复用 `is_client_release_path`
+- **修改的文件列表**: scripts/make_update_zip.py、scripts/build_client_package.py、server/README.md、README.md
+
+---
+
 ## 会话总结 - 2026-08-11 (21)
 
 - **会话目的**: P0 发布与稳定性 — 完成客户端自动更新完整流程，后台服务与 `app/` 分离

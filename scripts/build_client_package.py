@@ -38,6 +38,19 @@ def should_skip(rel: str, manifest: dict) -> bool:
     return False
 
 
+def is_client_release_path(rel: str, manifest: dict | None = None) -> bool:
+    """是否属于客户端安装包内的可发布路径（与 copy_tree 规则一致）。"""
+    manifest = manifest or load_manifest()
+    rel = str(rel).replace('\\', '/').lstrip('./')
+    if not rel or should_skip(rel, manifest):
+        return False
+    top = rel.split('/')[0]
+    if top in manifest.get('include_dirs', []):
+        return True
+    inc = {str(x).replace('\\', '/') for x in manifest.get('include_files', [])}
+    return rel in inc
+
+
 def copy_tree(src: Path, dst: Path, manifest: dict, stats: dict):
     if not src.exists():
         return
