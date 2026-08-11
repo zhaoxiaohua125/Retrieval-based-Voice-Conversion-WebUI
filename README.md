@@ -1936,3 +1936,38 @@ ewrite；扩展 LyricWord 与字级 matcher
 - **会话目的**: 用户确认当前功能稳定，暂无新问题
 - **状态**: 智能切/波形、切回唱段、歌单双击切歌等近期修复经用户验证通过
 - **修改的文件列表**: README.md
+
+---
+
+## 会话总结 - 2026-08-11 (18)
+
+- **问题**: AI 跟唱 VAD 门控人声检测偶发「顿一下」
+- **根因**: 门控 0/1 硬切；字间静音 hangover 偏短；重开需连续 2 块超阈值
+- **修复**:
+  1. 门控平滑 `_voice_gate_smooth`（快开慢关，避免瞬断）
+  2. hangover 延长至约 0.55s+；关断阈值降低（close_gate×0.22）
+  3. 唱段内 1.2s 内重开只需 1 块超阈值
+- **修改的文件列表**: app/audio/stream_manager.py、app/pitchfix/service.py、README.md
+
+---
+
+## 会话总结 - 2026-08-11 (19)
+
+- **问题**: 跟唱衰减调到 0.1 后，停麦仍约半秒才关 AI 人声
+- **根因**: hangover 固定下限 0.55s，与「衰减」滑条语义脱节
+- **修复**:
+  1. 区分字间短静音（syllable_hold）与持续无声（stop_hold = 衰减×1.0，0.1→约 0.1s）
+  2. 连续 3 块低电平后走 stop_hold，否则走 syllable_hold 防唱段内顿
+  3. 门控淡出速率随衰减增大而变慢
+- **修改的文件列表**: app/audio/stream_manager.py、app/pitchfix/service.py、README.md
+
+---
+
+## 会话总结 - 2026-08-11 (20)
+
+- **诉求**: 跟唱衰减 0.1 时无人声输入后立即停 AI 人声（最灵敏）
+- **实现**:
+  1. 抽出 `app/audio/follow_vad.py` 共用 VAD/门控平滑
+  2. 衰减 ≤0.105：`mic_rms < close_gate` 即关门控，无 hangover
+  3. 衰减 ≤0.105：门控淡出瞬间置 0；更大衰减仍保留 hold + 慢淡出
+- **修改的文件列表**: app/audio/follow_vad.py、app/audio/stream_manager.py、app/pitchfix/service.py、README.md

@@ -12,6 +12,7 @@ import sounddevice as sd
 import soundfile as sf
 
 from app.audio.devices import pick_voicemeeter_defaults
+from app.audio.follow_vad import follow_vad_tick, smooth_follow_gate
 from app.audio.ring_buffer import RingBuffer
 from app.config_store import ConfigStore
 from app.events import BusMessage, ModuleId, SignalType
@@ -46,6 +47,7 @@ class PitchFollowService:
         self._cfg = {}
         self._cache_key = ''
         self._vad_above = 0
+        self._vad_below = 0
         self._clock_origin_frame = 0
         self._clock_origin_mono = 0.0
         self._out_latency = 0.05
@@ -167,6 +169,7 @@ class PitchFollowService:
             self._voice_gate = 0.0
             self._voice_gate_smooth = 0.0
         self._vad_above = 0
+        self._vad_below = 0
         if key != self._cache_key or self._inst is None:
             self._inst = self._load_wav_mono(inst_path, sr)
             self._ref_vocal = self._load_wav_mono(ref_path, sr)
@@ -237,14 +240,11 @@ class PitchFollowService:
         return inst, ref, finished
 
     def _smooth_follow_gate(self) -> float:
+        att = float(self._cfg.get('follow_attenuation', 0.1))
         with self._gate_lock:
             tgt = self._voice_gate
             g = self._voice_gate_smooth
-        if tgt >= 0.5:
-            g = g + (1.0 - g) * 0.5
-        else:
-            g *= 0.78
-        g = max(0.0, min(1.0, g))
+        g = smooth_follow_gate(tgt, g, att)
         with self._gate_lock:
             self._voice_gate_smooth = g
             return g
@@ -291,35 +291,23 @@ class PitchFollowService:
                 thr = float(self._cfg.get('follow_threshold', 75))
                 open_gate = max(0.001, (thr / 100.0) * 0.006)
                 close_gate = open_gate * 0.22
-                att = min(0.2, max(0.1, float(self._cfg.get('follow_attenuation', 0.1))))
-                hangover = max(0.55, att * 4.5)
+                att = float(self._cfg.get('follow_attenuation', 0.1))
                 mic_rms = float(np.sqrt(np.mean(mic * mic))) if mic.size else 0.0
                 now = time.monotonic()
-                if mic_rms >= open_gate:
-                    self._vad_above = min(4, self._vad_above + 1)
-                else:
-                    self._vad_above = max(0, self._vad_above - 1)
                 with self._gate_lock:
                     was_open = self._voice_gate >= 0.5
-                in_grace = self._voice_off_at is not None and (now - self._voice_off_at) < hangover
-                recent_on = self._voice_on_at is not None and (now - self._voice_on_at) < 1.2
-                if was_open:
-                    if mic_rms >= close_gate:
-                        self._voice_off_at = None
-                        active = True
-                    else:
-                        if self._voice_off_at is None:
-                            self._voice_off_at = now
-                        active = in_grace
-                elif self._vad_above >= (1 if (in_grace or recent_on) else 2) or (in_grace and mic_rms >= close_gate):
-                    self._voice_off_at = None
-                    active = True
-                else:
-                    active = False
-                    if not in_grace:
-                        self._voice_off_at = None
-                if active:
-                    self._voice_on_at = now
+                active, self._vad_above, self._vad_below, self._voice_off_at, self._voice_on_at = follow_vad_tick(
+                    mic_rms,
+                    open_gate,
+                    close_gate,
+                    att,
+                    was_open,
+                    self._vad_above,
+                    self._vad_below,
+                    self._voice_off_at,
+                    self._voice_on_at,
+                    now,
+                )
                 with self._gate_lock:
                     self._voice_gate = 1.0 if active else 0.0
             except Exception:
@@ -353,6 +341,7 @@ class PitchFollowService:
             pass
         self._in_ring = None
         self._vad_above = 0
+        self._vad_below = 0
         if not keep_cache:
             self._inst = None
             self._ref_vocal = None
