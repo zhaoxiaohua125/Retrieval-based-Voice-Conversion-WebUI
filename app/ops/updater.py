@@ -74,14 +74,28 @@ def verify_md5(path, expected_md5):
     return file_md5(path).lower() == str(expected_md5).lower()
 
 
-def download_file(url, dest_path, expected_md5=None):
+def download_file(url, dest_path, expected_md5=None, on_progress=None):
     dest = Path(dest_path)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    with urlopen(url, timeout=60) as resp, open(dest, 'wb') as out:
-        shutil.copyfileobj(resp, out)
+    with urlopen(url, timeout=120) as resp:
+        total = int(resp.headers.get('Content-Length', 0) or 0)
+        read = 0
+        with open(dest, 'wb') as out:
+            while True:
+                chunk = resp.read(256 * 1024)
+                if not chunk:
+                    break
+                out.write(chunk)
+                read += len(chunk)
+                if on_progress and total > 0:
+                    on_progress(min(0.92, read / total), '下载更新包…')
+                elif on_progress:
+                    on_progress(0.5, '下载更新包…')
     if expected_md5 and not verify_md5(dest, expected_md5):
         dest.unlink(missing_ok=True)
         raise ValueError('md5 mismatch for %s' % dest)
+    if on_progress:
+        on_progress(0.93, '下载完成')
     return str(dest.resolve())
 
 

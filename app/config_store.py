@@ -19,6 +19,7 @@ DEFAULT_CONFIG = {
     'update': {
         'check_url': '',
         'auto_check': True,
+        'skip_version': '',
     },
     'audio': {
         'sample_rate': 48000,

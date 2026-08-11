@@ -1,0 +1,9 @@
+{
+  "latest_version": "0.1.1-dev",
+  "force_update": false,
+  "update_desc": "本地开发测试：自动更新链路验证",
+  "full_package_url": "http://127.0.0.1:8765/releases/update.zip",
+  "patch_url": "",
+  "md_full": "",
+  "md_patch": ""
+}

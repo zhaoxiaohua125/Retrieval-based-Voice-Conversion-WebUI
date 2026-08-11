@@ -301,6 +301,48 @@ def main():
                 page.select_song_by_title(payload.get('title', ''))
             elif action == 'song_switched':
                 page.set_song_switching(False)
+            elif action == 'update_available':
+                from app.ui.update_dialog import show_update_prompt
+
+                window._update_dialog = show_update_prompt(window, bridge, payload)
+            elif action == 'update_checked':
+                if not payload.get('silent'):
+                    QMessageBox.information(window, '检查更新', payload.get('message') or '已是最新版本')
+            elif action == 'update_failed':
+                msg = payload.get('message') or '更新失败'
+                dlg = getattr(window, '_update_dialog', None)
+                if dlg is not None and dlg.isVisible():
+                    dlg.mark_failed(msg)
+                elif not payload.get('silent'):
+                    QMessageBox.warning(window, '更新', msg)
+            elif action == 'update_finished':
+                dlg = getattr(window, '_update_dialog', None)
+                if dlg is not None:
+                    try:
+                        dlg.accept()
+                    except RuntimeError:
+                        pass
+                    window._update_dialog = None
+                if payload.get('updated'):
+                    ans = QMessageBox.question(
+                        window,
+                        '更新完成',
+                        '已更新至 %s，是否立即重启客户端？' % (payload.get('version') or ''),
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    )
+                    if ans == QMessageBox.StandardButton.Yes:
+                        from app.ops.install_root import relaunch_client
+
+                        try:
+                            relaunch_client(ROOT)
+                        except Exception as exc:
+                            QMessageBox.warning(window, '重启失败', str(exc))
+                        else:
+                            app.quit()
+                elif payload.get('message') and not payload.get('silent'):
+                    QMessageBox.information(window, '更新', payload.get('message'))
+            elif action == 'update_skipped':
+                window._update_dialog = None
             elif action == 'lyric_tick':
                 page.set_lyric_tick(payload)
 
@@ -312,9 +354,15 @@ def main():
         scheduler.subscribe(SignalType.STATUS, on_scheduler_status)
 
         def on_scheduler_progress(msg: BusMessage):
+            payload = msg.payload or {}
+            if msg.source == ModuleId.SCHEDULER and payload.get('phase') == 'update':
+                dlg = getattr(window, '_update_dialog', None)
+                if dlg is not None:
+                    dlg.set_progress(int(payload.get('percent', 0) or 0), str(payload.get('message') or ''))
+                return
             if msg.source != ModuleId.SCHEDULER or not controller.state.offline_running:
                 return
-            bridge.ui_progress.emit(msg.payload or {})
+            bridge.ui_progress.emit(payload)
 
         bridge.ui_progress.connect(window.page_song_make.apply_offline_progress)
         scheduler.subscribe(SignalType.PROGRESS, on_scheduler_progress)
@@ -344,6 +392,15 @@ def main():
         window._quit_tray = tray
 
         QTimer.singleShot(0, window.page_playback.select_initial_song)
+
+        def _auto_check_update():
+            if not controller.config_store.get('update.auto_check', True):
+                return
+            url = str(controller.config_store.get('update.check_url', '') or '').strip()
+            if url:
+                bridge.emit_action('check_update', silent=True)
+
+        QTimer.singleShot(4000, _auto_check_update)
         bridge.log_message.emit('客户端已启动（AI 唱歌 / 离线做歌 / 歌词同步已接入）')
 
         return app.exec()

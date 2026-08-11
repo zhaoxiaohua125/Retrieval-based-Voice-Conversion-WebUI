@@ -1971,3 +1971,19 @@ ewrite；扩展 LyricWord 与字级 matcher
   2. 衰减 ≤0.105：`mic_rms < close_gate` 即关门控，无 hangover
   3. 衰减 ≤0.105：门控淡出瞬间置 0；更大衰减仍保留 hold + 慢淡出
 - **修改的文件列表**: app/audio/follow_vad.py、app/audio/stream_manager.py、app/pitchfix/service.py、README.md
+
+---
+
+## 会话总结 - 2026-08-11 (21)
+
+- **会话目的**: P0 发布与稳定性 — 完成客户端自动更新完整流程，后台服务与 `app/` 分离
+- **完成的主要任务**:
+  1. 新增 `server/` 更新服务：`GET /version.json`、静态 releases、日志上报、发布脚本 `tools/publish_release.py`
+  2. 客户端 `UpdateClient` + `install_root.relaunch_client`：检查 / 下载（进度）/ MD5 / 解压 / 备份 / 写 VERSION
+  3. `UpdatePromptDialog`：发现新版本、立即更新 / 稍后 / 跳过；强制更新模式
+  4. 修复 `_check_update` 误把元组当 dict；托盘/设置联动；启动 4s 后 `auto_check`
+  5. 烟测脚本 `scripts/test_update_flow.py`
+- **关键决策**: 服务端独立 `server/` 目录；客户端逻辑留在 `app/ops/` + `app/ui/update_dialog.py`
+- **技术栈**: FastAPI、uvicorn、PyQt6、urllib 下载、zip 增量/全量
+- **修改的文件列表**: server/main.py、server/tools/publish_release.py、server/data/version.json、app/ops/install_root.py、app/ops/update_client.py、app/ops/updater.py、app/ui/update_dialog.py、app/integration/controller.py、app/ui/settings_dialog.py、app/config_store.py、scripts/run_ui_skeleton.py、scripts/test_update_flow.py、README.md
+

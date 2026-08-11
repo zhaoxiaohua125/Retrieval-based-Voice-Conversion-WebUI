@@ -79,6 +79,7 @@ class ClientController:
         self._smart_peaks_thresh = 0.12
         self._smart_silent_acc = 0.0
         self._smart_vocal_acc = 0.0
+        self._update_running = False
 
     @property
     def pitch_follow(self):
@@ -188,6 +189,8 @@ class ClientController:
             'lyrics_enhance': self._enhance_lyrics,
             'lyrics_rewrite': self._rewrite_lyrics,
             'check_update': self._check_update,
+            'apply_update': self._apply_update,
+            'skip_update': self._skip_update,
             'settings_save': self._save_settings,
             'audio_test_mic': self._test_mic,
         }
@@ -2133,14 +2136,82 @@ class ClientController:
             self._offline_thread.join(timeout=1.0)
 
     def _check_update(self, payload=None):
-        from app.ops.updater import check_update
+        payload = payload or {}
+        threading.Thread(
+            target=self._check_update_worker,
+            args=(bool(payload.get('silent')),),
+            name='check-update',
+            daemon=True,
+        ).start()
 
-        url = self.config_store.get('update.check_url', '')
-        if not url:
-            self._publish_status('update_skip', log='未配置 update.check_url')
+    def _check_update_worker(self, silent: bool = False):
+        from app.ops.update_client import UpdateClient
+
+        client = UpdateClient(self.config_store, self.project_root)
+        result = client.check()
+        if not result.get('ok'):
+            self._publish_status('update_failed', silent=silent, message=result.get('error', '检查失败'))
             return
-        info = check_update(url)
-        self._publish_status('update_checked', log='更新检查：%s' % (info.get('message') or info.get('latest_version')))
+        if result.get('need_update'):
+            self._publish_status(
+                'update_available',
+                silent=silent,
+                current_version=result.get('current_version'),
+                latest_version=result.get('latest_version'),
+                force_update=result.get('force_update'),
+                update_desc=result.get('update_desc'),
+            )
+            return
+        msg = '当前已是最新版本（%s）' % result.get('current_version', '')
+        self._publish_status('update_checked', silent=silent, message=msg, log=msg if not silent else '')
+
+    def _apply_update(self, payload=None):
+        if self._update_running:
+            return
+        threading.Thread(
+            target=self._apply_update_worker,
+            args=(payload or {},),
+            name='apply-update',
+            daemon=True,
+        ).start()
+
+    def _apply_update_worker(self, payload: dict):
+        from app.ops.update_client import UpdateClient
+
+        self._update_running = True
+        try:
+            client = UpdateClient(self.config_store, self.project_root)
+            use_patch = bool(payload.get('use_patch', True))
+
+            def on_progress(ratio, msg=''):
+                self._publish_progress(percent=int(float(ratio or 0) * 100), message=msg or '更新中…', phase='update')
+
+            result = client.apply(use_patch=use_patch, on_progress=on_progress)
+            if not result.get('ok'):
+                self._publish_status('update_failed', message=result.get('error', '更新失败'))
+                return
+            if result.get('updated'):
+                self._publish_status(
+                    'update_finished',
+                    updated=True,
+                    version=result.get('version'),
+                    install_dir=result.get('install_dir'),
+                    backup_dir=result.get('backup_dir'),
+                    log='已更新至 %s，请重启客户端' % result.get('version'),
+                )
+            else:
+                self._publish_status('update_finished', updated=False, message='无需更新')
+        finally:
+            self._update_running = False
+
+    def _skip_update(self, payload=None):
+        from app.ops.update_client import UpdateClient
+
+        version = str((payload or {}).get('version') or '').strip()
+        if not version:
+            return
+        UpdateClient(self.config_store, self.project_root).skip_version(version)
+        self._publish_status('update_skipped', log='已跳过版本 %s' % version)
 
     def _save_settings(self, payload: dict):
         payload = payload or {}
@@ -2182,6 +2253,8 @@ class ClientController:
             self.lyrics.matcher.set_offset_ms(off + lead)
         if payload.get('update_url') is not None:
             self.config_store.set('update.check_url', str(payload['update_url']).strip())
+        if payload.get('update_auto_check') is not None:
+            self.config_store.set('update.auto_check', bool(payload['update_auto_check']))
         if payload.get('log_dir'):
             self.config_store.set('paths.log_dir', str(payload['log_dir']).strip())
         if payload.get('sr_type'):

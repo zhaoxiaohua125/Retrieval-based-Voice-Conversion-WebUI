@@ -351,7 +351,9 @@ class SettingsDialog(QDialog):
             form = QFormLayout(box)
             self.edit_update_url = QLineEdit()
             self.edit_log_dir = QLineEdit()
+            self.chk_auto_check = QCheckBox('启动时自动检查更新')
             form.addRow('更新地址', self.edit_update_url)
+            form.addRow('', self.chk_auto_check)
             form.addRow('日志目录', self.edit_log_dir)
             root.addWidget(box)
         return self._scroll_page(build)
@@ -414,6 +416,7 @@ class SettingsDialog(QDialog):
         layout = load_ui_layout().get('settings') or {}
         self.spin_osc.setValue(int(self.config.get('lyrics.osc_port', layout.get('osc_port', 9000))))
         self.edit_update_url.setText(str(self.config.get('update.check_url', layout.get('update_url', ''))))
+        self.chk_auto_check.setChecked(bool(self.config.get('update.auto_check', True)))
         self.edit_log_dir.setText(str(self.config.get('paths.log_dir', layout.get('log_dir', 'logs/client'))))
         self.spin_sample_rate.setValue(int(self.config.get('audio.sample_rate', 48000)))
         self.chk_wasapi.setChecked(bool(self.config.get('audio.wasapi_exclusive', False)))
@@ -575,6 +578,7 @@ class SettingsDialog(QDialog):
         payload = {
             'osc_port': self.spin_osc.value(),
             'update_url': self.edit_update_url.text().strip(),
+            'update_auto_check': self.chk_auto_check.isChecked(),
             'log_dir': self.edit_log_dir.text().strip(),
             'sr_type': sr_type,
             'lyrics': {
