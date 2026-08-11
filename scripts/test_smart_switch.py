@@ -9,7 +9,7 @@ if str(ROOT) not in sys.path:
 
 import numpy as np
 
-from app.playback.waveform_peaks import is_vocal_energy_region, silence_threshold
+from app.playback.waveform_peaks import inst_segment_span_at, is_vocal_energy_region, silence_threshold
 
 
 def test_energy_region():
@@ -20,6 +20,14 @@ def test_energy_region():
     assert is_vocal_energy_region(40.0, peaks, dur, th)
     assert not is_vocal_energy_region(70.0, peaks, dur, th)
     assert is_vocal_energy_region(5.0, None, dur)
+    intro = inst_segment_span_at(5.0, peaks, dur, th)
+    assert intro is not None and intro[1] - intro[0] >= 20.0
+    assert inst_segment_span_at(40.0, peaks, dur, th) is None
+    narrow = np.full(100, 0.9, dtype=np.float32)
+    narrow[50] = 0.03
+    narrow_dur = 100.0
+    narrow_th = silence_threshold(narrow)
+    assert inst_segment_span_at(50.0, narrow, narrow_dur, narrow_th) is None
     print('smart_switch energy smoke passed')
 
 

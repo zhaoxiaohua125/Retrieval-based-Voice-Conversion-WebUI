@@ -386,7 +386,12 @@ class PlaybackPage(QWidget):
             self.progress.blockSignals(True)
             self.progress.setValue(int(min(1.0, pos / dur) * 1000))
             self.progress.blockSignals(False)
-            self.waveform.set_playback(pos, dur, playing and not paused)
+            self.waveform.set_playback(
+                pos,
+                dur,
+                playing and not paused,
+                smart_overlay=bool(payload.get('smart_overlay')),
+            )
         if self._mode in ('ai_sing', 'ai_follow', 'reverb_talk', 'normal_talk'):
             self._sync_transport(playing, paused)
 

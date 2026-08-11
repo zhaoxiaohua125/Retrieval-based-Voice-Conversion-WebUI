@@ -15,7 +15,13 @@ from app.config_store import ConfigStore
 from app.events import BusMessage, ModuleId, SignalType
 from app.integration.state import ClientState
 from app.lyrics import LyricsService
-from app.playback.waveform_peaks import is_vocal_energy_region, load_waveform_peaks
+from app.playback.waveform_peaks import (
+    SILENCE_FLOOR,
+    inst_segment_span_at,
+    is_vocal_energy_region,
+    load_waveform_peaks,
+    silence_threshold,
+)
 from app.ops.exceptions import classify_exception
 from app.playback import WavPlayer
 from app.playback.library import delete_song_from_disk, find_lrc_in_dir, scan_song_library
@@ -70,6 +76,7 @@ class ClientController:
         self._smart_switch_busy = False
         self._smart_peaks = None
         self._smart_peaks_dur = 0.0
+        self._smart_peaks_thresh = 0.12
         self._smart_silent_acc = 0.0
         self._smart_vocal_acc = 0.0
 
@@ -364,6 +371,7 @@ class ClientController:
         if not path or not Path(path).is_file():
             self._smart_peaks = None
             self._smart_peaks_dur = 0.0
+            self._smart_peaks_thresh = 0.12
             return
         try:
             peaks, dur = load_waveform_peaks(path)
@@ -371,18 +379,26 @@ class ClientController:
             logger.warning('smart_switch vocal peaks failed: %s', exc)
             self._smart_peaks = None
             self._smart_peaks_dur = 0.0
+            self._smart_peaks_thresh = 0.12
             return
         song = self.state.selected_song or {}
         if str(song.get('vocal_path') or '') != path:
             return
         self._smart_peaks = peaks
         self._smart_peaks_dur = float(dur or 0.0)
-        logger.info('smart_switch peaks ready dur=%.1fs path=%s', self._smart_peaks_dur, Path(path).name)
+        self._smart_peaks_thresh = silence_threshold(peaks, SILENCE_FLOOR)
+        logger.info(
+            'smart_switch peaks ready dur=%.1fs thresh=%.3f path=%s',
+            self._smart_peaks_dur,
+            self._smart_peaks_thresh,
+            Path(path).name,
+        )
 
     def _schedule_smart_peaks(self, song: dict):
         path = str((song or {}).get('vocal_path') or '')
         self._smart_peaks = None
         self._smart_peaks_dur = 0.0
+        self._smart_peaks_thresh = 0.12
         self._smart_silent_acc = 0.0
         self._smart_vocal_acc = 0.0
         if not path:
@@ -397,6 +413,11 @@ class ClientController:
     def _smart_switch_enabled(self) -> bool:
         return bool(self.config_store.get('playback.smart_switch', False))
 
+    def _playback_tick_extra(self) -> dict:
+        if self._smart_reverb_active and self.state.selected_mode in ('ai_sing', 'ai_follow'):
+            return {'smart_overlay': True, 'base_mode': self.state.selected_mode}
+        return {}
+
     def _maybe_smart_switch(self, pos: float, playing: bool, paused: bool = False):
         if self._smart_switch_busy or paused or not playing:
             return
@@ -409,7 +430,8 @@ class ClientController:
             return
         min_hold = float(self.config_store.get('playback.smart_switch_min_gap_sec', 3.0) or 3.0)
         vocal_hold = min(1.0, max(0.35, min_hold * 0.25))
-        in_vocal = is_vocal_energy_region(pos, self._smart_peaks, self._smart_peaks_dur)
+        thresh = self._smart_peaks_thresh
+        in_vocal = is_vocal_energy_region(pos, self._smart_peaks, self._smart_peaks_dur, thresh)
         if self._smart_reverb_active:
             if self.state.mode != 'reverb_talk':
                 return
@@ -428,7 +450,12 @@ class ClientController:
         if in_vocal:
             self._smart_silent_acc = 0.0
         else:
-            self._smart_silent_acc += 0.03
+            span = inst_segment_span_at(pos, self._smart_peaks, self._smart_peaks_dur, thresh)
+            seg_len = (span[1] - span[0]) if span else 0.0
+            if seg_len >= min_hold:
+                self._smart_silent_acc += 0.03
+            else:
+                self._smart_silent_acc = 0.0
         if not in_vocal and self._smart_silent_acc >= min_hold:
             self._smart_switch_busy = True
             self._smart_silent_acc = 0.0
@@ -541,6 +568,7 @@ class ClientController:
                 paused=paused,
                 overlay_mode=mode,
                 base_mode=self.state.selected_mode,
+                smart_overlay=(mode == 'reverb_talk' and self.state.selected_mode in ('ai_sing', 'ai_follow')),
             )
         return True
 
@@ -1208,6 +1236,7 @@ class ClientController:
                     duration=dur,
                     playing=playing,
                     paused=paused,
+                    **self._playback_tick_extra(),
                 )
             elif self._player.is_active:
                 stuck = 0
@@ -1222,6 +1251,7 @@ class ClientController:
                     duration=self._player.duration,
                     playing=self._player.is_playing,
                     paused=not self._player.is_playing and self._player.is_active,
+                    **self._playback_tick_extra(),
                 )
             elif self.state.mode == 'ai_sing' and self.state.playback_running:
                 stuck += 1

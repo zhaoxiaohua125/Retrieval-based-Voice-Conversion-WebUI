@@ -7,7 +7,13 @@ from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QLinearGradient, QPainter, QPen
 from PyQt6.QtWidgets import QWidget
 
-from app.playback.waveform_peaks import is_vocal_energy_region, load_waveform_peaks, silence_threshold
+from app.playback.waveform_peaks import (
+    SILENCE_FLOOR,
+    is_vocal_energy_region,
+    load_waveform_peaks,
+    peak_energy_at,
+    silence_threshold,
+)
 
 
 class _WaveformLoadWorker(QThread):
@@ -32,7 +38,6 @@ class WaveformWidget(QWidget):
     WINDOW_SEC = 36.0
     PLAYHEAD_RATIO = 0.36
     BAR_GAP = 3
-    SILENCE_FLOOR = 0.06
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -42,6 +47,7 @@ class WaveformWidget(QWidget):
         self._display_sec = 0.0
         self._sync_mono = time.monotonic()
         self._playing = False
+        self._smart_overlay = False
         self._path = ''
         self._loader = None
         self._pulse = 0.0
@@ -102,10 +108,17 @@ class WaveformWidget(QWidget):
             self._duration = float(duration)
         self._sync(float(sec or 0), self._playing)
 
-    def set_playback(self, sec: float, duration: float, playing: bool):
+    def set_playback(self, sec: float, duration: float, playing: bool, smart_overlay: bool = False):
         if duration > 0:
             self._duration = float(duration)
+        self._smart_overlay = bool(smart_overlay)
         self._sync(float(sec or 0), bool(playing))
+
+    def set_smart_overlay(self, active: bool):
+        active = bool(active)
+        if active != self._smart_overlay:
+            self._smart_overlay = active
+            self.update()
 
     def reset_position(self):
         self._sync(0.0, False)
@@ -132,15 +145,10 @@ class WaveformWidget(QWidget):
             self.update()
 
     def _silence_threshold(self) -> float:
-        return silence_threshold(self._peaks, self.SILENCE_FLOOR)
+        return silence_threshold(self._peaks, SILENCE_FLOOR)
 
     def _amp_at(self, t: float) -> float:
-        peaks = self._peaks
-        if peaks is None or len(peaks) == 0 or self._duration <= 0:
-            return 0.0
-        idx = int(t / self._duration * (len(peaks) - 1))
-        idx = max(0, min(idx, len(peaks) - 1))
-        return float(peaks[idx])
+        return peak_energy_at(t, self._peaks, self._duration)
 
     def is_inst_region(self, t: float | None = None) -> bool:
         t = self._display_sec if t is None else float(t)
@@ -201,6 +209,20 @@ class WaveformWidget(QWidget):
         thresh = self._silence_threshold()
         pulse = (np.sin(self._pulse) * 0.06 + 1.0) if self._playing else 1.0
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        span = self._window_span()
+        head = w * self.PLAYHEAD_RATIO
+        t0 = self._display_sec - head / max(w, 1) * span
+        t1 = self._display_sec + (w - head) / max(w, 1) * span
+        if t1 > t0:
+            p.setPen(Qt.PenStyle.NoPen)
+            x = 0
+            while x < w:
+                t = self._time_for_x(x + bar_w * 0.5, w)
+                vocal = is_vocal_energy_region(t, self._peaks, self._duration, thresh)
+                x2 = min(w, x + bar_w + 1)
+                if not vocal:
+                    p.fillRect(x, 0, x2 - x, h, QColor('#f1f5f9'))
+                x = x2
         played_prog = int(head_x)
         if played_prog > 0:
             p.fillRect(0, h - 4, played_prog, 4, QColor(37, 99, 235, 70))
@@ -213,8 +235,8 @@ class WaveformWidget(QWidget):
                 continue
             xi = int(x)
             played = t <= self._display_sec
-            silent = amp < thresh
-            if silent:
+            vocal = is_vocal_energy_region(t, self._peaks, self._duration, thresh)
+            if not vocal:
                 seg_pen = QPen(QColor('#64748b' if played else '#94a3b8'), 1, Qt.PenStyle.DashLine)
                 p.setPen(seg_pen)
                 p.drawLine(xi, mid, xi + bar_w, mid)
@@ -226,7 +248,8 @@ class WaveformWidget(QWidget):
             if dist < 0.8:
                 color = QColor('#1d4ed8' if played else '#bfdbfe')
             p.fillRect(xi, mid - bh, bar_w, bh * 2, color)
-        p.setPen(QPen(QColor('#2563eb'), 2))
+        head_color = QColor('#d97706' if self._smart_overlay else '#2563eb')
+        p.setPen(QPen(head_color, 2))
         p.drawLine(head_x, 6, head_x, h - 10)
         p.end()
 

@@ -1882,3 +1882,26 @@ ewrite；扩展 LyricWord 与字级 matcher
 - **根因**: 单曲循环 `return True` 导致 playback tick 退出；`set_lyric_tick` 在 index=-1 时不刷新 UI
 - **修复**: 原地循环 `return False` 保持 tick；`lyrics.reset_sync(0)`；开头位置重置歌词 UI
 - **修改的文件列表**: app/integration/controller.py、app/lyrics/service.py、app/ui/pages/playback_page.py、README.md
+
+---
+
+## 会话总结 - 2026-08-11 (13)
+
+- **会话目的**: 继续打磨智能切与波形，让判定逻辑与 UI 完全一致，减少短间奏误切
+- **主要任务**:
+  1. `waveform_peaks` 抽出 `peak_energy_at` / `inst_segment_span_at` / `SILENCE_FLOOR`，智能切与波形共用同一阈值
+  2. 智能切仅在伴奏段长度 ≥「静音保持」时才累计，跳过极短间奏
+  3. 波形绘制改为 `is_vocal_energy_region` 判定（虚线/竖条与智能切 WYSIWYG）
+  4. 智能混响覆盖时 playhead 变琥珀色并显示「智能混响」提示
+  5. `playback_tick` 携带 `smart_overlay` 供波形实时同步
+- **关键决策**: 控制器加载 peaks 时缓存 `silence_threshold`，避免与波形各自算阈值产生偏差
+- **技术栈**: Python、NumPy、soundfile、PyQt6
+- **修改的文件列表**: app/playback/waveform_peaks.py、app/integration/controller.py、app/ui/waveform_widget.py、app/ui/pages/playback_page.py、scripts/test_smart_switch.py、README.md
+
+---
+
+## 会话总结 - 2026-08-11 (14)
+
+- **会话目的**: 去掉智能混响时波形上的文字提示，保留琥珀色 playhead
+- **修改**: `waveform_widget.py` 移除「智能混响」drawText，playhead 琥珀色 `#d97706` 不变
+- **修改的文件列表**: app/ui/waveform_widget.py、README.md
