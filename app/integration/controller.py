@@ -515,7 +515,7 @@ class ClientController:
 
     _reverb_inst_state = _timeline_inst_state
 
-    def _switch_unified_playback(self, mode: str, song: dict, carry_pos: float = 0.0, autoplay: bool = True, quiet: bool = False) -> bool:
+    def _switch_unified_playback(self, mode: str, song: dict, carry_pos: float | None = None, autoplay: bool = True, quiet: bool = False) -> bool:
         song = dict(song or {})
         if not self._song_unified_ready(song, mode):
             return False
@@ -525,7 +525,7 @@ class ClientController:
             self._release_ai_follow(handoff=True)
         inst_path = song.get('instrumental_path') or ''
         vocal_path = song.get('vocal_path') or ''
-        pos = carry_pos if carry_pos > 0 else self._current_song_position()
+        pos = self._current_song_position() if carry_pos is None else max(0.0, float(carry_pos))
         mgr_was = self._unified_stream_active()
         tick_alive = self._playback_tick is not None and self._playback_tick.is_alive()
         try:
@@ -884,19 +884,29 @@ class ClientController:
         mode = self.state.selected_mode if self.state.selected_mode in MODE_IDS else 'ai_sing'
         self._apply_mode(mode, autoplay=True)
 
-    def _active_playback_mode(self) -> str:
-        if not self._is_timeline_playing():
-            return ''
+    def _session_playback_mode(self) -> str:
+        """当前播放会话模式（含暂停/智能混响覆盖），用于切歌。"""
         mgr = self._unified_mgr()
-        if mgr is not None and mgr.config.playback_mode in PLAYBACK_MODES:
-            return mgr.config.playback_mode
-        if self.state.ai_follow_running or self.state.ai_follow_preparing or self.state.mode == 'ai_follow':
+        if mgr is not None:
+            if mgr.inst_duration > 0 and mgr.inst_playing:
+                return mgr.config.playback_mode
+            if mgr.config.playback_mode in ('reverb_talk', 'normal_talk') and self.state.passthrough_running:
+                return mgr.config.playback_mode
+        pf = self._pitch_follow
+        if self.state.ai_follow_running or self.state.ai_follow_preparing or (pf is not None and pf.running):
             return 'ai_follow'
         if self.state.mode in ('reverb_talk', 'normal_talk') and self.state.passthrough_running:
             return self.state.mode
-        if self.state.mode == 'ai_sing' or (self.state.playback_running and self._player.is_active):
+        if self.state.mode == 'ai_sing' and self._player.is_active:
             return 'ai_sing'
+        if self.state.playback_running and self.state.mode in PLAYBACK_MODES:
+            return self.state.mode
         return ''
+
+    def _active_playback_mode(self) -> str:
+        if not self._is_timeline_playing():
+            return ''
+        return self._session_playback_mode()
 
     def _select_song(self, payload: dict):
         payload = payload or {}
@@ -950,11 +960,12 @@ class ClientController:
                 log='未找到歌词文件（期望同名 %s），仅播放音频' % hint,
             )
         if resume_if_playing and switching:
-            mode = self._active_playback_mode()
+            mode = self._session_playback_mode()
             if mode:
                 title = song.get('title') or Path(song.get('play_path') or '').stem
                 self._inst_end_sent = False
-                self._continue_mode_with_song(mode, dict(self.state.selected_song), 0.0)
+                autoplay = self._is_timeline_playing()
+                self._continue_mode_with_song(mode, dict(self.state.selected_song), 0.0, autoplay)
                 self._publish_status('track_advance', title=title, log='切换歌曲：%s' % title)
                 return
         def _preload_done():

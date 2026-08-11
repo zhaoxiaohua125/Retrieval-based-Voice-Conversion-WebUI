@@ -1915,3 +1915,16 @@ ewrite；扩展 LyricWord 与字级 matcher
   1. 切回防抖 `vocal_hold` 从 `min_hold×0.25`（约 0.75s）降至 `min_hold×0.08`（约 0.24s），上限 0.25s
   2. 智能混响态下增加 0.25s 唱段前瞻，人声将起时提前累计
 - **修改的文件列表**: app/integration/controller.py、README.md
+
+---
+
+## 会话总结 - 2026-08-11 (16)
+
+- **问题**: 播放中双击歌单切歌，歌词已切换但音频仍播上一首
+- **根因**:
+  1. `_select_song` 仅用 `_active_playback_mode()`（要求未暂停），暂停/智能混响等态下判定为空，只预加载不重启播放
+  2. `_switch_unified_playback` 把 `carry_pos=0` 误当「沿用旧进度」，切歌应从 0 开始
+- **修复**:
+  1. 新增 `_session_playback_mode()`（含暂停/混响覆盖），切歌时用它决定是否重启当前模式
+  2. `carry_pos=None` 才沿用进度，显式传 `0.0` 从头播
+- **修改的文件列表**: app/integration/controller.py、README.md

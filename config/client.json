@@ -78,7 +78,7 @@
   },
   "playback": {
     "play_mode": "repeat_one",
-    "smart_switch": true,
+    "smart_switch": false,
     "smart_switch_min_gap_sec": 1.0
   },
   "pitchfix": {
@@ -101,8 +101,8 @@
   },
   "ui": {
     "geometry": [
-      470,
-      296,
+      582,
+      300,
       1280,
       880
     ],
