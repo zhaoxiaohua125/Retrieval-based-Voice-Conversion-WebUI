@@ -11,6 +11,10 @@
     "auto_check": true,
     "skip_version": ""
   },
+  "logs": {
+    "auto_upload_crash": true,
+    "upload_url": ""
+  },
   "audio": {
     "sample_rate": 48000,
     "block_ms": 200,
@@ -102,8 +106,8 @@
   },
   "ui": {
     "geometry": [
-      546,
-      328,
+      596,
+      240,
       1280,
       875
     ],

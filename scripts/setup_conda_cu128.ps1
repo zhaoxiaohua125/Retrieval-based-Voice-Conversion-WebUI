@@ -18,10 +18,12 @@ Write-Host "=== Create $EnvName for RTX 50+ (cu128) ==="
 if ($LASTEXITCODE -ne 0) { throw "conda create failed" }
 
 $py = Join-Path $CondaBase "envs\$EnvName\python.exe"
-Write-Host "Install torch cu128..."
+Write-Host "Install torch cu128 (mirror, ~3.3GB)..."
+$TorchIndex = "https://mirrors.nju.edu.cn/pytorch/whl/cu128"
+$PypiExtra = "https://mirrors.pku.edu.cn/pypi/simple"
 & $py -m pip install torch==2.7.1+cu128 torchaudio==2.7.1+cu128 `
-    --index-url https://download.pytorch.org/whl/cu128 `
-    --extra-index-url https://pypi.org/simple
+    --index-url $TorchIndex `
+    --extra-index-url $PypiExtra
 if ($LASTEXITCODE -ne 0) { throw "torch cu128 install failed" }
 
 Write-Host "Install project deps..."

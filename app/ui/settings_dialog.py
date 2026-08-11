@@ -352,8 +352,13 @@ class SettingsDialog(QDialog):
             self.edit_update_url = QLineEdit()
             self.edit_log_dir = QLineEdit()
             self.chk_auto_check = QCheckBox('启动时自动检查更新')
+            self.chk_crash_upload = QCheckBox('崩溃时自动上报日志')
+            self.edit_log_upload_url = QLineEdit()
+            self.edit_log_upload_url.setPlaceholderText('留空则从更新地址推导 /api/logs/upload')
             form.addRow('更新地址', self.edit_update_url)
             form.addRow('', self.chk_auto_check)
+            form.addRow('', self.chk_crash_upload)
+            form.addRow('日志上报地址', self.edit_log_upload_url)
             form.addRow('日志目录', self.edit_log_dir)
             root.addWidget(box)
         return self._scroll_page(build)
@@ -417,6 +422,8 @@ class SettingsDialog(QDialog):
         self.spin_osc.setValue(int(self.config.get('lyrics.osc_port', layout.get('osc_port', 9000))))
         self.edit_update_url.setText(str(self.config.get('update.check_url', layout.get('update_url', ''))))
         self.chk_auto_check.setChecked(bool(self.config.get('update.auto_check', True)))
+        self.chk_crash_upload.setChecked(bool(self.config.get('logs.auto_upload_crash', True)))
+        self.edit_log_upload_url.setText(str(self.config.get('logs.upload_url', '')))
         self.edit_log_dir.setText(str(self.config.get('paths.log_dir', layout.get('log_dir', 'logs/client'))))
         self.spin_sample_rate.setValue(int(self.config.get('audio.sample_rate', 48000)))
         self.chk_wasapi.setChecked(bool(self.config.get('audio.wasapi_exclusive', False)))
@@ -579,6 +586,8 @@ class SettingsDialog(QDialog):
             'osc_port': self.spin_osc.value(),
             'update_url': self.edit_update_url.text().strip(),
             'update_auto_check': self.chk_auto_check.isChecked(),
+            'crash_auto_upload': self.chk_crash_upload.isChecked(),
+            'log_upload_url': self.edit_log_upload_url.text().strip(),
             'log_dir': self.edit_log_dir.text().strip(),
             'sr_type': sr_type,
             'lyrics': {

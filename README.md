@@ -2032,3 +2032,14 @@ ewrite；扩展 LyricWord 与字级 matcher
 - **技术栈**: FastAPI、uvicorn、PyQt6、urllib 下载、zip 增量/全量
 - **修改的文件列表**: server/main.py、server/tools/publish_release.py、server/data/version.json、app/ops/install_root.py、app/ops/update_client.py、app/ops/updater.py、app/ui/update_dialog.py、app/integration/controller.py、app/ui/settings_dialog.py、app/config_store.py、scripts/run_ui_skeleton.py、scripts/test_update_flow.py、README.md
 
+---
+
+## 会话总结 - 2026-08-11 (27)
+
+- **诉求**: 崩溃日志自动上报
+- **实现**:
+  1. `app/ops/crash_reporter.py`：异常退出检测、打包上传、sys/thread excepthook
+  2. 启动时若上次未正常退出则补传；退出时写 `.last_exit_clean` 标记
+  3. 上报地址默认从 `update.check_url` 推导 `/api/logs/upload`；设置页可开关
+- **修改的文件列表**: app/ops/crash_reporter.py、app/ops/log_reporter.py、app/config_store.py、scripts/run_ui_skeleton.py、app/ui/settings_dialog.py、app/integration/controller.py、config/client.json、server/README.md、README.md
+

@@ -60,9 +60,6 @@ from app.ui.tray import fallback_app_icon
 
 def _install_crash_diagnostics():
     import faulthandler
-    import logging
-    import threading
-    import traceback
 
     log_dir = ROOT / 'logs' / 'client'
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -70,16 +67,6 @@ def _install_crash_diagnostics():
         faulthandler.enable(file=open(log_dir / 'crash.log', 'a', encoding='utf-8'), all_threads=True)
     except OSError:
         faulthandler.enable()
-    logger = logging.getLogger('rvc_client')
-
-    def _thread_hook(args):
-        logger.error(
-            'uncaught thread exception in %s:\n%s',
-            args.thread,
-            ''.join(traceback.format_exception(args.exc_type, args.exc_value, args.exc_traceback)),
-        )
-
-    threading.excepthook = _thread_hook
 
 
 def _startup_log(msg: str):
@@ -106,6 +93,13 @@ def _fatal_startup(app, title: str, detail: str, exc: BaseException | None = Non
         text = '%s\n\n%s' % (detail, traceback.format_exc())
     logging.getLogger('rvc_client').error('startup failed: %s\n%s', title, text)
     _startup_log('FATAL: %s\n%s' % (title, text))
+    try:
+        from app.config_store import ConfigStore
+        from app.ops.crash_reporter import upload_crash_logs
+
+        upload_crash_logs(ROOT, ConfigStore().load(), reason='startup_fatal', detail=text, sync=True)
+    except Exception:
+        pass
     try:
         if app is not None:
             QMessageBox.critical(None, title, detail if exc is None else '%s\n\n详见 logs/client/startup.log' % detail)
@@ -147,6 +141,11 @@ def main():
         console_level = logging.WARNING if (ROOT / 'VERSION').is_file() else logging.INFO
         setup_rotating_logging(console_level=console_level)
         _install_crash_diagnostics()
+        from app.config_store import ConfigStore
+        from app.ops.crash_reporter import install_crash_hooks, mark_clean_exit, startup_crash_check
+
+        boot_config = ConfigStore().load()
+        startup_crash_check(ROOT, boot_config)
         _setup_qt_runtime(ROOT)
         _startup_log('logging ready')
         scheduler = AppScheduler.instance().start()
@@ -171,9 +170,10 @@ def main():
             QMessageBox.warning(None, '提示', '当前系统托盘不可用，托盘菜单将跳过')
 
         bridge = UiBridge()
-        controller = ClientController(scheduler, project_root=ROOT)
+        controller = ClientController(scheduler, project_root=ROOT, config=boot_config)
         controller.set_ui_bridge(bridge)
         controller.start()
+        install_crash_hooks(ROOT, controller.config_store)
         _startup_log('controller ready')
 
         def on_user_action(action: str, payload: dict):
@@ -211,6 +211,10 @@ def main():
         window._quit_shutdown = lambda: scheduler.shutdown() if scheduler.running else None
 
         def _finalize():
+            try:
+                mark_clean_exit(ROOT, controller.config_store)
+            except Exception:
+                pass
             if scheduler.running:
                 scheduler.shutdown()
             tray = getattr(window, '_quit_tray', None)

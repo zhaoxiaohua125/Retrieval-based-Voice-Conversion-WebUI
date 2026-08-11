@@ -21,6 +21,10 @@ DEFAULT_CONFIG = {
         'auto_check': True,
         'skip_version': '',
     },
+    'logs': {
+        'auto_upload_crash': True,
+        'upload_url': '',
+    },
     'audio': {
         'sample_rate': 48000,
         'block_ms': 200,

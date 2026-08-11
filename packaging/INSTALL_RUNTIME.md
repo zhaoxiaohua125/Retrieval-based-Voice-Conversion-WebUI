@@ -26,7 +26,7 @@ build_demo_package_cu128.bat    # 直接打 50 系及以上包
 setup_conda_cu128.bat
 ```
 
-会创建环境并安装 `torch==2.7.1+cu128` + `requirments_cu128_py312.txt`。
+会创建环境并安装 `torch==2.7.1+cu128` + `requirments_cu128_py312.txt`（PyTorch 从南京大学镜像下载，约 3.3GB）。
 
 ## 打包过程
 

@@ -2273,6 +2273,10 @@ class ClientController:
             self.config_store.set('update.check_url', str(payload['update_url']).strip())
         if payload.get('update_auto_check') is not None:
             self.config_store.set('update.auto_check', bool(payload['update_auto_check']))
+        if payload.get('crash_auto_upload') is not None:
+            self.config_store.set('logs.auto_upload_crash', bool(payload['crash_auto_upload']))
+        if payload.get('log_upload_url') is not None:
+            self.config_store.set('logs.upload_url', str(payload['log_upload_url']).strip())
         if payload.get('log_dir'):
             self.config_store.set('paths.log_dir', str(payload['log_dir']).strip())
         if payload.get('sr_type'):

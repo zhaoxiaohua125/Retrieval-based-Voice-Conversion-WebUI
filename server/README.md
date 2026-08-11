@@ -51,10 +51,15 @@ python scripts/make_update_zip.py --since abc1234 --to HEAD --version 0.1.2
 
 ```json
 "update": {
-  "check_url": "http://127.0.0.1:8765/version.json",
-  "auto_check": true
+  "check_url": "http://127.0.0.1:8765/version.json"
+},
+"logs": {
+  "auto_upload_crash": true,
+  "upload_url": ""
 }
 ```
+
+`upload_url` 留空时，自动从 `update.check_url` 推导为 `/api/logs/upload`。崩溃/异常退出时会打包 `client.log`、`crash.log` 等并 POST 上报。
 
 ## 目录
 
