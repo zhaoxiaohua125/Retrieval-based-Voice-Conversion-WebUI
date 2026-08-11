@@ -1738,6 +1738,40 @@ ewrite；扩展 LyricWord 与字级 matcher
 
 ---
 
+## 会话总结 - 2026-08-11 (2)
+
+- **会话主要目的**: 增加「智能切模式」开关与自动前奏/间奏切混响说话
+- **完成的主要任务**:
+  1. 设置 → 播放设置：勾选「智能切模式」+ 间奏判定秒数（默认 3s）
+  2. `is_vocal_region()` 按 LRC 行轴判定唱段 vs 前奏/长间奏/尾奏
+  3. 播放中若已选 AI 唱歌/跟唱且有歌词：非唱段自动切混响说话，唱段回到所选模式
+  4. 手动点混响/普通说话后本首不再自动切；切歌重置
+- **配置项**: `playback.smart_switch`、`playback.smart_switch_min_gap_sec`
+- **修改的文件列表**: app/lyrics/matcher.py、app/config_store.py、app/ui/settings_dialog.py、app/integration/controller.py、scripts/test_smart_switch.py、README.md
+
+---
+
+## 会话总结 - 2026-08-11 (3)
+
+- **会话主要目的**: 修复智能切模式无效果
+- **根因**: LRC 解析把每行 `end_sec` 设为下一句 `start`，旧逻辑把整段间奏都算进唱段，`is_vocal_region` 恒为 True
+- **修复**: 用 `_line_sing_end()` 估算实际句末（逐字取最后一字 / 行级按字数估时长），再判长间奏；切换条件改为 `_is_timeline_playing()`；写 client.log 切换日志
+- **修改的文件列表**: app/lyrics/matcher.py、app/integration/controller.py、scripts/test_smart_switch.py、README.md
+
+---
+
+## 会话总结 - 2026-08-11 (4)
+
+- **会话主要目的**: 波形 UI 对标声迹（伴奏段平直虚线），说明智能切应基于人声音轨能量而非歌词
+- **完成的主要任务**:
+  1. 波形优先加载 `vocal_path`（converted_vocal）分析人声能量
+  2. 低能量区画水平虚线，高能量区画竖条；播放头处显示「伴奏段」
+  3. 底部已播放进度条 + 工具提示说明
+- **未改**: 智能切仍用 LRC 句轴（后续可改为人声 peaks 阈值，与波形同源）
+- **修改的文件列表**: app/ui/waveform_widget.py、app/ui/pages/playback_page.py、README.md
+
+---
+
 ## 会话总结 - 2026-08-11
 
 - **会话主要目的**: 对比 `打包演示客户端.bat` 与 `build_demo_package.bat` 打出的包是否相同
@@ -1748,3 +1782,64 @@ ewrite；扩展 LyricWord 与字级 matcher
   3. 前者传了已失效的 `-Zip`（当前 ps1 无该参数，且提示手动 zip）；后者明确不自动 zip
 - **使用的技术栈**: Windows bat、PowerShell、conda-pack
 - **修改的文件列表**: README.md（仅追加会话总结）
+
+---
+
+## 会话总结 - 2026-08-11 (5)
+
+- **会话主要目的**: 智能切改按 converted_vocal 人声能量，不再依赖 LRC
+- **完成的主要任务**:
+  1. 抽出 `silence_threshold` / `is_vocal_energy_region`（与波形虚线同源）
+  2. 选歌后台加载 vocal peaks；智能切去掉 `loaded_lyrics` 限制
+  3. 「静音保持」秒数作连续无人声防抖后再切混响
+  4. 设置文案更新为无需歌词
+- **修改的文件列表**: app/ui/waveform_widget.py、app/integration/controller.py、app/ui/settings_dialog.py、scripts/test_smart_switch.py、README.md
+
+---
+
+## 会话总结 - 2026-08-11 (6)
+
+- **修复**: 去掉波形播放头旁「伴奏段」文字，仅保留虚线/竖条视觉
+- **修改的文件列表**: app/ui/waveform_widget.py、README.md
+
+---
+
+## 会话总结 - 2026-08-11 (7)
+
+- **会话主要目的**: 消除四模式切换时的 stop→start 停顿，尤其混响说话 ↔ 普通说话
+- **完成的主要任务**:
+  1. `AudioService.start_stream` 流已运行时原地更新混响/增益/伴奏，不再因 reverb 变化重建流
+  2. `AudioStreamManager` 记录 `_inst_path`，同曲仅 seek、不重载 WAV
+  3. `_start_talk` 说话模式互切走热路径，不 stop 音频流、不重启 tick
+  4. handoff 路径 sleep 从 0.15~0.25s 降至 0.03~0.05s；智能切/续播不再先 stop 再 start 说话
+- **关键决策**: 混响↔普通仅改回调参数；跨引擎（AI 唱歌/跟唱 ↔ 说话）仍须释放旧源，但缩短等待
+- **技术栈**: Python、sounddevice、AudioStreamManager、AppController
+- **修改的文件列表**: app/audio/service.py、app/audio/stream_manager.py、app/integration/controller.py、README.md
+
+---
+
+## 会话总结 - 2026-08-11 (7)
+
+- **会话主要目的**: 消除四模式切换时的 stop→start 停顿，尤其混响说话 ↔ 普通说话
+- **完成的主要任务**:
+  1. `AudioService.start_stream` 流已运行时原地更新混响/增益/伴奏，不再因 reverb 变化重建流
+  2. `AudioStreamManager` 记录 `_inst_path`，同曲仅 seek、不重载 WAV
+  3. `_start_talk` 说话模式互切走热路径，不 stop 音频流、不重启 tick
+  4. handoff 路径 sleep 从 0.15~0.25s 降至 0.03~0.05s；智能切/续播不再先 stop 再 start 说话
+- **关键决策**: 混响↔普通仅改回调参数；跨引擎（AI 唱歌/跟唱 ↔ 说话）仍须释放旧源，但缩短等待
+- **技术栈**: Python、sounddevice、AudioStreamManager、AppController
+- **修改的文件列表**: app/audio/service.py、app/audio/stream_manager.py、app/integration/controller.py、README.md
+
+---
+
+## 会话总结 - 2026-08-11 (8)
+
+- **会话主要目的**: 四模式（AI 唱歌 / AI 跟唱 / 混响说话 / 普通说话）切换与混响↔普通一样无缝
+- **完成的主要任务**:
+  1. **单流架构**：`AudioStreamManager` 以 `instrumental.wav` 为唯一时间轴，回调内按 `playback_mode` 混音
+  2. **AI 唱歌** 改为伴奏 + `converted_vocal` 分轨（切换不再重启 WavPlayer）
+  3. **AI 跟唱** VAD 迁入 stream manager，不再独占第二条 sounddevice 流
+  4. `switch_playback_mode` + `_switch_unified_playback`：四模式互切只热更新，不 stop_stream
+  5. tick / 暂停 / seek / 智能切 / 混音设置统一走 manager
+- **关键决策**: 有 inst+vocal 走单流；仅 cover 无分轨时仍 fallback WavPlayer
+- **修改的文件列表**: app/audio/stream_manager.py、app/audio/service.py、app/integration/controller.py、README.md

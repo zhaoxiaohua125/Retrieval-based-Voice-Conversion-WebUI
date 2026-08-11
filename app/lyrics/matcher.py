@@ -73,3 +73,43 @@ class LyricMatcher:
                     else:
                         break
         return LyricMatch(index=chosen_index, line=chosen, time_sec=t, word_index=word_index)
+
+
+def _line_sing_end(line: LyricLine, next_line: LyricLine | None) -> float:
+    """估算本句实际演唱结束时刻（LRC 行 end 常等于下一句 start，不能用来判间奏）。"""
+    if line.words:
+        content = [w for w in line.words if not w.text.isspace()]
+        if content:
+            return max(float(content[-1].end_sec), float(line.start_sec) + 0.25)
+    text = (line.text or '').strip()
+    est = max(1.2, min(12.0, max(len(text), 1) * 0.28))
+    end = float(line.start_sec) + est
+    if next_line is not None:
+        end = min(end, float(next_line.start_sec) - 0.05)
+    else:
+        end = min(max(end, float(line.start_sec) + 0.5), float(line.end_sec))
+    return max(end, float(line.start_sec) + 0.2)
+
+
+def is_vocal_region(time_sec: float, document: LyricDocument, offset_ms: int = 0, min_gap_sec: float = 3.0) -> bool:
+    """True=唱段（AI 唱歌/跟唱）；False=前奏/长间奏/尾奏（智能切混响说话）。"""
+    lines = document.lines if document else []
+    if not lines:
+        return True
+    t = float(time_sec) + int(offset_ms) / 1000.0
+    min_gap = max(0.5, float(min_gap_sec or 3.0))
+    if t < lines[0].start_sec:
+        return False
+    for i, line in enumerate(lines):
+        sing_end = _line_sing_end(line, lines[i + 1] if i + 1 < len(lines) else None)
+        if line.start_sec <= t < sing_end:
+            return True
+        if i + 1 < len(lines):
+            nxt = lines[i + 1]
+            gap = float(nxt.start_sec) - sing_end
+            if gap >= min_gap and sing_end <= t < nxt.start_sec:
+                return False
+            if sing_end <= t < nxt.start_sec:
+                return True
+    last_end = _line_sing_end(lines[-1], None)
+    return t < last_end

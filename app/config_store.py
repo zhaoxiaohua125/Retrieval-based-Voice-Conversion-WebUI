@@ -88,6 +88,8 @@ DEFAULT_CONFIG = {
     },
     'playback': {
         'play_mode': 'sequential',
+        'smart_switch': False,
+        'smart_switch_min_gap_sec': 3.0,
     },
 }
 

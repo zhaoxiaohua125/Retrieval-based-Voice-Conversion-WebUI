@@ -117,7 +117,7 @@ class SettingsDialog(QDialog):
         self._page_title.setText(label)
         subs = {
             'audio': '选择输入/输出设备、采样率与试麦（本机通道输出）。',
-            'playback': '歌库播放模式、说话/混响、AI 跟唱默认混音（保存后新会话生效）。',
+            'playback': '歌库播放模式、说话/混响、AI 跟唱默认混音；智能切依据 converted_vocal 能量（无需歌词）。',
             'lyrics': '逐字歌词生成与高亮同步参数。',
             'general': '更新检查、日志目录等全局项。',
             'shortcuts': '仅在「播放」Tab 生效的快捷键。',
@@ -201,6 +201,21 @@ class SettingsDialog(QDialog):
                 self.cmb_play_mode.addItem(PLAY_MODE_LABELS[mode], mode)
             lib_form.addRow('播放模式', self.cmb_play_mode)
             root.addWidget(lib)
+
+            smart = QGroupBox('智能切模式')
+            smart_form = QFormLayout(smart)
+            self.chk_smart_switch = QCheckBox('前奏 / 间奏 / 尾奏自动切「混响说话」')
+            self.chk_smart_switch.setToolTip(
+                '分析 converted_vocal 人声音轨能量（与波形虚线同源），无需 LRC。\n'
+                '唱段自动回到所选 AI 唱歌/跟唱。手动点「混响说话/普通说话」后本首不再自动切换。'
+            )
+            self.spin_smart_gap = QSpinBox()
+            self.spin_smart_gap.setRange(1, 10)
+            self.spin_smart_gap.setSuffix(' 秒')
+            self.spin_smart_gap.setToolTip('连续检测无人声达到此秒数后才切混响（防抖，避免句尾误触）')
+            smart_form.addRow(self.chk_smart_switch)
+            smart_form.addRow('静音保持', self.spin_smart_gap)
+            root.addWidget(smart)
 
             talk = QGroupBox('说话 / 混响')
             talk_layout = QVBoxLayout(talk)
@@ -413,6 +428,8 @@ class SettingsDialog(QDialog):
         self.lbl_reverb_decay.setText('%.0f%%' % (decay * 100))
         mode = str(self.config.get('playback.play_mode', 'sequential') or 'sequential')
         self._set_combo_data(self.cmb_play_mode, mode if mode in PLAY_MODES else 'sequential', 'sequential')
+        self.chk_smart_switch.setChecked(bool(self.config.get('playback.smart_switch', False)))
+        self.spin_smart_gap.setValue(int(round(float(self.config.get('playback.smart_switch_min_gap_sec', 3.0) or 3.0))))
         self._load_pitchfix_sliders()
         engine = str(self.config.get('lyrics.align_engine', 'energy') or 'energy').strip().lower()
         engine = 'whisper' if engine.startswith('whisper') or engine in ('faster-whisper', 'asr') else 'energy'
@@ -580,6 +597,8 @@ class SettingsDialog(QDialog):
             },
             'playback': {
                 'play_mode': str(self.cmb_play_mode.currentData() or 'sequential'),
+                'smart_switch': self.chk_smart_switch.isChecked(),
+                'smart_switch_min_gap_sec': float(self.spin_smart_gap.value()),
             },
             'pitchfix': self._collect_pitchfix(),
             'shortcuts': {key: self._key_edits[key].keySequence().toString() for key in SHORTCUT_KEYS},

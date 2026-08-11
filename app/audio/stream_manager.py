@@ -5,6 +5,7 @@ import threading
 import time
 import traceback
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 
@@ -12,6 +13,8 @@ from app.audio.devices import pick_voicemeeter_defaults
 from app.audio.ring_buffer import RingBuffer
 
 logger = logging.getLogger('rvc_client.audio')
+
+PLAYBACK_MODES = ('normal_talk', 'reverb_talk', 'ai_sing', 'ai_follow')
 
 
 @dataclass
@@ -31,6 +34,11 @@ class AudioStreamConfig:
     reverb_mix: float = 0.35
     reverb_decay: float = 0.72
     inst_gain: float = 0.77
+    playback_mode: str = ''
+    mic_gain: float = 0.77
+    ref_vocal_gain: float = 0.0
+    follow_threshold: float = 75.0
+    follow_attenuation: float = 0.1
 
     def block_frames(self) -> int:
         ms = max(100, min(500, int(self.block_ms)))
@@ -64,6 +72,19 @@ class AudioStreamManager:
         self._inst_duration = 0.0
         self._inst_paused = False
         self._inst_finished = False
+        self._inst_path = ''
+        self._ref_vocal_data = None
+        self._ref_vocal_path = ''
+        self._voice_gate = 0.0
+        self._gate_lock = threading.Lock()
+        self._vad_stop = threading.Event()
+        self._vad_thread = None
+        self._voice_off_at = None
+        self._vad_above = 0
+        self._clock_origin_frame = 0
+        self._clock_origin_mono = 0.0
+        self._out_latency = 0.05
+        self._clock_active = False
         self._stats = {'callbacks': 0, 'underruns': 0, 'input_overflow': 0, 'restarts': 0}
 
     @property
@@ -87,7 +108,15 @@ class AudioStreamManager:
     def inst_position(self) -> float:
         with self._lock:
             sr = int(self.config.sample_rate or 48000)
-            return self._inst_pos / sr if sr else 0.0
+            if not sr:
+                return 0.0
+            written = self._inst_pos / sr
+            if self._inst_paused or not self._clock_active or not self._running:
+                return written
+            elapsed = time.monotonic() - self._clock_origin_mono
+            est = self._clock_origin_frame / sr + elapsed - self._out_latency
+            hi = min(self._inst_duration, written + 0.4)
+            return max(0.0, min(est, hi))
 
     @property
     def inst_duration(self) -> float:
@@ -106,6 +135,12 @@ class AudioStreamManager:
     def inst_finished(self) -> bool:
         return bool(self._inst_finished)
 
+    def _reset_clock_locked(self, frame: int | None = None, active: bool = False):
+        fr = self._inst_pos if frame is None else int(frame)
+        self._clock_origin_frame = fr
+        self._clock_origin_mono = time.monotonic()
+        self._clock_active = bool(active)
+
     def replay_instrumental(self):
         with self._lock:
             if self._inst_data is None:
@@ -113,6 +148,7 @@ class AudioStreamManager:
             self._inst_pos = 0
             self._inst_finished = False
             self._inst_paused = False
+            self._reset_clock_locked(0, active=self._running and not self._inst_paused)
 
     def load_instrumental(self, path: str, seek_sec: float = 0.0):
         import soundfile as sf
@@ -131,6 +167,23 @@ class AudioStreamManager:
             self._inst_duration = len(self._inst_data) / target_sr if target_sr else 0.0
             self._inst_paused = False
             self._inst_finished = False
+            self._inst_path = str(Path(path).resolve())
+            self._reset_clock_locked(self._inst_pos, active=self._running)
+
+    def load_ref_vocal(self, path: str):
+        import soundfile as sf
+
+        data, sr = sf.read(str(path), dtype='float32', always_2d=True)
+        if data.shape[1] > 1:
+            data = data.mean(axis=1, keepdims=True)
+        target_sr = int(self.config.sample_rate)
+        if int(sr) != target_sr:
+            import librosa
+
+            data = librosa.resample(data.T, orig_sr=int(sr), target_sr=target_sr).T.reshape(-1, 1)
+        with self._lock:
+            self._ref_vocal_data = np.asarray(data[:, 0], dtype=np.float32)
+            self._ref_vocal_path = str(Path(path).resolve())
 
     def clear_instrumental(self):
         with self._lock:
@@ -139,6 +192,13 @@ class AudioStreamManager:
             self._inst_duration = 0.0
             self._inst_paused = False
             self._inst_finished = False
+            self._inst_path = ''
+            self._reset_clock_locked(0, active=False)
+
+    def clear_ref_vocal(self):
+        with self._lock:
+            self._ref_vocal_data = None
+            self._ref_vocal_path = ''
 
     def seek_instrumental(self, seconds: float):
         with self._lock:
@@ -147,28 +207,145 @@ class AudioStreamManager:
             sr = int(self.config.sample_rate)
             self._inst_pos = max(0, min(len(self._inst_data), int(float(seconds) * sr)))
             self._inst_finished = False
+            self._reset_clock_locked(self._inst_pos, active=self._running and not self._inst_paused)
 
     def toggle_inst_pause(self) -> bool:
         with self._lock:
             if self._inst_data is None:
                 return False
             self._inst_paused = not self._inst_paused
+            if self._inst_paused:
+                self._clock_active = False
+            else:
+                self._reset_clock_locked(self._inst_pos, active=self._running)
             return not self._inst_paused
 
-    def _read_inst_frames(self, frames: int) -> np.ndarray:
+    def _read_song_frames(self, frames: int) -> tuple[np.ndarray, np.ndarray]:
         with self._lock:
+            inst = np.zeros(frames, dtype=np.float32)
+            ref = np.zeros(frames, dtype=np.float32)
             if self._inst_data is None or self._inst_paused:
-                return np.zeros(frames, dtype=np.float32)
+                return inst, ref
             start = self._inst_pos
             end = min(start + frames, len(self._inst_data))
             got = max(0, end - start)
-            out = np.zeros(frames, dtype=np.float32)
             if got:
-                out[:got] = self._inst_data[start:end]
+                inst[:got] = self._inst_data[start:end]
+                if self._ref_vocal_data is not None:
+                    ref_end = min(end, len(self._ref_vocal_data))
+                    ref_got = max(0, ref_end - start)
+                    if ref_got > 0:
+                        ref[:ref_got] = self._ref_vocal_data[start:ref_end]
                 self._inst_pos = end
+                self._clock_origin_frame = start
+                self._clock_origin_mono = time.monotonic()
+                self._clock_active = True
             if end >= len(self._inst_data):
                 self._inst_finished = True
-            return out
+            return inst, ref
+
+    def set_playback_mode(self, cfg: AudioStreamConfig, inst_path: str | None = None, vocal_path: str | None = None, seek_sec: float = 0.0):
+        prev_mode = self.config.playback_mode
+        prev_reverb = self.config.passthrough_reverb
+        self.config.playback_mode = cfg.playback_mode
+        self.config.passthrough = cfg.passthrough
+        self.config.passthrough_reverb = cfg.passthrough_reverb
+        self.config.passthrough_gain = cfg.passthrough_gain
+        self.config.reverb_mix = cfg.reverb_mix
+        self.config.reverb_decay = cfg.reverb_decay
+        self.config.inst_gain = cfg.inst_gain
+        self.config.mic_gain = cfg.mic_gain
+        self.config.ref_vocal_gain = cfg.ref_vocal_gain
+        self.config.follow_threshold = cfg.follow_threshold
+        self.config.follow_attenuation = cfg.follow_attenuation
+        self.config.block_ms = cfg.block_ms
+        if cfg.playback_mode == 'reverb_talk' and (prev_mode != 'reverb_talk' or not prev_reverb):
+            self._init_reverb()
+        elif cfg.playback_mode != 'reverb_talk' and prev_mode == 'reverb_talk':
+            self._rev_bufs = self._rev_pos = self._rev_delays = None
+        if inst_path:
+            resolved = str(Path(inst_path).resolve())
+            if self._inst_path == resolved:
+                if abs(self.inst_position - float(seek_sec or 0)) > 0.12:
+                    self.seek_instrumental(seek_sec)
+            else:
+                self.load_instrumental(inst_path, seek_sec)
+        if vocal_path and cfg.playback_mode in ('ai_sing', 'ai_follow'):
+            resolved = str(Path(vocal_path).resolve())
+            if self._ref_vocal_path != resolved:
+                self.load_ref_vocal(vocal_path)
+        if cfg.playback_mode == 'ai_follow':
+            self._start_vad_worker()
+        else:
+            self._stop_vad_worker()
+            with self._gate_lock:
+                self._voice_gate = 1.0 if cfg.playback_mode == 'ai_sing' else 0.0
+        return self
+
+    def _start_vad_worker(self):
+        if self._vad_thread is not None and self._vad_thread.is_alive():
+            return
+        self._vad_stop.clear()
+        self._voice_off_at = None
+        self._vad_above = 0
+        with self._gate_lock:
+            self._voice_gate = 0.0
+        self._vad_thread = threading.Thread(target=self._vad_loop, name='stream-vad', daemon=True)
+        self._vad_thread.start()
+
+    def _stop_vad_worker(self):
+        self._vad_stop.set()
+        th = self._vad_thread
+        self._vad_thread = None
+        if th is not None and th.is_alive() and threading.current_thread() is not th:
+            th.join(timeout=0.05)
+        self._voice_off_at = None
+        self._vad_above = 0
+
+    def _vad_loop(self):
+        block = self.config.block_frames()
+        while self._running and not self._vad_stop.is_set():
+            try:
+                if self.config.playback_mode != 'ai_follow':
+                    break
+                if self.input_ring.available_frames() < block:
+                    time.sleep(0.002)
+                    continue
+                mic = self.input_ring.read(block)[:, 0]
+                thr = float(self.config.follow_threshold or 75)
+                open_gate = max(0.001, (thr / 100.0) * 0.006)
+                close_gate = open_gate * 0.35
+                att = min(0.2, max(0.1, float(self.config.follow_attenuation or 0.1)))
+                hangover = max(0.25, att * 2.5)
+                mic_rms = float(np.sqrt(np.mean(mic * mic))) if mic.size else 0.0
+                now = time.monotonic()
+                if mic_rms >= open_gate:
+                    self._vad_above = min(3, self._vad_above + 1)
+                else:
+                    self._vad_above = max(0, self._vad_above - 1)
+                with self._gate_lock:
+                    was_open = self._voice_gate >= 0.5
+                in_grace = self._voice_off_at is not None and (now - self._voice_off_at) < hangover
+                if was_open:
+                    if mic_rms >= close_gate:
+                        self._voice_off_at = None
+                        active = True
+                    else:
+                        if self._voice_off_at is None:
+                            self._voice_off_at = now
+                        active = in_grace
+                elif self._vad_above >= 2 or (in_grace and self._vad_above >= 1 and mic_rms >= open_gate):
+                    self._voice_off_at = None
+                    active = True
+                else:
+                    active = False
+                    if not in_grace:
+                        self._voice_off_at = None
+                with self._gate_lock:
+                    self._voice_gate = 1.0 if active else 0.0
+            except Exception:
+                logger.error('stream vad error:\n%s', traceback.format_exc())
+                time.sleep(0.02)
 
     def start(self):
         with self._lock:
@@ -179,15 +356,19 @@ class AudioStreamManager:
                 raise RuntimeError('未找到可用音频输入/输出设备')
             self.config.input_device = in_dev
             self.config.output_device = out_dev
-            self._init_reverb()
+            if self.config.playback_mode == 'reverb_talk':
+                self._init_reverb()
             self._open_stream()
             self._running = True
+            if self.config.playback_mode == 'ai_follow':
+                self._start_vad_worker()
             self._watchdog = threading.Thread(target=self._watch_loop, name='audio-watchdog', daemon=True)
             self._watchdog.start()
-            logger.info('audio stream started in=%s out=%s sr=%s block=%s', in_dev, out_dev, self.config.sample_rate, self.config.block_frames())
+            logger.info('audio stream started in=%s out=%s sr=%s block=%s mode=%s', in_dev, out_dev, self.config.sample_rate, self.config.block_frames(), self.config.playback_mode)
             return self
 
     def stop(self):
+        self._stop_vad_worker()
         with self._lock:
             self._running = False
             stream = self._stream
@@ -195,6 +376,9 @@ class AudioStreamManager:
             self.input_ring.clear()
             self.output_ring.clear()
             self.clear_instrumental()
+            self.clear_ref_vocal()
+            self.config.playback_mode = ''
+            self._reset_clock_locked(0, active=False)
         self._close_stream(stream)
         logger.info('audio stream stopped')
         return self
@@ -253,6 +437,35 @@ class AudioStreamManager:
         wet *= 0.25
         return np.clip(dry * (1.0 - mix) + wet * mix, -1.0, 1.0)
 
+    def _mix_output(self, frames: int, mono_in: np.ndarray) -> np.ndarray:
+        mode = self.config.playback_mode or ('reverb_talk' if self.config.passthrough_reverb else 'normal_talk' if self.config.passthrough else '')
+        inst, ref = self._read_song_frames(frames)
+        ig = float(self.config.inst_gain or 0.77)
+        if mode in ('normal_talk', 'reverb_talk'):
+            gain = float(self.config.passthrough_gain or 1.0)
+            boosted = np.clip(mono_in * gain, -1.0, 1.0)
+            if mode == 'reverb_talk':
+                boosted[:, 0] = self._reverb_mono(boosted)
+            if self._inst_data is not None:
+                return np.clip(boosted + inst.reshape(-1, 1) * ig, -1.0, 1.0)
+            return boosted
+        if mode == 'ai_sing':
+            mg = float(self.config.mic_gain or 0.77)
+            mix = inst.reshape(-1, 1) * ig + ref.reshape(-1, 1) * mg
+        elif mode == 'ai_follow':
+            with self._gate_lock:
+                gate = self._voice_gate
+            mg = float(self.config.mic_gain or 0.77)
+            rg = float(self.config.ref_vocal_gain or 0.0)
+            vocal = ref.reshape(-1, 1)
+            mix = inst.reshape(-1, 1) * ig + vocal * gate * mg + vocal * rg
+        else:
+            return np.zeros((frames, 1), dtype=np.float32)
+        peak = float(np.max(np.abs(mix))) if mix.size else 0.0
+        if peak > 1.0:
+            mix = mix / peak
+        return mix.astype(np.float32)
+
     def _close_stream(self, stream=None):
         if stream is None:
             with self._lock:
@@ -267,8 +480,6 @@ class AudioStreamManager:
             logger.debug('stream close: %s', traceback.format_exc())
 
     def _callback(self, indata, outdata, frames, time_info, status):
-        import sounddevice as sd
-
         self._stats['callbacks'] += 1
         if status:
             if status.input_overflow:
@@ -283,16 +494,17 @@ class AudioStreamManager:
             elif mono_in.ndim == 1:
                 mono_in = mono_in.reshape(-1, 1)
             self.input_ring.write(mono_in)
-            if self.config.passthrough:
-                gain = float(self.config.passthrough_gain or 1.0)
-                boosted = np.clip(mono_in * gain, -1.0, 1.0)
-                if self.config.passthrough_reverb:
-                    boosted[:, 0] = self._reverb_mono(boosted)
-                if self._inst_data is not None:
-                    inst = self._read_inst_frames(frames).reshape(-1, 1)
-                    ig = float(self.config.inst_gain or 0.77)
-                    boosted = np.clip(boosted + inst * ig, -1.0, 1.0)
-                self.output_ring.write(boosted)
+            lat = None
+            try:
+                if time_info is not None:
+                    lat = float(time_info.outputBufferDacTime) - float(time_info.currentTime)
+            except Exception:
+                lat = None
+            if lat is not None and lat == lat and 0.005 <= float(lat) <= 0.22:
+                self._out_latency = 0.65 * self._out_latency + 0.35 * float(lat)
+            mode = self.config.playback_mode
+            if mode in PLAYBACK_MODES or self.config.passthrough:
+                self.output_ring.write(self._mix_output(frames, mono_in))
             need = outdata.shape[0]
             chunk = self.output_ring.read(need)
             filled = self._smooth_output(chunk, need)

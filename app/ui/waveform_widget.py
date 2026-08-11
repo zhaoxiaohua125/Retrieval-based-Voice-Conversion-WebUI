@@ -1,46 +1,20 @@
-"""播放页波形：滚动视窗 + 平滑播放头（按像素密度绘制）。"""
+"""播放页波形：人声能量条 + 伴奏段平直虚线（对标声迹条形图）。"""
 
 import time
-from pathlib import Path
 
 import numpy as np
-import soundfile as sf
 from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QLinearGradient, QPainter, QPen
 from PyQt6.QtWidgets import QWidget
 
-
-def load_waveform_peaks(path, points=900):
-    path = str(path or '')
-    if not path or not Path(path).is_file():
-        return None, 0.0
-    info = sf.info(path)
-    duration = float(info.duration or 0.0)
-    frames = int(info.frames or 0)
-    if frames <= 0 or duration <= 0:
-        return None, duration
-    points = max(96, min(int(points), frames))
-    block = max(1, frames // points)
-    peaks = []
-    with sf.SoundFile(path) as f:
-        while True:
-            data = f.read(block, dtype='float32', always_2d=True)
-            if len(data) == 0:
-                break
-            mono = data.mean(axis=1)
-            peaks.append(float(np.max(np.abs(mono))) if len(mono) else 0.0)
-    if not peaks:
-        return None, duration
-    arr = np.asarray(peaks, dtype=np.float32)
-    peak = float(arr.max()) or 1.0
-    return arr / peak, duration
+from app.playback.waveform_peaks import is_vocal_energy_region, load_waveform_peaks, silence_threshold
 
 
 class _WaveformLoadWorker(QThread):
     loaded = pyqtSignal(object, float, str)
     failed = pyqtSignal(str)
 
-    def __init__(self, path: str, points=900):
+    def __init__(self, path: str, points=1200):
         super().__init__()
         self._path = path
         self._points = points
@@ -58,6 +32,7 @@ class WaveformWidget(QWidget):
     WINDOW_SEC = 36.0
     PLAYHEAD_RATIO = 0.36
     BAR_GAP = 3
+    SILENCE_FLOOR = 0.06
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -71,6 +46,7 @@ class WaveformWidget(QWidget):
         self._loader = None
         self._pulse = 0.0
         self.setMinimumHeight(88)
+        self.setToolTip('基于 AI 人声音轨：平直虚线=前奏/间奏/尾奏（无人声）；竖条=有人唱歌')
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._on_frame)
@@ -155,6 +131,23 @@ class WaveformWidget(QWidget):
             self._pulse = (self._pulse + 0.1) % (2 * np.pi)
             self.update()
 
+    def _silence_threshold(self) -> float:
+        return silence_threshold(self._peaks, self.SILENCE_FLOOR)
+
+    def _amp_at(self, t: float) -> float:
+        peaks = self._peaks
+        if peaks is None or len(peaks) == 0 or self._duration <= 0:
+            return 0.0
+        idx = int(t / self._duration * (len(peaks) - 1))
+        idx = max(0, min(idx, len(peaks) - 1))
+        return float(peaks[idx])
+
+    def is_inst_region(self, t: float | None = None) -> bool:
+        t = self._display_sec if t is None else float(t)
+        if self._peaks is None or self._duration <= 0:
+            return False
+        return not is_vocal_energy_region(t, self._peaks, self._duration, self._silence_threshold())
+
     def _window_span(self):
         return max(self.WINDOW_SEC, self._duration * 0.12)
 
@@ -198,29 +191,43 @@ class WaveformWidget(QWidget):
         p.fillRect(0, 0, w, h, grad)
         if self._peaks is None or len(self._peaks) == 0:
             p.setPen(QColor('#94a3b8'))
-            p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, '波形加载中…' if self._path else '选择歌曲后显示波形')
+            hint = '波形加载中…' if self._path else '选择歌曲后显示波形（优先 AI 人声）'
+            p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, hint)
             p.end()
             return
         mid = h // 2
         head_x = int(w * self.PLAYHEAD_RATIO)
         bar_w = max(2, self.BAR_GAP - 1)
+        thresh = self._silence_threshold()
         pulse = (np.sin(self._pulse) * 0.06 + 1.0) if self._playing else 1.0
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        played_prog = int(head_x)
+        if played_prog > 0:
+            p.fillRect(0, h - 4, played_prog, 4, QColor(37, 99, 235, 70))
+        base_pen = QPen(QColor('#cbd5e1'), 1, Qt.PenStyle.DashLine)
+        p.setPen(base_pen)
+        p.drawLine(0, mid, w, mid)
         for t, amp in self._visible_bars(w):
             x = self._x_for_time(t, w)
             if x < -bar_w or x > w + bar_w:
                 continue
             xi = int(x)
+            played = t <= self._display_sec
+            silent = amp < thresh
+            if silent:
+                seg_pen = QPen(QColor('#64748b' if played else '#94a3b8'), 1, Qt.PenStyle.DashLine)
+                p.setPen(seg_pen)
+                p.drawLine(xi, mid, xi + bar_w, mid)
+                continue
             dist = abs(x - head_x) / max(w * 0.1, 1.0)
             boost = max(0.0, 1.0 - dist) * 0.25 * pulse
-            bh = max(3, int(amp * (h * 0.38) * (1.0 + boost)))
-            played = t <= self._display_sec
+            bh = max(4, int(amp * (h * 0.38) * (1.0 + boost)))
             color = QColor('#2563eb' if played else '#93c5fd')
             if dist < 0.8:
                 color = QColor('#1d4ed8' if played else '#bfdbfe')
             p.fillRect(xi, mid - bh, bar_w, bh * 2, color)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setPen(QPen(QColor('#2563eb'), 2))
-        p.drawLine(head_x, 8, head_x, h - 8)
+        p.drawLine(head_x, 6, head_x, h - 10)
         p.end()
 
     def mousePressEvent(self, event):

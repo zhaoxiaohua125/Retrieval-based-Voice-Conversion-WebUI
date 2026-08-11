@@ -2,9 +2,10 @@
 
 import logging
 from dataclasses import asdict
+from pathlib import Path
 
 from app.audio.devices import device_summary, list_devices
-from app.audio.stream_manager import AudioStreamConfig, AudioStreamManager
+from app.audio.stream_manager import PLAYBACK_MODES, AudioStreamConfig, AudioStreamManager
 from app.config_store import ConfigStore
 from app.events import BusMessage, ModuleId, SignalType
 from app.scheduler import AppScheduler
@@ -28,6 +29,23 @@ def inst_gain_from_config(config_store: ConfigStore) -> float:
     return 0.77
 
 
+def pitchfix_mix_from_config(config_store: ConfigStore) -> dict:
+    pf = config_store.get('pitchfix', {}) or {}
+    mic_gain = float(pf['mic_gain']) if pf.get('mic_gain') is not None else (
+        int(pf['mic_ui']) / 100.0 if pf.get('mic_ui') is not None else 0.77
+    )
+    ref_vocal_gain = float(pf['ref_vocal_gain']) if pf.get('ref_vocal_gain') is not None else (
+        int(pf['orig_ui']) / 100.0 if pf.get('orig_ui') is not None else 0.0
+    )
+    att = float(pf.get('follow_attenuation', 0.1))
+    return {
+        'mic_gain': mic_gain,
+        'ref_vocal_gain': ref_vocal_gain,
+        'follow_threshold': float(pf.get('follow_threshold', 75)),
+        'follow_attenuation': min(0.2, max(0.1, att)),
+    }
+
+
 class AudioService:
     """任务 3 音频 IO 门面：枚举设备、启停采集流。"""
 
@@ -45,6 +63,27 @@ class AudioService:
             return
         self.scheduler.add_shutdown_hook(self.stop_stream)
         self._hook_registered = True
+
+    def _build_playback_config(self, mode: str, reverb: bool | None = None) -> AudioStreamConfig:
+        audio = self.config_store.get('audio', {}) or {}
+        mix = pitchfix_mix_from_config(self.config_store)
+        cfg = self.load_stream_config()
+        cfg.playback_mode = mode
+        cfg.passthrough = mode in ('normal_talk', 'reverb_talk')
+        cfg.passthrough_reverb = mode == 'reverb_talk' if reverb is None else bool(reverb)
+        cfg.inst_gain = inst_gain_from_config(self.config_store)
+        cfg.mic_gain = mix['mic_gain']
+        cfg.ref_vocal_gain = mix['ref_vocal_gain']
+        cfg.follow_threshold = mix['follow_threshold']
+        cfg.follow_attenuation = mix['follow_attenuation']
+        if mode in ('normal_talk', 'reverb_talk'):
+            cfg.block_ms = int(audio.get('passthrough_block_ms', 50))
+            cfg.reverb_mix = float(audio.get('reverb_mix', 0.35))
+            cfg.reverb_decay = float(audio.get('reverb_decay', 0.72))
+        elif mode in ('ai_sing', 'ai_follow'):
+            pf = self.config_store.get('pitchfix', {}) or {}
+            cfg.block_ms = int(pf.get('block_ms', audio.get('passthrough_block_ms', 50)))
+        return cfg
 
     def load_stream_config(self) -> AudioStreamConfig:
         audio = self.config_store.get('audio', {}) or {}
@@ -80,41 +119,26 @@ class AudioService:
         self._publish(SignalType.STATUS, {'action': 'devices_listed', 'summary': summary, 'devices': [d.to_dict() for d in devices]})
         return devices
 
-    def start_stream(
+    def switch_playback_mode(
         self,
-        passthrough: bool | None = None,
-        reverb: bool = False,
+        mode: str,
         inst_path: str | None = None,
+        vocal_path: str | None = None,
         inst_seek: float = 0.0,
+        reverb: bool | None = None,
     ):
+        if mode not in PLAYBACK_MODES:
+            raise ValueError('unsupported playback mode: %s' % mode)
         self._ensure_shutdown_hook()
-        cfg = self.load_stream_config()
-        if passthrough is not None:
-            cfg.passthrough = passthrough
-        cfg.passthrough_reverb = bool(reverb)
-        if cfg.passthrough:
-            audio = self.config_store.get('audio', {}) or {}
-            cfg.block_ms = int(audio.get('passthrough_block_ms', 50))
-            cfg.reverb_mix = float(audio.get('reverb_mix', 0.35))
-            cfg.reverb_decay = float(audio.get('reverb_decay', 0.72))
-            cfg.inst_gain = inst_gain_from_config(self.config_store)
+        cfg = self._build_playback_config(mode, reverb=reverb)
         if self.manager and self.manager.running:
-            same = (
-                self.manager.config.passthrough == cfg.passthrough
-                and self.manager.config.passthrough_reverb == cfg.passthrough_reverb
-            )
-            if same and not inst_path:
-                self.manager.config.passthrough_gain = cfg.passthrough_gain
-                self.manager.config.reverb_mix = cfg.reverb_mix
-                self.manager.config.reverb_decay = cfg.reverb_decay
-                self.manager.config.inst_gain = cfg.inst_gain
-                if cfg.passthrough:
-                    self.manager.config.block_ms = cfg.block_ms
-                return self.manager
-            self.stop_stream()
+            self.manager.set_playback_mode(cfg, inst_path, vocal_path if mode in ('ai_sing', 'ai_follow') else None, inst_seek)
+            return self.manager
         self.manager = AudioStreamManager(cfg)
         if inst_path:
             self.manager.load_instrumental(inst_path, inst_seek)
+        if vocal_path and mode in ('ai_sing', 'ai_follow'):
+            self.manager.load_ref_vocal(vocal_path)
         self.manager.start()
         self._publish(
             SignalType.STATUS,
@@ -126,6 +150,16 @@ class AudioService:
             },
         )
         return self.manager
+
+    def start_stream(
+        self,
+        passthrough: bool | None = None,
+        reverb: bool = False,
+        inst_path: str | None = None,
+        inst_seek: float = 0.0,
+    ):
+        mode = 'reverb_talk' if reverb else 'normal_talk'
+        return self.switch_playback_mode(mode, inst_path=inst_path, vocal_path=None, inst_seek=inst_seek, reverb=reverb)
 
     def stop_stream(self):
         if self.manager is None:

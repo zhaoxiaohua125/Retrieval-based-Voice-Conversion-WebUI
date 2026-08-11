@@ -282,7 +282,8 @@ class PlaybackPage(QWidget):
             self.title_label.setText(song.get('title', '未命名'))
             self.title_label.setStyleSheet('font-size:18px;color:#64748b;')
         play_path = song.get('play_path') or song.get('cover_path') or song.get('vocal_path')
-        self.waveform.load_file(play_path or '')
+        wave_path = song.get('vocal_path') or play_path
+        self.waveform.load_file(wave_path or '')
         self.waveform.set_position_ratio(0.0)
         self.bridge.emit_action('playback_select_song', song=song, resume_if_playing=resume_if_playing)
 
