@@ -1714,3 +1714,25 @@ ewrite；扩展 LyricWord 与字级 matcher
   3. `rotating_log` 在 stderr 为空时不挂控制台 Handler
   4. 统一 StartClient 启动变量 `LAUNCH`（pythonw 优先，逻辑与 Debug 一致）
 - **修改的文件列表**: scripts/run_ui_skeleton.py、app/ops/rotating_log.py、scripts/build_client_package.py、README.md
+
+---
+
+## 会话总结 - 2026-08-10 (11)
+
+- **会话主要目的**: 消除正常启动后 CMD 黑窗口一直驻留
+- **根因**: `StartClient.bat` 使用 `start /wait`，bat 会阻塞到客户端退出才关闭控制台
+- **完成的主要任务**: 改为 `pythonw` + `start` 不等待、立即 `exit`；「启动声迹客户端.bat」直接 detached 启动 pythonw
+- **修改的文件列表**: scripts/build_client_package.py、README.md
+
+---
+
+## 会话总结 - 2026-08-11
+
+- **会话主要目的**: 对比 `打包演示客户端.bat` 与 `build_demo_package.bat` 打出的包是否相同
+- **完成的主要任务**: 核对两个 bat 及其调用的 `build_demo_package_menu.bat` / `build_client_package.ps1` 参数差异
+- **关键决策与结论**:
+  1. 不相同：前者直打 cu118 全量包；后者进入菜单可选 cu118/cu128
+  2. 菜单选 [1] 时 CUDA/环境与前者同为 cu118 + rvc312，但版本目录名为 `0.1.0-demo-cu118`（前者为 `0.1.0-demo`）
+  3. 前者传了已失效的 `-Zip`（当前 ps1 无该参数，且提示手动 zip）；后者明确不自动 zip
+- **使用的技术栈**: Windows bat、PowerShell、conda-pack
+- **修改的文件列表**: README.md（仅追加会话总结）

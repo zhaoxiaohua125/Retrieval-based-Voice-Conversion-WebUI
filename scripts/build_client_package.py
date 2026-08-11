@@ -85,7 +85,6 @@ def write_launcher(out_dir: Path):
         'set "PATH=%~dp0tools\\ffmpeg;%PATH%"\r\n'
         'set "PY="\r\n'
         'set "PYW="\r\n'
-        'set "LAUNCH="\r\n'
         'if exist "python\\python.exe" set "PY=python\\python.exe"\r\n'
         'if not defined PY if exist "python\\Scripts\\python.exe" set "PY=python\\Scripts\\python.exe"\r\n'
         'if not defined PY for /f "delims=" %%i in (\'powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\\resolve_launch_python.ps1"\') do set "PY=%%i"\r\n'
@@ -97,15 +96,13 @@ def write_launcher(out_dir: Path):
         '  exit /b 1\r\n'
         ')\r\n'
         'set "PYW=%PY:python.exe=pythonw.exe%"\r\n'
-        'if exist "%PYW%" set "LAUNCH=%PYW%"\r\n'
-        'if not defined LAUNCH set "LAUNCH=%PY%"\r\n'
-        'start "" /wait "%LAUNCH%" scripts\\run_ui_skeleton.py\r\n'
-        'set "EC=%ERRORLEVEL%"\r\n'
-        'if not "%EC%"=="0" (\r\n'
-        '  echo [ERROR] Client exited with code %EC%. See logs\\client\\startup.log\r\n'
+        'if not exist "%PYW%" (\r\n'
+        '  echo [ERROR] pythonw.exe not found beside %PY%\r\n'
         '  pause\r\n'
+        '  exit /b 1\r\n'
         ')\r\n'
-        'exit /b %EC%\r\n'
+        'start "" "%PYW%" scripts\\run_ui_skeleton.py\r\n'
+        'exit /b 0\r\n'
     )
     debug_bat = (
         '@echo off\r\n'
@@ -125,7 +122,16 @@ def write_launcher(out_dir: Path):
         'echo Exit: %ERRORLEVEL%\r\n'
         'pause\r\n'
     )
-    wrapper = '@echo off\r\ncd /d "%~dp0"\r\ncall "%~dp0StartClient.bat"\r\n'
+    wrapper = (
+        '@echo off\r\n'
+        'cd /d "%~dp0"\r\n'
+        'set "PATH=%~dp0tools\\ffmpeg;%PATH%"\r\n'
+        'if exist "python\\pythonw.exe" (\r\n'
+        '  start "" "python\\pythonw.exe" scripts\\run_ui_skeleton.py\r\n'
+        '  exit /b 0\r\n'
+        ')\r\n'
+        'call "%~dp0StartClient.bat"\r\n'
+    )
     repair_bat = '@echo off\r\ncd /d "%~dp0"\r\npowershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\\repair_bundled_torch.ps1" -PackageDir "%~dp0"\r\npause\r\n'
     verify_bat = '@echo off\r\ncd /d "%~dp0"\r\n"%~dp0python\\python.exe" "%~dp0scripts\\verify_client_package.py" "%~dp0"\r\npause\r\n'
     for name, content in (
