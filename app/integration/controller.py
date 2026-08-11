@@ -24,7 +24,7 @@ from app.playback.waveform_peaks import (
 )
 from app.ops.exceptions import classify_exception
 from app.playback import WavPlayer
-from app.playback.library import delete_song_from_disk, find_lrc_in_dir, scan_song_library
+from app.playback.library import delete_song_from_disk, find_lrc_in_dir, scan_accompaniment_library, scan_song_library
 from app.rvc.types import RvcInferParams
 from app.rvc.vc_context import discover_first_model, resolve_index_for_model
 from app.scheduler import AppScheduler
@@ -62,7 +62,8 @@ class ClientController:
         self._follow_prepare_thread = None
         self._follow_handoff = False
         self._mix_save_timer = None
-        self._library = []
+        self._library_sing = []
+        self._library_inst = []
         self._started = False
         self._lock = threading.RLock()
         self._tick_generation = 0
@@ -104,7 +105,7 @@ class ClientController:
 
     @property
     def library(self):
-        return list(self._library)
+        return list(self._library_sing)
 
     def start(self):
         if self._started:
@@ -691,13 +692,26 @@ class ClientController:
     def _scan_library_blocking(self):
         opt_dir = self.config_store.get('paths.opt_dir', 'opt')
         dirs = [opt_dir, str(Path(opt_dir) / 'task4_offline')]
-        self._library = scan_song_library(self.project_root, dirs=dirs)
+        self._library_sing = scan_song_library(self.project_root, dirs=dirs)
+        self._library_inst = scan_accompaniment_library(self.project_root, opt_dir=opt_dir)
+
+    def _publish_library(self, log: str = ''):
+        body = {
+            'sing_songs': self._library_sing,
+            'inst_songs': self._library_inst,
+            'songs': self._library_sing,
+        }
+        if log:
+            body['log'] = log
+        self._publish_status('library_updated', **body)
 
     def _refresh_library(self):
         def _work():
             try:
                 self._scan_library_blocking()
-                self._publish_status('library_updated', songs=self._library, log='歌库已刷新（%s 首）' % len(self._library))
+                self._publish_library(
+                    log='歌库已刷新（唱歌 %s / 原唱 %s）' % (len(self._library_sing), len(self._library_inst))
+                )
             except Exception:
                 logger.error('library refresh failed:\n%s', traceback.format_exc())
         threading.Thread(target=_work, name='library-scan', daemon=True).start()
@@ -729,11 +743,7 @@ class ClientController:
             self._publish_status('lyrics_loaded', lines=[])
             self._publish_status('playback_stopped', log='当前歌曲已删除')
         self._scan_library_blocking()
-        self._publish_status(
-            'library_updated',
-            songs=self._library,
-            log='已删除「%s」（%s 个文件）' % (title, len(deleted)),
-        )
+        self._publish_library(log='已删除「%s」（%s 个文件）' % (title, len(deleted)))
         if cur_id and del_id and cur_id == del_id:
             self._publish_status('song_deleted', title=title)
 
@@ -771,6 +781,9 @@ class ClientController:
             return
         if mode == 'ai_follow' and (not song.get('instrumental_path') or not song.get('vocal_path')):
             self._publish_error('AI 跟唱需要 instrumental.wav 与 converted_vocal.wav')
+            return
+        if mode == 'ai_follow' and str(song.get('library_type') or '') == 'accompaniment':
+            self._publish_error('原唱条目不支持 AI 跟唱')
             return
         carry = self._current_song_position() if self._is_timeline_playing() or self._has_paused_session() else 0.0
         payload = {'song': song, 'position': carry, 'autoplay': autoplay}
@@ -1304,7 +1317,8 @@ class ClientController:
         self._publish_status('play_mode_changed', mode=mode, log='播放模式：%s' % PLAY_MODE_LABELS[mode])
 
     def _pick_next_song(self, repeat_same: bool = False):
-        library = self._library or []
+        cur = self.state.selected_song or {}
+        library = self._library_inst if str(cur.get('library_type') or '') == 'accompaniment' else self._library_sing
         if not library:
             return None
         current = self.state.selected_song or {}

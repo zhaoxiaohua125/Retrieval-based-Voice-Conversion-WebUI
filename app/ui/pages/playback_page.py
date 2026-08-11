@@ -41,7 +41,10 @@ class PlaybackPage(QWidget):
     def __init__(self, bridge, parent=None):
         super().__init__(parent)
         self.bridge = bridge
-        self._songs = []
+        self._songs_sing = []
+        self._songs_inst = []
+        self._lib_tab = 'sing'
+        self._row_by_tab = {'sing': -1, 'inst': -1}
         self._selected = None
         self._switching = False
         self._mode = 'idle'
@@ -55,7 +58,23 @@ class PlaybackPage(QWidget):
         lib = QWidget()
         lib_layout = QVBoxLayout(lib)
         lib_head = QHBoxLayout()
-        lib_head.addWidget(QLabel('我的歌库'))
+        self.btn_tab_sing = QPushButton('唱歌')
+        self.btn_tab_inst = QPushButton('原唱')
+        for btn in (self.btn_tab_sing, self.btn_tab_inst):
+            btn.setCheckable(True)
+            btn.setStyleSheet(
+                'QPushButton{padding:4px 12px;border-radius:6px;border:1px solid #cbd5e1;background:#fff;color:#334155;}'
+                'QPushButton:checked{background:#2563eb;color:#fff;border-color:#2563eb;font-weight:600;}'
+            )
+        self.btn_tab_sing.setChecked(True)
+        self._lib_tab_group = QButtonGroup(self)
+        self._lib_tab_group.setExclusive(True)
+        self._lib_tab_group.addButton(self.btn_tab_sing)
+        self._lib_tab_group.addButton(self.btn_tab_inst)
+        self.btn_tab_sing.clicked.connect(lambda: self._switch_lib_tab('sing'))
+        self.btn_tab_inst.clicked.connect(lambda: self._switch_lib_tab('inst'))
+        lib_head.addWidget(self.btn_tab_sing)
+        lib_head.addWidget(self.btn_tab_inst)
         self.btn_refresh = QPushButton('刷新')
         self.btn_refresh.clicked.connect(lambda: self.bridge.emit_action('playback_refresh_library'))
         lib_head.addStretch()
@@ -205,16 +224,50 @@ class PlaybackPage(QWidget):
         self._lyric_lines = []
         self._lyric_row = -1
 
-    def apply_library(self, songs: list, auto_select: bool = True):
+    def apply_library(self, songs: list, inst_songs: list | None = None, auto_select: bool = True):
         keep = self._selected
-        self._songs = list(songs or [])
+        self._songs_sing = list(songs or [])
+        self._songs_inst = list(inst_songs or [])
         self._filter_songs(self.search_box.text(), auto_select=auto_select and not keep)
+
+    def _active_songs(self) -> list:
+        return self._songs_inst if self._lib_tab == 'inst' else self._songs_sing
+
+    def _switch_lib_tab(self, tab: str):
+        if tab not in ('sing', 'inst') or tab == self._lib_tab:
+            return
+        self._row_by_tab[self._lib_tab] = self.song_list.currentRow()
+        self._lib_tab = tab
+        self.search_box.setPlaceholderText('搜索原唱' if tab == 'inst' else '搜索歌曲')
+        self._filter_songs(self.search_box.text(), auto_select=False)
+        row = self._row_by_tab.get(tab, -1)
+        if 0 <= row < self.song_list.count():
+            self.song_list.setCurrentRow(row)
+            self._apply_row_song(row, resume_if_playing=False, show_switching=False)
+        elif self.song_list.count() > 0:
+            self.select_initial_song()
+        else:
+            self.clear_current_song()
+        self._sync_mode_for_library()
+
+    def _sync_mode_for_library(self):
+        inst_only = self._is_accompaniment_selected()
+        self.btn_ai_follow.setEnabled(not inst_only)
+        if inst_only and self.btn_ai_follow.isChecked():
+            self.btn_ai_follow.blockSignals(True)
+            self.btn_ai_follow.setChecked(False)
+            self.btn_ai_follow.blockSignals(False)
+            if self._selected:
+                self._select_mode_ui('normal_talk')
+
+    def _is_accompaniment_selected(self) -> bool:
+        return str((self._selected or {}).get('library_type') or '') == 'accompaniment'
 
     def _filter_songs(self, keyword: str, auto_select: bool = True):
         keyword = (keyword or '').strip().lower()
         self.song_list.blockSignals(True)
         self.song_list.clear()
-        for song in self._songs:
+        for song in self._active_songs():
             title = song.get('title', '')
             if keyword and keyword not in title.lower():
                 continue
@@ -281,10 +334,11 @@ class PlaybackPage(QWidget):
         elif not self._switching:
             self.title_label.setText(song.get('title', '未命名'))
             self.title_label.setStyleSheet('font-size:18px;color:#64748b;')
-        play_path = song.get('play_path') or song.get('cover_path') or song.get('vocal_path')
+        play_path = song.get('play_path') or song.get('cover_path') or song.get('vocal_path') or song.get('instrumental_path')
         wave_path = song.get('vocal_path') or play_path
         self.waveform.load_file(wave_path or '')
         self.waveform.set_position_ratio(0.0)
+        self._sync_mode_for_library()
         self.bridge.emit_action('playback_select_song', song=song, resume_if_playing=resume_if_playing)
 
     def set_song_switching(self, busy: bool, title: str = ''):
@@ -292,6 +346,8 @@ class PlaybackPage(QWidget):
         self.song_list.setEnabled(not busy)
         self.search_box.setEnabled(not busy)
         self.btn_refresh.setEnabled(not busy)
+        self.btn_tab_sing.setEnabled(not busy)
+        self.btn_tab_inst.setEnabled(not busy)
         if busy:
             name = title or (self._selected or {}).get('title', '未命名')
             self.title_label.setText('切换中：%s…' % name)
@@ -315,6 +371,12 @@ class PlaybackPage(QWidget):
             peer.setChecked(False)
             peer.blockSignals(False)
             self.bridge.emit_action('playback_select_mode', mode=mode, log='请先在歌库中选择歌曲')
+            return
+        if mode == 'ai_follow' and self._is_accompaniment_selected():
+            self.btn_ai_follow.blockSignals(True)
+            self.btn_ai_follow.setChecked(False)
+            self.btn_ai_follow.blockSignals(False)
+            self.bridge.emit_action('playback_select_mode', mode=mode, log='原唱条目不支持 AI 跟唱，请用混响/普通说话')
             return
         self._uncheck_mode_buttons(mode)
         peer = {
@@ -511,6 +573,8 @@ class PlaybackPage(QWidget):
         self.song_list.setEnabled(True)
         self.search_box.setEnabled(True)
         self.btn_refresh.setEnabled(True)
+        self.btn_tab_sing.setEnabled(True)
+        self.btn_tab_inst.setEnabled(True)
         self.title_label.setText('请从歌库选择歌曲')
         self.title_label.setStyleSheet('font-size:18px;color:#64748b;')
         self.waveform.load_file('')
@@ -520,14 +584,22 @@ class PlaybackPage(QWidget):
         title = (title or '').strip()
         if not title:
             return
-        for i in range(self.song_list.count()):
-            item = self.song_list.item(i)
-            if not item:
-                continue
-            song = item.data(Qt.ItemDataRole.UserRole) or {}
-            if song.get('title') == title or item.text() == title:
-                self.set_song_switching(True, title)
-                self._apply_row_song(i, resume_if_playing=True, show_switching=False)
+        for tab, songs in (('sing', self._songs_sing), ('inst', self._songs_inst)):
+            for i, song in enumerate(songs):
+                if song.get('title') != title:
+                    continue
+                if self._lib_tab != tab:
+                    (self.btn_tab_inst if tab == 'inst' else self.btn_tab_sing).setChecked(True)
+                    self._switch_lib_tab(tab)
+                for row in range(self.song_list.count()):
+                    item = self.song_list.item(row)
+                    if not item:
+                        continue
+                    data = item.data(Qt.ItemDataRole.UserRole) or {}
+                    if (data.get('id') or data.get('play_path')) == (song.get('id') or song.get('play_path')):
+                        self.set_song_switching(True, title)
+                        self._apply_row_song(row, resume_if_playing=True, show_switching=False)
+                        return
                 return
 
     def set_play_mode(self, mode: str):

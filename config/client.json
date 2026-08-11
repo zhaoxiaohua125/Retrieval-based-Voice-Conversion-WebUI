@@ -8,7 +8,8 @@
   },
   "update": {
     "check_url": "",
-    "auto_check": true
+    "auto_check": true,
+    "skip_version": ""
   },
   "audio": {
     "sample_rate": 48000,
@@ -101,8 +102,8 @@
   },
   "ui": {
     "geometry": [
-      582,
-      300,
+      311,
+      352,
       1280,
       880
     ],

@@ -1983,6 +1983,33 @@ ewrite；扩展 LyricWord 与字级 matcher
 
 ---
 
+## 会话总结 - 2026-08-11 (23)
+
+- **诉求**: 「我的歌库」拆成「唱歌 / 伴奏」两个 Tab；伴奏为手动放入 `opt/` 的原始音频
+- **实现**:
+  1. `scan_accompaniment_library` 扫描 `opt/` 根目录 wav/mp3/flac 等，排除离线做歌产物
+  2. 控制器分 `_library_sing` / `_library_inst` 一并刷新下发
+  3. 播放页 Tab 切换列表；伴奏禁用 AI 跟唱，支持混响/普通说话及播放器播伴奏
+- **修改的文件列表**: app/playback/library.py、app/integration/controller.py、app/ui/pages/playback_page.py、app/playback/__init__.py、scripts/run_ui_skeleton.py、README.md
+
+---
+
+## 会话总结 - 2026-08-11 (24)
+
+- **诉求**: 伴奏 Tab 支持扫描 `opt/` 子文件夹
+- **实现**: `scan_accompaniment_library` 改为 `rglob` 递归；跳过 `task4_offline`；子目录内文件标题显示为 `子目录/歌名`
+- **修改的文件列表**: app/playback/library.py、README.md
+
+---
+
+## 会话总结 - 2026-08-11 (25)
+
+- **诉求**: 歌库 Tab「伴奏」改名为「原唱」
+- **修改**: 播放页 Tab 文案、搜索框占位、刷新日志及 AI 跟唱提示
+- **修改的文件列表**: app/ui/pages/playback_page.py、app/integration/controller.py、README.md
+
+---
+
 ## 会话总结 - 2026-08-11 (21)
 
 - **会话目的**: P0 发布与稳定性 — 完成客户端自动更新完整流程，后台服务与 `app/` 分离

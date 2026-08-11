@@ -2,6 +2,18 @@
 
 from pathlib import Path
 
+_AI_STEM_SUFFIXES = (
+    '_cover',
+    '_converted_vocal',
+    '_instrumental',
+    '_vocals',
+    '_original_vocal',
+    '_vocals_noreverb',
+    '_harmony',
+)
+_INST_EXTS = ('.wav', '.mp3', '.flac', '.ogg', '.m4a')
+_SKIP_ACCOMP_PARTS = frozenset({'task4_offline', '__pycache__', '.git'})
+
 
 def _stem_from_wav_name(name: str) -> str:
     stem = name
@@ -49,6 +61,7 @@ def _song_from_stem(stem: str, folder: Path):
     return {
         'id': str(play_path.resolve()),
         'title': stem,
+        'library_type': 'sing',
         'cover_path': str(cover.resolve()) if cover.is_file() else None,
         'vocal_path': str(vocal.resolve()) if vocal.is_file() else None,
         'instrumental_path': str(inst.resolve()) if inst.is_file() else None,
@@ -78,8 +91,68 @@ def scan_song_library(project_root, dirs=None):
     return sorted(songs.values(), key=lambda s: s['title'])
 
 
+def _is_ai_pipeline_stem(stem: str) -> bool:
+    return any(stem.endswith(suf) for suf in _AI_STEM_SUFFIXES)
+
+
+def _accompaniment_entry(audio: Path, folder: Path) -> dict | None:
+    if not audio.is_file():
+        return None
+    stem = audio.stem
+    if _is_ai_pipeline_stem(stem):
+        return None
+    base = stem
+    if (folder / f'{base}_cover.wav').is_file() or (folder / f'{base}_converted_vocal.wav').is_file():
+        return None
+    path = str(audio.resolve())
+    return {
+        'id': path,
+        'title': stem,
+        'library_type': 'accompaniment',
+        'cover_path': None,
+        'vocal_path': None,
+        'instrumental_path': path,
+        'play_path': path,
+        'lrc_path': find_lrc_in_dir(folder, stem),
+        'dir': str(folder.resolve()),
+    }
+
+
+def scan_accompaniment_library(project_root, opt_dir='opt'):
+    """扫描 opt 及子目录下手动放入的伴奏（跳过 task4_offline 等做歌目录）。"""
+    root = Path(project_root) / str(opt_dir or 'opt')
+    if not root.is_dir():
+        return []
+    songs = {}
+    for p in sorted(root.rglob('*')):
+        if not p.is_file() or p.suffix.lower() not in _INST_EXTS:
+            continue
+        rel = p.relative_to(root)
+        if 'task4_offline' in rel.parts:
+            continue
+        if any(part in _SKIP_ACCOMP_PARTS or part.startswith('.') for part in rel.parts[:-1]):
+            continue
+        entry = _accompaniment_entry(p, p.parent)
+        if not entry:
+            continue
+        if len(rel.parts) > 1:
+            entry = dict(entry)
+            entry['title'] = '%s/%s' % ('/'.join(rel.parts[:-1]), p.stem)
+        songs[entry['id']] = entry
+    return sorted(songs.values(), key=lambda s: s['title'])
+
+
 def collect_song_related_paths(song: dict):
     """收集一首歌在 output 目录下的关联文件（wav/lrc/f0 等）。"""
+    if str(song.get('library_type') or '') == 'accompaniment':
+        paths = []
+        for key in ('play_path', 'instrumental_path', 'lrc_path'):
+            p = song.get(key)
+            if p:
+                fp = Path(p)
+                if fp.is_file():
+                    paths.append(fp)
+        return paths
     folder = Path(song.get('dir') or Path(song.get('play_path', '')).parent)
     stem = song.get('title') or _stem_from_wav_name(Path(song.get('play_path', '')).stem)
     if not folder.is_dir() or not stem:
