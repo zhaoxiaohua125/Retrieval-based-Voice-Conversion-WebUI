@@ -1843,3 +1843,42 @@ ewrite；扩展 LyricWord 与字级 matcher
   5. tick / 暂停 / seek / 智能切 / 混音设置统一走 manager
 - **关键决策**: 有 inst+vocal 走单流；仅 cover 无分轨时仍 fallback WavPlayer
 - **修改的文件列表**: app/audio/stream_manager.py、app/audio/service.py、app/integration/controller.py、README.md
+
+---
+
+## 会话总结 - 2026-08-11 (9)
+
+- **会话主要目的**: 修复智能切模式下切换混乱
+- **完成的主要任务**:
+  1. 智能切走 `_switch_unified_playback(quiet=True)`，不再发 `passthrough_started`/`playback_started` 导致 UI 按钮乱跳
+  2. 新增 `smart_switch_tick`：只更新进度/波形，不改变选中模式按钮
+  3. 状态机拆分：智能混响中只判切回唱段；唱段中只判切混响
+  4. 切回唱段增加 vocal 防抖（约为「静音保持」的 25%，最少 0.35s）
+  5. 手动选模式 / 开关智能切时重置 `_smart_reverb_active` 与累计器
+- **修改的文件列表**: app/integration/controller.py、scripts/run_ui_skeleton.py、README.md
+
+---
+
+## 会话总结 - 2026-08-11 (10)
+
+- **问题**: 设置里点保存出现双声，像又播放一遍
+- **根因**: 关闭设置弹窗后 `restore_playback_after_settings` 在单流仍在播时，又启动了 WavPlayer / PitchFollow 第二条流
+- **修复**: 单流活跃时只热更新混音参数，不再 restore 重建播放；`_save_settings` 同步 pitchfix 混音到 manager
+- **修改的文件列表**: app/integration/controller.py、README.md
+
+---
+
+## 会话总结 - 2026-08-11 (11)
+
+- **问题**: 智能切开启后伴奏段实际已是混响说话，但按钮仍高亮 AI 唱歌
+- **修复**: `smart_switch_tick` 携带 `overlay_mode`，UI 同步更新按钮选中态（伴奏→混响说话，唱段→AI 唱歌/跟唱）
+- **修改的文件列表**: scripts/run_ui_skeleton.py、README.md
+
+---
+
+## 会话总结 - 2026-08-11 (12)
+
+- **问题**: 混响/普通说话模式下歌曲播完重播，歌词仍停在末尾
+- **根因**: 单曲循环 `return True` 导致 playback tick 退出；`set_lyric_tick` 在 index=-1 时不刷新 UI
+- **修复**: 原地循环 `return False` 保持 tick；`lyrics.reset_sync(0)`；开头位置重置歌词 UI
+- **修改的文件列表**: app/integration/controller.py、app/lyrics/service.py、app/ui/pages/playback_page.py、README.md

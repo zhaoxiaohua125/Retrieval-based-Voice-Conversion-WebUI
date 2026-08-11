@@ -252,6 +252,11 @@ def main():
                 page.clear_current_song()
             elif action == 'playback_tick':
                 page.set_playback_state(payload)
+            elif action == 'smart_switch_tick':
+                overlay = payload.get('overlay_mode') or ''
+                if overlay in ('ai_sing', 'ai_follow', 'reverb_talk', 'normal_talk'):
+                    page.set_selected_mode(overlay)
+                page.set_playback_state(payload)
             elif action == 'playback_started':
                 page.set_mode('ai_sing', active=True)
                 page.set_playback_state(payload)

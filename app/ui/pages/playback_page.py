@@ -398,12 +398,18 @@ class PlaybackPage(QWidget):
         text = (payload or {}).get('text', '')
         index = int((payload or {}).get('index', -1))
         html = (payload or {}).get('html_light') or ''
+        if index < 0 or not self._lyric_lines:
+            self.lyric_main.setText(text or '')
+            self.lyric_prev.setText('')
+            self.lyric_next.setText(self._lyric_lines[0] if self._lyric_lines else '')
+            self.lyrics_list.blockSignals(True)
+            self.lyrics_list.setCurrentRow(-1)
+            self.lyrics_list.blockSignals(False)
+            return
         if html and (payload or {}).get('has_words'):
             self.lyric_main.setText(html)
         elif text:
             self.lyric_main.setText(text)
-        if index < 0 or not self._lyric_lines:
-            return
         self.lyric_prev.setText(self._lyric_lines[index - 1] if index > 0 else '')
         self.lyric_next.setText(self._lyric_lines[index + 1] if index + 1 < len(self._lyric_lines) else '')
         self.lyrics_list.blockSignals(True)

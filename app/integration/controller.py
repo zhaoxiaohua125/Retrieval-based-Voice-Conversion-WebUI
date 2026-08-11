@@ -71,6 +71,7 @@ class ClientController:
         self._smart_peaks = None
         self._smart_peaks_dur = 0.0
         self._smart_silent_acc = 0.0
+        self._smart_vocal_acc = 0.0
 
     @property
     def pitch_follow(self):
@@ -220,6 +221,21 @@ class ClientController:
     def restore_playback_after_settings(self, snap: dict | None):
         if not snap:
             return
+        if self._unified_stream_active():
+            mgr = self._unified_mgr()
+            if mgr is not None:
+                mix = pitchfix_mix_from_config(self.config_store)
+                audio_cfg = dict(self.config_store.get('audio', {}) or {})
+                if mgr.config.passthrough:
+                    mgr.config.passthrough_gain = passthrough_gain_from_audio(audio_cfg)
+                mgr.config.reverb_mix = float(audio_cfg.get('reverb_mix', 0.35))
+                mgr.config.reverb_decay = float(audio_cfg.get('reverb_decay', 0.72))
+                mgr.config.inst_gain = inst_gain_from_config(self.config_store)
+                mgr.config.mic_gain = mix['mic_gain']
+                mgr.config.ref_vocal_gain = mix['ref_vocal_gain']
+                mgr.config.follow_threshold = mix['follow_threshold']
+                mgr.config.follow_attenuation = mix['follow_attenuation']
+            return
         pos = float(snap.get('position', 0) or 0)
         mode = snap.get('mode')
         if snap.get('ai_follow_running') and not (self._pitch_follow and self._pitch_follow.running):
@@ -341,6 +357,7 @@ class ClientController:
         self._smart_user_override = False
         self._smart_switch_busy = False
         self._smart_silent_acc = 0.0
+        self._smart_vocal_acc = 0.0
 
     def _load_smart_vocal_peaks(self, path: str):
         path = str(path or '')
@@ -367,6 +384,7 @@ class ClientController:
         self._smart_peaks = None
         self._smart_peaks_dur = 0.0
         self._smart_silent_acc = 0.0
+        self._smart_vocal_acc = 0.0
         if not path:
             return
         threading.Thread(
@@ -390,26 +408,39 @@ class ClientController:
         if self._smart_peaks is None or self._smart_peaks_dur <= 0:
             return
         min_hold = float(self.config_store.get('playback.smart_switch_min_gap_sec', 3.0) or 3.0)
+        vocal_hold = min(1.0, max(0.35, min_hold * 0.25))
         in_vocal = is_vocal_energy_region(pos, self._smart_peaks, self._smart_peaks_dur)
+        if self._smart_reverb_active:
+            if self.state.mode != 'reverb_talk':
+                return
+            if in_vocal:
+                self._smart_vocal_acc += 0.03
+            else:
+                self._smart_vocal_acc = 0.0
+            if self._smart_vocal_acc >= vocal_hold:
+                self._smart_switch_busy = True
+                self._smart_vocal_acc = 0.0
+                logger.info('smart_switch -> vocal pos=%.2fs base=%s', pos, base)
+                self._dispatch_mode_switch(self._smart_switch_to_vocal, float(pos))
+            return
+        if self.state.mode not in ('ai_sing', 'ai_follow') or not self._is_timeline_playing():
+            return
         if in_vocal:
             self._smart_silent_acc = 0.0
         else:
             self._smart_silent_acc += 0.03
-        if not in_vocal and self._smart_silent_acc >= min_hold and not self._smart_reverb_active:
-            if self.state.mode in ('ai_sing', 'ai_follow') and self._is_timeline_playing():
-                self._smart_switch_busy = True
-                self._smart_reverb_active = True
-                logger.info('smart_switch -> reverb pos=%.2fs mode=%s', pos, base)
-                self._dispatch_mode_switch(self._smart_switch_to_reverb, float(pos))
-        elif in_vocal and self._smart_reverb_active and self.state.mode == 'reverb_talk':
+        if not in_vocal and self._smart_silent_acc >= min_hold:
             self._smart_switch_busy = True
-            logger.info('smart_switch -> vocal pos=%.2fs base=%s', pos, base)
-            self._dispatch_mode_switch(self._smart_switch_to_vocal, float(pos))
+            self._smart_silent_acc = 0.0
+            self._smart_reverb_active = True
+            logger.info('smart_switch -> reverb pos=%.2fs mode=%s', pos, base)
+            self._dispatch_mode_switch(self._smart_switch_to_reverb, float(pos))
 
     def _smart_switch_to_reverb(self, pos: float):
         try:
             song = dict(self.state.selected_song or {})
-            self._start_talk({'song': song, 'position': float(pos), 'autoplay': True}, mode='reverb_talk')
+            if not self._switch_unified_playback('reverb_talk', song, float(pos), True, quiet=True):
+                self._start_talk({'song': song, 'position': float(pos), 'autoplay': True}, mode='reverb_talk')
         finally:
             self._smart_switch_busy = False
 
@@ -417,8 +448,10 @@ class ClientController:
         try:
             mode = self.state.selected_mode if self.state.selected_mode in ('ai_sing', 'ai_follow') else 'ai_sing'
             song = dict(self.state.selected_song or {})
-            self._continue_mode_with_song_impl(mode, song, float(pos), True)
+            if not self._switch_unified_playback(mode, song, float(pos), True, quiet=True):
+                self._continue_mode_with_song_impl(mode, song, float(pos), True)
             self._smart_reverb_active = False
+            self._smart_vocal_acc = 0.0
         finally:
             self._smart_switch_busy = False
 
@@ -452,7 +485,7 @@ class ClientController:
 
     _reverb_inst_state = _timeline_inst_state
 
-    def _switch_unified_playback(self, mode: str, song: dict, carry_pos: float = 0.0, autoplay: bool = True) -> bool:
+    def _switch_unified_playback(self, mode: str, song: dict, carry_pos: float = 0.0, autoplay: bool = True, quiet: bool = False) -> bool:
         song = dict(song or {})
         if not self._song_unified_ready(song, mode):
             return False
@@ -487,13 +520,28 @@ class ClientController:
         self.state.ai_follow_preparing = False
         self.state.playback_running = autoplay or (mgr.inst_duration > 0 and mgr.inst_paused)
         pos, dur, playing, paused = self._timeline_inst_state()
+        if pos <= 0.15:
+            sync_lyrics = self._reset_playback_lyrics
+        else:
+            sync_lyrics = self._ensure_playback_lyrics
         if not mgr_was or not tick_alive:
             self._inst_end_sent = False
-            self._ensure_playback_lyrics(pos)
+            sync_lyrics(pos)
             self._restart_playback_tick()
         else:
-            self._ensure_playback_lyrics(pos)
-        self._publish_status('playback_tick', position=pos, duration=dur, playing=playing, paused=paused)
+            sync_lyrics(pos)
+        if not quiet:
+            self._publish_status('playback_tick', position=pos, duration=dur, playing=playing, paused=paused)
+        else:
+            self._publish_status(
+                'smart_switch_tick',
+                position=pos,
+                duration=dur,
+                playing=playing,
+                paused=paused,
+                overlay_mode=mode,
+                base_mode=self.state.selected_mode,
+            )
         return True
 
     def _toggle_reverb_talk(self, payload=None):
@@ -712,8 +760,13 @@ class ClientController:
         if mode in ('reverb_talk', 'normal_talk'):
             self._smart_user_override = True
             self._smart_reverb_active = False
+            self._smart_silent_acc = 0.0
+            self._smart_vocal_acc = 0.0
         elif mode in ('ai_sing', 'ai_follow'):
             self._smart_user_override = False
+            self._smart_reverb_active = False
+            self._smart_silent_acc = 0.0
+            self._smart_vocal_acc = 0.0
         self._publish_status('mode_selected', mode=mode)
         if self._is_timeline_playing() and mode == self.state.mode:
             return
@@ -939,6 +992,14 @@ class ClientController:
             self.state.lyrics_running = True
         self.lyrics.sync_at(time_sec, force=True)
 
+    def _reset_playback_lyrics(self, time_sec: float = 0.0):
+        if not self.state.loaded_lyrics:
+            return
+        if not self.state.lyrics_running:
+            self.lyrics.start(source='manual', enable_tick=False)
+            self.state.lyrics_running = True
+        self.lyrics.reset_sync(time_sec)
+
     def _start_ai_sing(self, payload: dict):
         self._dispatch_mode_switch(self._start_ai_sing_impl, self._with_autoplay(payload))
 
@@ -1035,7 +1096,10 @@ class ClientController:
         self.state.mode = 'ai_sing'
         self._inst_end_sent = False
         pos = self._player.position
-        self._ensure_playback_lyrics(pos)
+        if pos <= 0.15:
+            self._reset_playback_lyrics(pos)
+        else:
+            self._ensure_playback_lyrics(pos)
         if not autoplay:
             self.state.playback_running = False
             self._restart_playback_tick()
@@ -1218,6 +1282,8 @@ class ClientController:
         self._dispatch_mode_switch(self._continue_mode_with_song_impl, mode, dict(song), float(carry_pos), bool(autoplay))
 
     def _continue_mode_with_song_impl(self, mode: str, song: dict, carry_pos: float = 0.0, autoplay: bool = True):
+        if float(carry_pos or 0) <= 0.15:
+            self._reset_playback_lyrics(float(carry_pos or 0))
         payload = {'song': song, 'position': carry_pos, 'autoplay': autoplay}
         if mode == 'ai_sing':
             self._start_ai_sing_impl(payload)
@@ -1244,7 +1310,9 @@ class ClientController:
                 if mgr is not None and mgr.inst_duration > 0:
                     mgr.replay_instrumental()
                     self._inst_end_sent = False
-                    self._ensure_playback_lyrics(0)
+                    self._smart_silent_acc = 0.0
+                    self._smart_vocal_acc = 0.0
+                    self._reset_playback_lyrics(0.0)
                     pos, dur, playing, paused = self._timeline_inst_state()
                     self._publish_status(
                         'playback_tick',
@@ -1254,7 +1322,7 @@ class ClientController:
                         paused=paused,
                     )
                     self._publish_status('track_advance', title=title, log='单曲循环：%s' % title)
-                    return True
+                    return False
             next_song = self._pick_next_song()
             if not next_song or not next_song.get('play_path'):
                 return False
@@ -1639,7 +1707,8 @@ class ClientController:
                 if pf.running or pf.position > 0:
                     pos = pf.position
                     self.lyrics.sync_at(pos, force=False)
-                    self._maybe_smart_switch(pos, pf.running, False)
+                    if not self._unified_stream_active():
+                        self._maybe_smart_switch(pos, pf.running, False)
                     self._publish_status(
                         'playback_tick',
                         position=pos,
@@ -2082,7 +2151,11 @@ class ClientController:
             self.config_store.set('playback.play_mode', play_mode)
         if 'smart_switch' in playback:
             self.config_store.set('playback.smart_switch', bool(playback.get('smart_switch')))
-            if not playback.get('smart_switch'):
+            if playback.get('smart_switch'):
+                self._smart_reverb_active = False
+                self._smart_silent_acc = 0.0
+                self._smart_vocal_acc = 0.0
+            else:
                 self._reset_smart_switch()
         if playback.get('smart_switch_min_gap_sec') is not None:
             self.config_store.set('playback.smart_switch_min_gap_sec', float(playback['smart_switch_min_gap_sec']))
@@ -2118,6 +2191,13 @@ class ClientController:
                 mgr.config.passthrough_gain = passthrough_gain_from_audio(audio_cfg)
             mgr.config.reverb_mix = float(audio_cfg.get('reverb_mix', 0.35))
             mgr.config.reverb_decay = float(audio_cfg.get('reverb_decay', 0.72))
+            if mgr.config.playback_mode in PLAYBACK_MODES:
+                mix = pitchfix_mix_from_config(self.config_store)
+                mgr.config.inst_gain = inst_gain_from_config(self.config_store)
+                mgr.config.mic_gain = mix['mic_gain']
+                mgr.config.ref_vocal_gain = mix['ref_vocal_gain']
+                mgr.config.follow_threshold = mix['follow_threshold']
+                mgr.config.follow_attenuation = mix['follow_attenuation']
         hint = ''
         if self.state.passthrough_running or self.state.realtime_running:
             hint = '（请重新开启普通说话/混响说话/AI 跟唱使新设备生效）'

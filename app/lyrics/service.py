@@ -161,6 +161,11 @@ class LyricsService:
         except Exception:
             logger.error('lyrics sync_at failed:\n%s', traceback.format_exc())
 
+    def reset_sync(self, time_sec: float = 0.0):
+        self._last_index = -1
+        self._last_word = -1
+        self.sync_at(time_sec, force=True)
+
     def tick_at(self, time_sec: float):
         self.sync_at(time_sec, force=False)
 
