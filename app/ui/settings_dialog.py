@@ -1,4 +1,4 @@
-"""系统设置：常规项 + 音频设备（对标 realtime_gui / YY 试麦）。"""
+"""系统设置：侧栏 Tab + 音频/播放/歌词/常规/快捷键。"""
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
@@ -12,24 +12,44 @@ from PyQt6.QtWidgets import (
     QKeySequenceEdit,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QPushButton,
     QRadioButton,
     QScrollArea,
     QSlider,
     QSpinBox,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from app.audio.devices import list_devices, list_hostapis, pick_voicemeeter_defaults
 from app.config_store import ConfigStore
+from app.integration.controller import PLAY_MODE_LABELS, PLAY_MODES
+from app.ui.ai_follow_mix_panel import _DEFAULTS as PF_DEFAULTS
+from app.ui.ai_follow_mix_panel import _att_from_slider, _slider_from_att
 from app.ui.layout_store import load_ui_layout
 from app.ui.playback_shortcuts import DEFAULT_SHORTCUTS, SHORTCUT_KEYS, SHORTCUT_LABELS
 from app.ui.rvc_advanced_dialog import RvcAdvancedDialog
 
+_NAV_STYLE = (
+    'QListWidget{background:#f8fafc;border:none;outline:0;padding:8px 6px;}'
+    'QListWidget::item{padding:10px 12px;border-radius:6px;color:#334155;}'
+    'QListWidget::item:selected{background:#2563eb;color:#fff;}'
+)
+
 
 class SettingsDialog(QDialog):
     """系统设置弹窗：写入 config/client.json，无需手改 JSON。"""
+
+    _TABS = (
+        ('audio', '音频与路由'),
+        ('playback', '播放设置'),
+        ('lyrics', '歌词'),
+        ('general', '常规'),
+        ('shortcuts', '快捷键'),
+    )
 
     def __init__(self, bridge, config: ConfigStore, project_root=None, song_make_page=None, parent=None):
         super().__init__(parent)
@@ -39,200 +59,301 @@ class SettingsDialog(QDialog):
         self.song_make_page = song_make_page
         self._mic_testing = False
         self._realtime_payload = None
+        self._pf_sliders = {}
         self.setWindowTitle('系统设置')
-        self.setMinimumWidth(600)
-        self.setMinimumHeight(640)
+        self.setMinimumSize(860, 620)
+        self.resize(920, 680)
         self._build_ui()
         self._load_values()
         self._reload_devices()
 
     def _build_ui(self):
-        outer = QVBoxLayout(self)
+        outer = QHBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        self._nav = QListWidget()
+        self._nav.setFixedWidth(156)
+        self._nav.setStyleSheet(_NAV_STYLE)
+        for _, label in self._TABS:
+            item = QListWidgetItem(label)
+            item.setTextAlignment(Qt.AlignmentFlag.AlignVCenter)
+            self._nav.addItem(item)
+        self._nav.currentRowChanged.connect(self._on_nav_changed)
+        outer.addWidget(self._nav)
+
+        right = QVBoxLayout()
+        right.setContentsMargins(20, 16, 20, 12)
+        self._page_title = QLabel('')
+        self._page_title.setStyleSheet('font-size:18px;font-weight:700;color:#0f172a;')
+        self._page_sub = QLabel('')
+        self._page_sub.setWordWrap(True)
+        self._page_sub.setStyleSheet('color:#64748b;font-size:12px;margin-bottom:4px;')
+        right.addWidget(self._page_title)
+        right.addWidget(self._page_sub)
+        self._stack = QStackedWidget()
+        self._stack.addWidget(self._page_audio())
+        self._stack.addWidget(self._page_playback())
+        self._stack.addWidget(self._page_lyrics())
+        self._stack.addWidget(self._page_general())
+        self._stack.addWidget(self._page_shortcuts())
+        right.addWidget(self._stack, stretch=1)
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        btn_cancel = QPushButton('取消')
+        btn_cancel.clicked.connect(self.reject)
+        btn_save = QPushButton('保存设置')
+        btn_save.clicked.connect(self.accept)
+        btn_row.addWidget(btn_cancel)
+        btn_row.addWidget(btn_save)
+        right.addLayout(btn_row)
+        outer.addLayout(right, stretch=1)
+        self._nav.setCurrentRow(0)
+
+    def _on_nav_changed(self, row: int):
+        if row < 0:
+            return
+        self._stack.setCurrentIndex(row)
+        key, label = self._TABS[row]
+        self._page_title.setText(label)
+        subs = {
+            'audio': '选择输入/输出设备、采样率与试麦（本机通道输出）。',
+            'playback': '歌库播放模式、说话/混响、AI 跟唱默认混音（保存后新会话生效）。',
+            'lyrics': '逐字歌词生成与高亮同步参数。',
+            'general': '更新检查、日志目录等全局项。',
+            'shortcuts': '仅在「播放」Tab 生效的快捷键。',
+        }
+        self._page_sub.setText(subs.get(key, ''))
+
+    def _scroll_page(self, builder):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         body = QWidget()
         root = QVBoxLayout(body)
-        general = QGroupBox('常规')
-        general_form = QFormLayout(general)
-        self.spin_osc = QSpinBox()
-        self.spin_osc.setRange(1, 65535)
-        self.edit_update_url = QLineEdit()
-        self.edit_log_dir = QLineEdit()
-        general_form.addRow('OSC 端口', self.spin_osc)
-        general_form.addRow('更新地址', self.edit_update_url)
-        general_form.addRow('日志目录', self.edit_log_dir)
-        root.addWidget(general)
-
-        lyrics_box = QGroupBox('逐字歌词（「生成逐字」时生效）')
-        lyrics_form = QFormLayout(lyrics_box)
-        self.cmb_align_engine = QComboBox()
-        self.cmb_align_engine.addItem('人声能量（推荐日常）', 'energy')
-        self.cmb_align_engine.addItem('Whisper 识别（更准、更慢）', 'whisper')
-        self.cmb_align_engine.setToolTip(
-            '决定点「生成逐字」时用哪种算法写进 LRC。\n'
-            '· 人声能量：轻量，几乎不占显存，速度快\n'
-            '· Whisper：整曲语音识别对齐，更贴人声，耗 CPU/可选 GPU\n'
-            '注意：只改这里不会自动重算；已有逐字的歌需再点一次「生成逐字」。'
-        )
-        self.cmb_align_engine.currentIndexChanged.connect(self._sync_lyrics_controls)
-        self.cmb_whisper_model = QComboBox()
-        for size, tip in (
-            ('tiny', '最快最粗'),
-            ('base', '较快'),
-            ('small', '平衡，推荐'),
-            ('medium', '更准更慢，更吃资源'),
-            ('large-v3', '最准最慢，很吃资源'),
-        ):
-            self.cmb_whisper_model.addItem('%s（%s）' % (size, tip), size)
-        self.cmb_whisper_model.setToolTip(
-            '仅 Whisper 引擎使用。模型越大越准也越慢；首次会下载到本机缓存。\n'
-            '一般选 small 即可；对齐不稳可试 medium。'
-        )
-        self.cmb_whisper_device = QComboBox()
-        self.cmb_whisper_device.addItem('CPU（稳定，不占显存，推荐）', 'cpu')
-        self.cmb_whisper_device.addItem('CUDA 显卡（更快，吃显存）', 'cuda')
-        self.cmb_whisper_device.addItem('自动（优先 CUDA，失败再 CPU）', 'auto')
-        self.cmb_whisper_device.setToolTip(
-            '仅 Whisper 引擎使用。\n'
-            '· CPU：稳定，不占显存；本机若 CUDA 报错请用此项\n'
-            '· CUDA：通常更快，但占显存，可能与 RVC 抢 GPU\n'
-            '· 自动：有显卡先试 CUDA，失败自动回退 CPU'
-        )
-        self.spin_lead_ms = QSpinBox()
-        self.spin_lead_ms.setRange(-2000, 2000)
-        self.spin_lead_ms.setSingleStep(20)
-        self.spin_lead_ms.setSuffix(' ms')
-        self.spin_lead_ms.setToolTip(
-            '字高亮相对播放进度的微调。\n'
-            '· 负值：高亮更晚（字比声快时用，如 -100）\n'
-            '· 正值：高亮更早（字比声慢时用）\n'
-            '保存后立即对当前歌词生效，无需重新生成。'
-        )
-        self.spin_offset_ms = QSpinBox()
-        self.spin_offset_ms.setRange(-10000, 10000)
-        self.spin_offset_ms.setSingleStep(50)
-        self.spin_offset_ms.setSuffix(' ms')
-        self.spin_offset_ms.setToolTip(
-            '整份歌词的整体时间偏移（所有行一起平移）。\n'
-            '整首歌歌词都偏早/偏晚时用；微调单字节奏优先改「高亮提前」。'
-        )
-        lyrics_form.addRow('对齐引擎', self.cmb_align_engine)
-        lyrics_form.addRow('Whisper 模型', self.cmb_whisper_model)
-        lyrics_form.addRow('Whisper 设备', self.cmb_whisper_device)
-        lyrics_form.addRow('高亮提前', self.spin_lead_ms)
-        lyrics_form.addRow('整体偏移', self.spin_offset_ms)
-        self.lbl_lyrics_hint = QLabel(
-            '进歌不会自动跑 Whisper；改引擎后请对当前歌曲再点「生成逐字」才会重写 LRC。'
-        )
-        self.lbl_lyrics_hint.setWordWrap(True)
-        self.lbl_lyrics_hint.setStyleSheet('color:#64748b;font-size:12px;')
-        lyrics_form.addRow(self.lbl_lyrics_hint)
-        root.addWidget(lyrics_box)
-
-        audio_box = QGroupBox('音频设备')
-        audio_layout = QVBoxLayout(audio_box)
-        host_row = QHBoxLayout()
-        host_row.addWidget(QLabel('设备类型'))
-        self.cmb_hostapi = QComboBox()
-        self.cmb_hostapi.setMinimumWidth(220)
-        self.cmb_hostapi.currentIndexChanged.connect(self._reload_devices)
-        self.chk_wasapi = QCheckBox('独占 WASAPI 设备')
-        host_row.addWidget(self.cmb_hostapi, stretch=1)
-        host_row.addWidget(self.chk_wasapi)
-        audio_layout.addLayout(host_row)
-
-        form = QFormLayout()
-        self.cmb_input = QComboBox()
-        self.cmb_input.setMinimumWidth(420)
-        self.cmb_output = QComboBox()
-        self.cmb_output.setMinimumWidth(420)
-        form.addRow('输入设备', self.cmb_input)
-        form.addRow('输出设备', self.cmb_output)
-        audio_layout.addLayout(form)
-
-        sr_row = QHBoxLayout()
-        self.btn_reload = QPushButton('重载设备列表')
-        self.btn_reload.clicked.connect(self._reload_devices)
-        self.radio_sr_model = QRadioButton('使用模型采样率')
-        self.radio_sr_device = QRadioButton('使用设备采样率')
-        self.sr_group = QButtonGroup(self)
-        self.sr_group.addButton(self.radio_sr_model)
-        self.sr_group.addButton(self.radio_sr_device)
-        self.lbl_sample_rate = QLabel('采样率：48000')
-        sr_row.addWidget(self.btn_reload)
-        sr_row.addWidget(self.radio_sr_model)
-        sr_row.addWidget(self.radio_sr_device)
-        sr_row.addStretch()
-        sr_row.addWidget(self.lbl_sample_rate)
-        audio_layout.addLayout(sr_row)
-
-        self.spin_sample_rate = QSpinBox()
-        self.spin_sample_rate.setRange(8000, 192000)
-        self.spin_sample_rate.setSingleStep(1000)
-        self.spin_sample_rate.setValue(48000)
-        self.spin_sample_rate.valueChanged.connect(lambda v: self.lbl_sample_rate.setText('采样率：%s' % v))
-        self.radio_sr_device.toggled.connect(self._sync_sr_controls)
-        self.radio_sr_model.toggled.connect(self._sync_sr_controls)
-        self.cmb_input.currentIndexChanged.connect(self._sync_device_sample_rate_hint)
-        self.cmb_output.currentIndexChanged.connect(self._sync_device_sample_rate_hint)
-
-        mic_row = QHBoxLayout()
-        self.btn_test_mic = QPushButton('试麦')
-        self.btn_test_mic.setToolTip('启动干声直通测试，对着麦克风说话；再次点击停止')
-        self.btn_test_mic.clicked.connect(self._toggle_test_mic)
-        self.lbl_mic_hint = QLabel('试麦：直通输入→输出，不经 RVC')
-        self.lbl_mic_hint.setStyleSheet('color:#64748b;font-size:12px;')
-        mic_row.addWidget(self.btn_test_mic)
-        mic_row.addWidget(self.lbl_mic_hint, stretch=1)
-        audio_layout.addLayout(mic_row)
-        pt_row = QHBoxLayout()
-        pt_row.addWidget(QLabel('普通说话音量（%）'))
-        self.slider_passthrough = QSlider(Qt.Orientation.Horizontal)
-        self.slider_passthrough.setRange(50, 200)
-        self.slider_passthrough.setToolTip('50%～200%，默认 100%=2 倍增益；保存后请重开「普通说话」')
-        self.lbl_passthrough = QLabel('')
-        self.lbl_passthrough.setMinimumWidth(40)
-        self.lbl_passthrough.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self.slider_passthrough.valueChanged.connect(lambda v: self.lbl_passthrough.setText('%s%%' % v))
-        pt_row.addWidget(self.slider_passthrough, stretch=1)
-        pt_row.addWidget(self.lbl_passthrough)
-        audio_layout.addLayout(pt_row)
-        root.addWidget(audio_box)
-
-        sc_box = QGroupBox('播放页快捷键（仅在「播放」Tab 生效）')
-        sc_form = QFormLayout(sc_box)
-        self._key_edits = {}
-        for key in SHORTCUT_KEYS:
-            edit = QKeySequenceEdit()
-            edit.setClearButtonEnabled(True)
-            edit.setToolTip('点击后按下目标键；留空表示禁用')
-            sc_form.addRow(SHORTCUT_LABELS[key], edit)
-            self._key_edits[key] = edit
-        root.addWidget(sc_box)
-
-        rvc_row = QHBoxLayout()
-        self.lbl_model = QLabel('')
-        self.lbl_model.setStyleSheet('color:#334155;font-size:13px;')
-        self.btn_advanced = QPushButton('RVC 高级设置…')
-        self.btn_advanced.setToolTip('模型选择、音调/Index/性能参数（对标 realtime_gui）')
-        self.btn_advanced.clicked.connect(self._open_advanced)
-        rvc_row.addWidget(self.lbl_model, stretch=1)
-        rvc_row.addWidget(self.btn_advanced)
-        root.addLayout(rvc_row)
+        builder(root)
         root.addStretch()
         scroll.setWidget(body)
-        outer.addWidget(scroll, stretch=1)
+        return scroll
 
-        btn_row = QHBoxLayout()
-        btn_row.addStretch()
-        btn_save = QPushButton('保存设置')
-        btn_save.clicked.connect(self.accept)
-        btn_cancel = QPushButton('取消')
-        btn_cancel.clicked.connect(self.reject)
-        btn_row.addWidget(btn_cancel)
-        btn_row.addWidget(btn_save)
-        outer.addLayout(btn_row)
+    def _page_audio(self):
+        def build(root):
+            box = QGroupBox('本机音频设备')
+            layout = QVBoxLayout(box)
+            host_row = QHBoxLayout()
+            host_row.addWidget(QLabel('设备类型'))
+            self.cmb_hostapi = QComboBox()
+            self.cmb_hostapi.setMinimumWidth(220)
+            self.cmb_hostapi.currentIndexChanged.connect(self._reload_devices)
+            self.chk_wasapi = QCheckBox('独占 WASAPI 设备')
+            host_row.addWidget(self.cmb_hostapi, stretch=1)
+            host_row.addWidget(self.chk_wasapi)
+            layout.addLayout(host_row)
+            form = QFormLayout()
+            self.cmb_input = QComboBox()
+            self.cmb_input.setMinimumWidth(420)
+            self.cmb_output = QComboBox()
+            self.cmb_output.setMinimumWidth(420)
+            form.addRow('输入设备', self.cmb_input)
+            form.addRow('输出设备', self.cmb_output)
+            layout.addLayout(form)
+            sr_row = QHBoxLayout()
+            self.btn_reload = QPushButton('重载设备列表')
+            self.btn_reload.clicked.connect(self._reload_devices)
+            self.radio_sr_model = QRadioButton('使用模型采样率')
+            self.radio_sr_device = QRadioButton('使用设备采样率')
+            self.sr_group = QButtonGroup(self)
+            self.sr_group.addButton(self.radio_sr_model)
+            self.sr_group.addButton(self.radio_sr_device)
+            self.lbl_sample_rate = QLabel('采样率：48000')
+            sr_row.addWidget(self.btn_reload)
+            sr_row.addWidget(self.radio_sr_model)
+            sr_row.addWidget(self.radio_sr_device)
+            sr_row.addStretch()
+            sr_row.addWidget(self.lbl_sample_rate)
+            layout.addLayout(sr_row)
+            self.spin_sample_rate = QSpinBox()
+            self.spin_sample_rate.setRange(8000, 192000)
+            self.spin_sample_rate.setSingleStep(1000)
+            self.spin_sample_rate.setValue(48000)
+            self.spin_sample_rate.valueChanged.connect(lambda v: self.lbl_sample_rate.setText('采样率：%s' % v))
+            self.radio_sr_device.toggled.connect(self._sync_sr_controls)
+            self.radio_sr_model.toggled.connect(self._sync_sr_controls)
+            self.cmb_input.currentIndexChanged.connect(self._sync_device_sample_rate_hint)
+            self.cmb_output.currentIndexChanged.connect(self._sync_device_sample_rate_hint)
+            mic_row = QHBoxLayout()
+            self.btn_test_mic = QPushButton('试麦')
+            self.btn_test_mic.setToolTip('启动干声直通测试，对着麦克风说话；再次点击停止')
+            self.btn_test_mic.clicked.connect(self._toggle_test_mic)
+            self.lbl_mic_hint = QLabel('试麦：直通输入→输出，不经 RVC')
+            self.lbl_mic_hint.setStyleSheet('color:#64748b;font-size:12px;')
+            mic_row.addWidget(self.btn_test_mic)
+            mic_row.addWidget(self.lbl_mic_hint, stretch=1)
+            layout.addLayout(mic_row)
+            root.addWidget(box)
+        return self._scroll_page(build)
+
+    def _page_playback(self):
+        def build(root):
+            lib = QGroupBox('歌库播放')
+            lib_form = QFormLayout(lib)
+            self.cmb_play_mode = QComboBox()
+            for mode in PLAY_MODES:
+                self.cmb_play_mode.addItem(PLAY_MODE_LABELS[mode], mode)
+            lib_form.addRow('播放模式', self.cmb_play_mode)
+            root.addWidget(lib)
+
+            talk = QGroupBox('说话 / 混响')
+            talk_layout = QVBoxLayout(talk)
+            pt_row = QHBoxLayout()
+            pt_row.addWidget(QLabel('普通说话音量'))
+            self.slider_passthrough = QSlider(Qt.Orientation.Horizontal)
+            self.slider_passthrough.setRange(50, 200)
+            self.slider_passthrough.setToolTip('50%～200%，默认 100%=2 倍增益；保存后请重开「普通说话」')
+            self.lbl_passthrough = QLabel('')
+            self.lbl_passthrough.setMinimumWidth(44)
+            self.lbl_passthrough.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.slider_passthrough.valueChanged.connect(lambda v: self.lbl_passthrough.setText('%s%%' % v))
+            pt_row.addWidget(self.slider_passthrough, stretch=1)
+            pt_row.addWidget(self.lbl_passthrough)
+            talk_layout.addLayout(pt_row)
+            for key, label, lo, hi, tip, scale in (
+                ('reverb_mix', '混响湿度', 0, 100, '混响说话模式下湿声比例', 100.0),
+                ('reverb_decay', '混响衰减', 50, 95, '越大混响尾音越长', 100.0),
+            ):
+                row = QHBoxLayout()
+                row.addWidget(QLabel(label))
+                slider = QSlider(Qt.Orientation.Horizontal)
+                slider.setRange(lo, hi)
+                if tip:
+                    slider.setToolTip(tip)
+                val_lbl = QLabel('')
+                val_lbl.setMinimumWidth(44)
+                val_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                slider.valueChanged.connect(lambda v, lbl=val_lbl, s=scale: lbl.setText('%.0f%%' % (v / s * 100) if s == 100 else '%.2f' % (v / s)))
+                row.addWidget(slider, stretch=1)
+                row.addWidget(val_lbl)
+                talk_layout.addLayout(row)
+                setattr(self, 'slider_%s' % key, slider)
+                setattr(self, 'lbl_%s' % key, val_lbl)
+            root.addWidget(talk)
+
+            follow = QGroupBox('AI 跟唱默认混音（🔊 面板初始值）')
+            follow_layout = QVBoxLayout(follow)
+            for key, label, lo, hi, tip in (
+                ('inst_ui', '伴奏音量', 0, 100, ''),
+                ('mic_ui', 'AI 人声音量', 0, 150, 'VAD 门控打开时 converted_vocal 音量'),
+                ('orig_ui', '原唱监听', 0, 100, '不参与 VAD，始终叠加 converted_vocal'),
+                ('threshold', '跟唱阈值', 0, 100, '越高越不易误触；越低越容易跟唱'),
+                ('attenuation_ui', '跟唱衰减', 1, 11, '停麦后 AI 人声保持时长'),
+            ):
+                row = QHBoxLayout()
+                row.addWidget(QLabel(label))
+                slider = QSlider(Qt.Orientation.Horizontal)
+                slider.setRange(lo, hi)
+                if tip:
+                    slider.setToolTip(tip)
+                val_lbl = QLabel('')
+                val_lbl.setMinimumWidth(44)
+                val_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+                def _sync(v, k=key, lbl=val_lbl):
+                    lbl.setText('%.2f' % _att_from_slider(v) if k == 'attenuation_ui' else str(v))
+
+                slider.valueChanged.connect(_sync)
+                row.addWidget(slider, stretch=1)
+                row.addWidget(val_lbl)
+                follow_layout.addLayout(row)
+                self._pf_sliders[key] = (slider, val_lbl)
+            root.addWidget(follow)
+
+            rvc_row = QHBoxLayout()
+            self.lbl_model = QLabel('')
+            self.lbl_model.setStyleSheet('color:#334155;font-size:13px;')
+            self.btn_advanced = QPushButton('RVC 高级设置…')
+            self.btn_advanced.setToolTip('模型选择、音调/Index/性能参数（对标 realtime_gui）')
+            self.btn_advanced.clicked.connect(self._open_advanced)
+            rvc_row.addWidget(self.lbl_model, stretch=1)
+            rvc_row.addWidget(self.btn_advanced)
+            root.addLayout(rvc_row)
+        return self._scroll_page(build)
+
+    def _page_lyrics(self):
+        def build(root):
+            box = QGroupBox('逐字歌词（「生成逐字」时生效）')
+            form = QFormLayout(box)
+            self.cmb_align_engine = QComboBox()
+            self.cmb_align_engine.addItem('人声能量（推荐日常）', 'energy')
+            self.cmb_align_engine.addItem('Whisper 识别（更准、更慢）', 'whisper')
+            self.cmb_align_engine.setToolTip(
+                '决定点「生成逐字」时用哪种算法写进 LRC。\n'
+                '· 人声能量：轻量，几乎不占显存，速度快\n'
+                '· Whisper：整曲语音识别对齐，更贴人声，耗 CPU/可选 GPU\n'
+                '注意：只改这里不会自动重算；已有逐字的歌需再点一次「生成逐字」。'
+            )
+            self.cmb_align_engine.currentIndexChanged.connect(self._sync_lyrics_controls)
+            self.cmb_whisper_model = QComboBox()
+            for size, tip in (
+                ('tiny', '最快最粗'),
+                ('base', '较快'),
+                ('small', '平衡，推荐'),
+                ('medium', '更准更慢，更吃资源'),
+                ('large-v3', '最准最慢，很吃资源'),
+            ):
+                self.cmb_whisper_model.addItem('%s（%s）' % (size, tip), size)
+            self.cmb_whisper_device = QComboBox()
+            self.cmb_whisper_device.addItem('CPU（稳定，不占显存，推荐）', 'cpu')
+            self.cmb_whisper_device.addItem('CUDA 显卡（更快，吃显存）', 'cuda')
+            self.cmb_whisper_device.addItem('自动（优先 CUDA，失败再 CPU）', 'auto')
+            self.spin_lead_ms = QSpinBox()
+            self.spin_lead_ms.setRange(-2000, 2000)
+            self.spin_lead_ms.setSingleStep(20)
+            self.spin_lead_ms.setSuffix(' ms')
+            self.spin_offset_ms = QSpinBox()
+            self.spin_offset_ms.setRange(-10000, 10000)
+            self.spin_offset_ms.setSingleStep(50)
+            self.spin_offset_ms.setSuffix(' ms')
+            form.addRow('对齐引擎', self.cmb_align_engine)
+            form.addRow('Whisper 模型', self.cmb_whisper_model)
+            form.addRow('Whisper 设备', self.cmb_whisper_device)
+            form.addRow('高亮提前', self.spin_lead_ms)
+            form.addRow('整体偏移', self.spin_offset_ms)
+            self.lbl_lyrics_hint = QLabel('改引擎后请对当前歌曲再点「生成逐字」才会重写 LRC。')
+            self.lbl_lyrics_hint.setWordWrap(True)
+            self.lbl_lyrics_hint.setStyleSheet('color:#64748b;font-size:12px;')
+            form.addRow(self.lbl_lyrics_hint)
+            root.addWidget(box)
+            osc_box = QGroupBox('OSC 歌词同步')
+            osc_form = QFormLayout(osc_box)
+            self.spin_osc = QSpinBox()
+            self.spin_osc.setRange(1, 65535)
+            osc_form.addRow('OSC 端口', self.spin_osc)
+            root.addWidget(osc_box)
+        return self._scroll_page(build)
+
+    def _page_general(self):
+        def build(root):
+            box = QGroupBox('常规')
+            form = QFormLayout(box)
+            self.edit_update_url = QLineEdit()
+            self.edit_log_dir = QLineEdit()
+            form.addRow('更新地址', self.edit_update_url)
+            form.addRow('日志目录', self.edit_log_dir)
+            root.addWidget(box)
+        return self._scroll_page(build)
+
+    def _page_shortcuts(self):
+        def build(root):
+            box = QGroupBox('播放页快捷键')
+            form = QFormLayout(box)
+            self._key_edits = {}
+            for key in SHORTCUT_KEYS:
+                edit = QKeySequenceEdit()
+                edit.setClearButtonEnabled(True)
+                edit.setToolTip('点击后按下目标键；留空表示禁用')
+                form.addRow(SHORTCUT_LABELS[key], edit)
+                self._key_edits[key] = edit
+            root.addWidget(box)
+        return self._scroll_page(build)
 
     def _set_combo_data(self, combo: QComboBox, value, default=None):
         target = value if value is not None else default
@@ -248,6 +369,32 @@ class SettingsDialog(QDialog):
         self.cmb_whisper_model.setEnabled(use_whisper)
         self.cmb_whisper_device.setEnabled(use_whisper)
 
+    def _load_pitchfix_sliders(self):
+        pf = self.config.get('pitchfix', {}) or {}
+        values = dict(PF_DEFAULTS)
+        if 'inst_ui' in pf:
+            values['inst_ui'] = int(pf['inst_ui'])
+        elif pf.get('inst_gain') is not None:
+            values['inst_ui'] = int(round(float(pf['inst_gain']) * 100))
+        if 'mic_ui' in pf:
+            values['mic_ui'] = int(pf['mic_ui'])
+        elif pf.get('mic_gain') is not None:
+            values['mic_ui'] = int(round(float(pf['mic_gain']) * 100))
+        for key in ('orig_ui', 'threshold', 'attenuation_ui'):
+            if key in pf:
+                values[key] = int(pf[key])
+            elif key == 'orig_ui' and pf.get('ref_vocal_gain') is not None:
+                values['orig_ui'] = int(round(float(pf['ref_vocal_gain']) * 100))
+            elif key == 'threshold' and pf.get('follow_threshold') is not None:
+                values['threshold'] = int(round(float(pf['follow_threshold'])))
+            elif key == 'attenuation_ui' and pf.get('follow_attenuation') is not None:
+                values['attenuation_ui'] = _slider_from_att(float(pf['follow_attenuation']))
+        for key, (slider, val_lbl) in self._pf_sliders.items():
+            slider.blockSignals(True)
+            slider.setValue(values[key])
+            slider.blockSignals(False)
+            val_lbl.setText('%.2f' % _att_from_slider(values[key]) if key == 'attenuation_ui' else str(values[key]))
+
     def _load_values(self):
         layout = load_ui_layout().get('settings') or {}
         self.spin_osc.setValue(int(self.config.get('lyrics.osc_port', layout.get('osc_port', 9000))))
@@ -258,11 +405,17 @@ class SettingsDialog(QDialog):
         pt_ui = int(self.config.get('audio.passthrough_ui', 100))
         self.slider_passthrough.setValue(max(50, min(200, pt_ui)))
         self.lbl_passthrough.setText('%s%%' % self.slider_passthrough.value())
+        mix = float(self.config.get('audio.reverb_mix', 0.35) or 0.35)
+        decay = float(self.config.get('audio.reverb_decay', 0.72) or 0.72)
+        self.slider_reverb_mix.setValue(int(round(mix * 100)))
+        self.lbl_reverb_mix.setText('%s%%' % int(round(mix * 100)))
+        self.slider_reverb_decay.setValue(int(round(decay * 100)))
+        self.lbl_reverb_decay.setText('%.0f%%' % (decay * 100))
+        mode = str(self.config.get('playback.play_mode', 'sequential') or 'sequential')
+        self._set_combo_data(self.cmb_play_mode, mode if mode in PLAY_MODES else 'sequential', 'sequential')
+        self._load_pitchfix_sliders()
         engine = str(self.config.get('lyrics.align_engine', 'energy') or 'energy').strip().lower()
-        if engine.startswith('whisper') or engine in ('faster-whisper', 'asr'):
-            engine = 'whisper'
-        else:
-            engine = 'energy'
+        engine = 'whisper' if engine.startswith('whisper') or engine in ('faster-whisper', 'asr') else 'energy'
         self._set_combo_data(self.cmb_align_engine, engine, 'energy')
         self._set_combo_data(self.cmb_whisper_model, str(self.config.get('lyrics.whisper_model', 'small') or 'small'), 'small')
         device = str(self.config.get('lyrics.whisper_device', 'cpu') or 'cpu').strip().lower()
@@ -276,10 +429,8 @@ class SettingsDialog(QDialog):
             val = str((self.config.get('shortcuts', {}) or {}).get(key) or DEFAULT_SHORTCUTS.get(key) or '')
             self._key_edits[key].setKeySequence(val)
         sr_type = str(self.config.get('realtime.sr_type', 'sr_model'))
-        if sr_type == 'sr_device':
-            self.radio_sr_device.setChecked(True)
-        else:
-            self.radio_sr_model.setChecked(True)
+        self.radio_sr_device.setChecked(sr_type == 'sr_device')
+        self.radio_sr_model.setChecked(sr_type != 'sr_device')
         self._sync_sr_controls()
         self.cmb_hostapi.blockSignals(True)
         self.cmb_hostapi.clear()
@@ -371,6 +522,17 @@ class SettingsDialog(QDialog):
         self._mic_testing = True
         self.btn_test_mic.setText('停止试麦')
 
+    def _collect_pitchfix(self) -> dict:
+        out = {}
+        for key, (slider, _) in self._pf_sliders.items():
+            out[key] = slider.value()
+        out['inst_gain'] = out['inst_ui'] / 100.0
+        out['mic_gain'] = out['mic_ui'] / 100.0
+        out['ref_vocal_gain'] = out['orig_ui'] / 100.0
+        out['follow_threshold'] = float(out['threshold'])
+        out['follow_attenuation'] = _att_from_slider(out['attenuation_ui'])
+        return out
+
     def closeEvent(self, event):
         if self._mic_testing:
             self.bridge.emit_action('audio_test_mic', stop=True)
@@ -413,11 +575,14 @@ class SettingsDialog(QDialog):
                 'sample_rate': sample_rate,
                 'passthrough_ui': int(self.slider_passthrough.value()),
                 'passthrough_gain': round(int(self.slider_passthrough.value()) / 50.0, 3),
+                'reverb_mix': round(self.slider_reverb_mix.value() / 100.0, 3),
+                'reverb_decay': round(self.slider_reverb_decay.value() / 100.0, 3),
             },
-            'shortcuts': {
-                key: self._key_edits[key].keySequence().toString()
-                for key in SHORTCUT_KEYS
+            'playback': {
+                'play_mode': str(self.cmb_play_mode.currentData() or 'sequential'),
             },
+            'pitchfix': self._collect_pitchfix(),
+            'shortcuts': {key: self._key_edits[key].keySequence().toString() for key in SHORTCUT_KEYS},
         }
         if self._realtime_payload:
             payload['realtime'] = dict(self._realtime_payload)

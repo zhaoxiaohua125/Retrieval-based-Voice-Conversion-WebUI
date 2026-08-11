@@ -1728,6 +1728,18 @@ ewrite；扩展 LyricWord 与字级 matcher
 
 ## 会话总结 - 2026-08-11
 
+- **会话主要目的**: 设置弹窗改为侧栏 Tab 壳，并新增「播放设置」页收纳现有可配置项
+- **完成的主要任务**:
+  1. `SettingsDialog` 重构为左侧导航 + `QStackedWidget`（音频与路由 / 播放设置 / 歌词 / 常规 / 快捷键）
+  2. 「播放设置」：歌库播放模式、普通说话音量、混响湿度/衰减、AI 跟唱默认混音五项、RVC 高级入口
+  3. 「音频与路由」保留设备/采样率/试麦；OSC 端口迁至「歌词」；快捷键独立 Tab
+  4. `controller._save_settings` 支持 `playback.play_mode`、`pitchfix.*`、`audio.reverb_*` 持久化并同步运行中服务
+- **修改的文件列表**: app/ui/settings_dialog.py、app/integration/controller.py、README.md
+
+---
+
+## 会话总结 - 2026-08-11
+
 - **会话主要目的**: 对比 `打包演示客户端.bat` 与 `build_demo_package.bat` 打出的包是否相同
 - **完成的主要任务**: 核对两个 bat 及其调用的 `build_demo_package_menu.bat` / `build_client_package.ps1` 参数差异
 - **关键决策与结论**:

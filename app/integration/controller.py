@@ -1841,7 +1841,7 @@ class ClientController:
     def _save_settings(self, payload: dict):
         payload = payload or {}
         audio = payload.get('audio') or {}
-        for key in ('hostapi', 'wasapi_exclusive', 'input_device', 'output_device', 'sample_rate', 'passthrough_gain', 'passthrough_ui'):
+        for key in ('hostapi', 'wasapi_exclusive', 'input_device', 'output_device', 'sample_rate', 'passthrough_gain', 'passthrough_ui', 'reverb_mix', 'reverb_decay'):
             if key in audio:
                 self.config_store.set('audio.%s' % key, audio[key])
         if 'passthrough_ui' in audio:
@@ -1885,17 +1885,48 @@ class ClientController:
         shortcuts = payload.get('shortcuts') or {}
         for key, val in shortcuts.items():
             self.config_store.set('shortcuts.%s' % key, str(val or '').strip())
+        playback = payload.get('playback') or {}
+        play_mode = str(playback.get('play_mode') or '').strip()
+        if play_mode in PLAY_MODES:
+            self.config_store.set('playback.play_mode', play_mode)
+        pitchfix = payload.get('pitchfix') or {}
+        for key in ('inst_ui', 'mic_ui', 'orig_ui', 'threshold', 'attenuation_ui'):
+            if key in pitchfix:
+                self.config_store.set('pitchfix.%s' % key, int(pitchfix[key]))
+        for src, dst in (
+            ('inst_gain', 'inst_gain'),
+            ('mic_gain', 'mic_gain'),
+            ('ref_vocal_gain', 'ref_vocal_gain'),
+            ('follow_threshold', 'follow_threshold'),
+            ('follow_attenuation', 'follow_attenuation'),
+        ):
+            if src in pitchfix:
+                self.config_store.set('pitchfix.%s' % dst, float(pitchfix[src]))
+        pf = self._pitch_follow
+        if pitchfix and pf is not None and (self.state.ai_follow_running or pf.running):
+            pf.apply_settings(
+                inst_gain=pitchfix.get('inst_gain'),
+                mic_gain=pitchfix.get('mic_gain'),
+                ref_vocal_gain=pitchfix.get('ref_vocal_gain'),
+                follow_threshold=pitchfix.get('follow_threshold'),
+                follow_attenuation=pitchfix.get('follow_attenuation'),
+            )
         self.config_store.save()
         self._sync_playback_output_device()
         mgr = self.audio.manager
-        if mgr and mgr.running and mgr.config.passthrough:
-            from app.audio.service import passthrough_gain_from_audio
-            merged = dict(self.config_store.get('audio', {}) or {})
-            mgr.config.passthrough_gain = passthrough_gain_from_audio(merged)
+        if mgr and mgr.running:
+            audio_cfg = dict(self.config_store.get('audio', {}) or {})
+            if mgr.config.passthrough:
+                from app.audio.service import passthrough_gain_from_audio
+                mgr.config.passthrough_gain = passthrough_gain_from_audio(audio_cfg)
+            mgr.config.reverb_mix = float(audio_cfg.get('reverb_mix', 0.35))
+            mgr.config.reverb_decay = float(audio_cfg.get('reverb_decay', 0.72))
         hint = ''
         if self.state.passthrough_running or self.state.realtime_running:
             hint = '（请重新开启普通说话/混响说话/AI 跟唱使新设备生效）'
         self._publish_status('settings_saved', log='音频与系统设置已写入 config/client.json%s' % hint)
+        if play_mode in PLAY_MODES:
+            self._publish_status('play_mode_changed', mode=play_mode)
 
     def _test_mic(self, payload=None):
         payload = payload or {}
