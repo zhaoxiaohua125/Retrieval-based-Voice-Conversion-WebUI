@@ -19,7 +19,7 @@ class HeaderBar(QWidget):
         self._buttons = []
         layout = QHBoxLayout(self)
         layout.setContentsMargins(12, 8, 12, 8)
-        self.title = QLabel('RVC 声迹')
+        self.title = QLabel('唱歌伴侣')
         self.title.setStyleSheet('font-size: 18px; font-weight: bold; color: #2563eb;')
         layout.addWidget(self.title)
         layout.addStretch()

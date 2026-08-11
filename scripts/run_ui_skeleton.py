@@ -152,7 +152,7 @@ def main():
         scheduler = AppScheduler.instance().start()
         app = QApplication(sys.argv)
         app.setQuitOnLastWindowClosed(False)
-        app.setApplicationName('RVC 声迹客户端')
+        app.setApplicationName('唱歌伴侣客户端')
         app.setApplicationVersion(CLIENT_VERSION)
         app_icon = fallback_app_icon()
         app.setWindowIcon(app_icon)
@@ -160,7 +160,7 @@ def main():
         from PyQt6.QtCore import Qt, QTimer
         from PyQt6.QtWidgets import QLabel
 
-        splash = QLabel('RVC 声迹客户端\n正在启动…')
+        splash = QLabel('唱歌伴侣客户端\n正在启动…')
         splash.setAlignment(Qt.AlignmentFlag.AlignCenter)
         splash.setStyleSheet('QLabel{background:#2563eb;color:#fff;font-size:16px;padding:32px 48px;border-radius:8px;}')
         splash.setWindowFlags(Qt.WindowType.SplashScreen | Qt.WindowType.FramelessWindowHint)
@@ -192,7 +192,7 @@ def main():
                 scan_done.set()
 
         threading.Thread(target=_startup_scan, name='startup-library-scan', daemon=True).start()
-        splash.setText('RVC 声迹客户端\n正在扫描歌库…')
+        splash.setText('唱歌伴侣客户端\n正在扫描歌库…')
         while not scan_done.is_set():
             app.processEvents()
             scan_done.wait(0.02)

@@ -37,7 +37,7 @@ class MainWindow(QMainWindow):
             config_store = ConfigStore().load()
         self.config_store = config_store
         self._controller = None
-        self.setWindowTitle('RVC 声迹客户端 v%s' % self._client_version())
+        self.setWindowTitle('唱歌伴侣客户端 v%s' % self._client_version())
         self.resize(1280, 800)
         self._build_ui()
         self._restore_layout()
@@ -187,7 +187,7 @@ class MainWindow(QMainWindow):
             btn = QMessageBox.question(
                 self,
                 '确认退出',
-                '确定要退出 RVC 声迹客户端吗？\n进行中的任务将被停止。',
+                '确定要退出 唱歌伴侣客户端吗？\n进行中的任务将被停止。',
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )
