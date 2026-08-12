@@ -1,9 +1,9 @@
-"""主窗口 Shell：顶栏三 Tab + 页面栈 + 底状态栏/日志。"""
+"""主窗口 Shell：登录 → 顶栏三 Tab + 页面栈 + 底状态栏/日志。"""
 
 import threading
 from pathlib import Path
 
-from PyQt6.QtCore import QTimer
+from PyQt6.QtCore import QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QApplication,
     QDialog,
@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (
 )
 from app.ui.header_bar import HeaderBar
 from app.ui.layout_store import load_ui_layout, save_ui_layout
-from app.ui.pages import AnnouncePage, PlaybackPage, SongMakePage
+from app.ui.pages import AnnouncePage, LoginPage, PlaybackPage, SongMakePage
 from app.ui.playback_shortcuts import PlaybackShortcutBinder
 from app.ui.qt_util import clicked
 from app.ui.settings_dialog import SettingsDialog
@@ -28,6 +28,8 @@ class MainWindow(QMainWindow):
     """SoundTrail 风格：播放 | 制作歌曲 | 公告。"""
 
     TAB_NAMES = HeaderBar.TAB_NAMES
+    main_entered = pyqtSignal()
+    _login_result = pyqtSignal(dict)
 
     def __init__(self, bridge, project_root=None, config_store=None):
         super().__init__()
@@ -38,9 +40,20 @@ class MainWindow(QMainWindow):
             config_store = ConfigStore().load()
         self.config_store = config_store
         self._controller = None
+        self._main_ready = False
+        self._backend_ready = False
+        self._login_pending = False
+        self._auth_token = ''
+        self._auth_user = None
+        self._pending_nav_tab = HeaderBar.TAB_PLAYBACK
+        self._page_playback = None
+        self._page_song_make = None
+        self._page_announce = None
+        self._shortcut_binder = None
         self.setWindowTitle('唱歌伴侣客户端 v%s' % self._client_version())
         self.resize(1280, 800)
         self._build_ui()
+        self._login_result.connect(self._on_login_result)
         self._restore_layout()
         self._gpu_timer = QTimer(self)
         self._gpu_timer.timeout.connect(self._refresh_gpu_status)
@@ -58,35 +71,73 @@ class MainWindow(QMainWindow):
         except Exception:
             return 'dev'
 
+    def is_main_ready(self) -> bool:
+        return self._main_ready
+
+    def is_backend_ready(self) -> bool:
+        return self._backend_ready
+
+    def mark_backend_ready(self):
+        self._backend_ready = True
+        if self._login_pending:
+            self._login_pending = False
+            self.page_login.set_status('正在进入…')
+            QTimer.singleShot(0, self._enter_main)
+
+    def set_login_wait_text(self, text: str):
+        if self._login_pending or not self.page_login.btn_login.isEnabled():
+            self.page_login.set_busy_text(text)
+
+    def set_boot_status(self, text: str):
+        if self._main_ready:
+            return
+        if self._login_pending or not self.page_login.btn_login.isEnabled():
+            self.page_login.set_busy_text(text)
+        else:
+            self.page_login.set_boot_hint(text)
+
     def _build_ui(self):
         root = QWidget()
         self.setCentralWidget(root)
         outer = QVBoxLayout(root)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
+        self.root_stack = QStackedWidget()
+        outer.addWidget(self.root_stack)
+        self.page_login = LoginPage(self.bridge)
+        self.page_login.login_requested.connect(self._on_login_requested)
+        self.root_stack.addWidget(self.page_login)
+        self.main_shell = QWidget()
+        self.root_stack.addWidget(self.main_shell)
+        self.root_stack.setCurrentWidget(self.page_login)
 
+    def _ensure_main_shell(self):
+        if self._main_ready:
+            return
+        shell = QVBoxLayout(self.main_shell)
+        shell.setContentsMargins(0, 0, 0, 0)
+        shell.setSpacing(0)
         self.header = HeaderBar()
         self.header.tab_changed.connect(self._on_nav_changed)
         self.header.btn_settings.clicked.connect(clicked(self._open_settings_dialog))
-        outer.addWidget(self.header)
-
+        shell.addWidget(self.header)
         self.stack = QStackedWidget()
-        self.page_playback = PlaybackPage(self.bridge)
-        self.page_song_make = SongMakePage(self.bridge, project_root=self.project_root)
-        self.page_announce = AnnouncePage(self.bridge)
-        self.stack.addWidget(self.page_playback)
-        self.stack.addWidget(self.page_song_make)
-        self.stack.addWidget(self.page_announce)
-        outer.addWidget(self.stack, stretch=1)
-
+        self._page_playback = PlaybackPage(self.bridge)
+        self._page_song_make = None
+        self._page_announce = None
+        self._slot_make = QWidget()
+        self._slot_announce = QWidget()
+        self.stack.addWidget(self._page_playback)
+        self.stack.addWidget(self._slot_make)
+        self.stack.addWidget(self._slot_announce)
+        shell.addWidget(self.stack, stretch=1)
         self.log_view = QTextEdit()
         self.log_view.setReadOnly(True)
         self.log_view.setPlaceholderText('运行日志…')
         self.log_view.setMaximumHeight(120)
-        outer.addWidget(self.log_view)
-
+        shell.addWidget(self.log_view)
         self.status = QStatusBar()
-        self.setStatusBar(self.status)
+        shell.addWidget(self.status)
         self.status.showMessage('就绪')
         self.plugin_label = QLabel('● 插件已连接')
         self.plugin_label.setStyleSheet('color:#16a34a;')
@@ -95,8 +146,44 @@ class MainWindow(QMainWindow):
         self.status.addPermanentWidget(self.plugin_label)
         self.bridge.log_message.connect(self.append_log)
         self._shortcut_binder = PlaybackShortcutBinder(
-            self, self.page_playback, self.config_store, playback_tab_index=HeaderBar.TAB_PLAYBACK
+            self, self._page_playback, self.config_store, playback_tab_index=HeaderBar.TAB_PLAYBACK
         )
+        self._main_ready = True
+        tab = self._pending_nav_tab
+        if isinstance(tab, int) and 0 <= tab < self.stack.count():
+            self.header.set_active_tab(tab)
+        QTimer.singleShot(0, self._refresh_gpu_status)
+
+    def _ensure_tab_page(self, index: int):
+        if index == HeaderBar.TAB_SONG_MAKE and self._page_song_make is None:
+            self._page_song_make = SongMakePage(self.bridge, project_root=self.project_root)
+            self.stack.removeWidget(self._slot_make)
+            self._slot_make.deleteLater()
+            self._slot_make = None
+            self.stack.insertWidget(HeaderBar.TAB_SONG_MAKE, self._page_song_make)
+        elif index == HeaderBar.TAB_ANNOUNCE and self._page_announce is None:
+            self._page_announce = AnnouncePage(self.bridge)
+            self.stack.removeWidget(self._slot_announce)
+            self._slot_announce.deleteLater()
+            self._slot_announce = None
+            self.stack.insertWidget(HeaderBar.TAB_ANNOUNCE, self._page_announce)
+
+    @property
+    def page_song_make(self):
+        self._ensure_main_shell()
+        self._ensure_tab_page(HeaderBar.TAB_SONG_MAKE)
+        return self._page_song_make
+
+    @property
+    def page_announce(self):
+        self._ensure_main_shell()
+        self._ensure_tab_page(HeaderBar.TAB_ANNOUNCE)
+        return self._page_announce
+
+    @property
+    def page_playback(self):
+        self._ensure_main_shell()
+        return self._page_playback
 
     @property
     def song_make_page(self):
@@ -106,17 +193,78 @@ class MainWindow(QMainWindow):
         self._controller = controller
 
     def _on_nav_changed(self, index: int):
+        if not self._main_ready:
+            return
+        self._ensure_tab_page(index)
         self.stack.setCurrentIndex(index)
         name = self.TAB_NAMES[index] if 0 <= index < len(self.TAB_NAMES) else ''
         self.status.showMessage('切换到%s页面' % name)
         self.bridge.emit_action('nav_tab', index=index, name=name)
 
+    def _on_login_requested(self, username: str, password: str):
+        self.page_login.set_status('正在登录…')
+
+        def _work():
+            try:
+                from app.ops.auth_client import login as remote_login
+                result = remote_login(username, password, self.config_store)
+            except Exception as exc:
+                result = {'ok': False, 'message': '登录异常：%s' % exc}
+            self._login_result.emit(result)
+
+        threading.Thread(target=_work, name='login-auth', daemon=True).start()
+
+    def _on_login_result(self, result: dict):
+        if not result.get('ok'):
+            msg = result.get('message') or '登录失败'
+            self.page_login.show_error(msg)
+            QMessageBox.warning(self, '登录失败', msg)
+            return
+        self._auth_token = str(result.get('token') or '')
+        self._auth_user = result.get('user') or {}
+        name = str((self._auth_user or {}).get('user_real') or (self._auth_user or {}).get('user_name') or '')
+        self.bridge.emit_action('login', log='登录成功：%s' % (name or '用户'))
+        self._on_login_success()
+
+    def _on_login_success(self):
+        if self._backend_ready:
+            self.page_login.set_status('正在加载界面…')
+            QTimer.singleShot(0, self._enter_main)
+            return
+        self._login_pending = True
+        self.page_login.set_status('正在初始化…')
+
+    def _enter_main(self):
+        self.page_login.set_status('正在加载界面…')
+        QTimer.singleShot(10, self._enter_main_build)
+
+    def _enter_main_build(self):
+        self.page_login.set_busy_text('正在加载播放页…')
+        QApplication.processEvents()
+        self._ensure_main_shell()
+        QTimer.singleShot(0, self._enter_main_show)
+
+    def _enter_main_show(self):
+        self.root_stack.setCurrentWidget(self.main_shell)
+        self.header.set_active_tab(HeaderBar.TAB_PLAYBACK)
+        self.status.showMessage('登录成功，已进入播放页')
+        self.page_login.set_busy(False)
+        QTimer.singleShot(0, self._emit_main_entered)
+        self.bridge.emit_action('login_success', log='已进入播放页')
+
+    def _emit_main_entered(self):
+        self.main_entered.emit()
+
     def switch_to_playback(self, song_title: str | None = None):
+        if not self._main_ready:
+            self._pending_nav_tab = HeaderBar.TAB_PLAYBACK
+            return
         self.header.set_active_tab(HeaderBar.TAB_PLAYBACK)
         if song_title:
             self.page_playback.select_song_by_title(song_title)
 
     def _open_settings_dialog(self):
+        self._ensure_main_shell()
         snap = self._controller.snapshot_playback() if self._controller else None
         dlg = SettingsDialog(
             self.bridge, self.config_store, project_root=self.project_root,
@@ -138,9 +286,13 @@ class MainWindow(QMainWindow):
             self._controller.restore_playback_after_settings(snap)
 
     def append_log(self, text):
+        if not self._main_ready:
+            return
         self.log_view.append(text)
 
     def _refresh_gpu_status(self):
+        if not self._main_ready:
+            return
         try:
             from app.ops.hardware import collect_environment_info
             cuda = collect_environment_info().get('cuda', {})
@@ -169,12 +321,13 @@ class MainWindow(QMainWindow):
                     x = avail.x() + max(0, (avail.width() - w) // 2)
                     y = avail.y() + max(0, (avail.height() - h) // 2)
             self.setGeometry(x, y, w, h)
-        tab = layout.get('active_nav_tab', layout.get('active_tab', HeaderBar.TAB_SONG_MAKE))
-        if isinstance(tab, int) and 0 <= tab < self.stack.count():
-            self.header.set_active_tab(tab)
-            self.stack.setCurrentIndex(tab)
+        tab = layout.get('active_nav_tab', layout.get('active_tab', HeaderBar.TAB_PLAYBACK))
+        if isinstance(tab, int) and 0 <= tab < len(HeaderBar.TAB_NAMES):
+            self._pending_nav_tab = tab
 
     def _save_window_layout(self):
+        if not self._main_ready:
+            return
         layout = load_ui_layout()
         g = self.geometry()
         layout['geometry'] = [g.x(), g.y(), g.width(), g.height()]
@@ -195,10 +348,11 @@ class MainWindow(QMainWindow):
             if btn != QMessageBox.StandardButton.Yes:
                 return False
         self._quitting = True
-        self._save_window_layout()
-        self._gpu_timer.stop()
-        self.setEnabled(False)
-        self.status.showMessage('正在退出，请稍候…')
+        if self._main_ready:
+            self._save_window_layout()
+            self._gpu_timer.stop()
+            self.setEnabled(False)
+            self.status.showMessage('正在退出，请稍候…')
         self._quit_worker = threading.Thread(target=self._run_shutdown, name='app-quit', daemon=True)
         self._quit_worker.start()
         self._quit_timer = QTimer(self)

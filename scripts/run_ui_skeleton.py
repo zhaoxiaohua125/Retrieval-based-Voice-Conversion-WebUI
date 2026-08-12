@@ -136,7 +136,6 @@ def main():
     import traceback
 
     app = None
-    splash = None
     try:
         console_level = logging.WARNING if (ROOT / 'VERSION').is_file() else logging.INFO
         setup_rotating_logging(console_level=console_level)
@@ -148,7 +147,6 @@ def main():
         startup_crash_check(ROOT, boot_config)
         _setup_qt_runtime(ROOT)
         _startup_log('logging ready')
-        scheduler = AppScheduler.instance().start()
         app = QApplication(sys.argv)
         app.setQuitOnLastWindowClosed(False)
         app.setApplicationName('唱歌伴侣客户端')
@@ -156,272 +154,298 @@ def main():
         app_icon = fallback_app_icon()
         app.setWindowIcon(app_icon)
 
-        from PyQt6.QtCore import Qt, QTimer
-        from PyQt6.QtWidgets import QLabel
-
-        splash = QLabel('唱歌伴侣客户端\n正在启动…')
-        splash.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        splash.setStyleSheet('QLabel{background:#2563eb;color:#fff;font-size:16px;padding:32px 48px;border-radius:8px;}')
-        splash.setWindowFlags(Qt.WindowType.SplashScreen | Qt.WindowType.FramelessWindowHint)
-        splash.show()
-        app.processEvents()
+        from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 
         if not QSystemTrayIcon.isSystemTrayAvailable():
             QMessageBox.warning(None, '提示', '当前系统托盘不可用，托盘菜单将跳过')
 
         bridge = UiBridge()
-        controller = ClientController(scheduler, project_root=ROOT, config=boot_config)
-        controller.set_ui_bridge(bridge)
-        controller.start()
-        install_crash_hooks(ROOT, controller.config_store)
-        _startup_log('controller ready')
-
-        def on_user_action(action: str, payload: dict):
-            scheduler.publish(BusMessage(SignalType.STATUS, ModuleId.UI, {'action': action, **(payload or {})}))
-            if payload.get('log'):
-                bridge.log_message.emit(str(payload['log']))
-
-        bridge.user_action.connect(on_user_action)
-
-        scan_done = threading.Event()
-
-        def _startup_scan():
-            try:
-                controller._scan_library_blocking()
-            finally:
-                scan_done.set()
-
-        threading.Thread(target=_startup_scan, name='startup-library-scan', daemon=True).start()
-        splash.setText('唱歌伴侣客户端\n正在扫描歌库…')
-        while not scan_done.is_set():
-            app.processEvents()
-            scan_done.wait(0.02)
-        _startup_log('library scan done count=%s' % len(controller.library))
-
-        window = MainWindow(bridge, project_root=ROOT, config_store=controller.config_store)
+        window = MainWindow(bridge, project_root=ROOT, config_store=boot_config)
         window.setWindowIcon(app_icon)
-        window.set_controller(controller)
-        lyrics = LyricsWindow()
-        lyrics.move(window.x() + 40, window.y() + 80)
-        controller.set_lyrics_window(lyrics)
-        _startup_log('main window created')
-
-        window._quit_lyrics = lyrics
-        window._quit_tray = None
-        window._quit_shutdown = lambda: scheduler.shutdown() if scheduler.running else None
-
-        def _finalize():
-            try:
-                mark_clean_exit(ROOT, controller.config_store)
-            except Exception:
-                pass
-            if scheduler.running:
-                scheduler.shutdown()
-            tray = getattr(window, '_quit_tray', None)
-            if tray is not None:
-                tray.hide()
-            lyrics.close()
-
-        app.aboutToQuit.connect(_finalize)
-        _startup_log('hooks ready')
-
-        def _apply_scheduler_status(envelope: dict):
-            source = envelope.get('source')
-            payload = envelope.get('payload') or {}
-            action = payload.get('action')
-            page = window.page_playback
-            make = window.page_song_make
-            if action == 'lyric_tick' and source == ModuleId.LYRICS:
-                page.set_lyric_tick(payload)
-                return
-            if source != ModuleId.SCHEDULER:
-                return
-            if action == 'offline_started':
-                make.set_offline_running(True)
-            elif action == 'offline_finished':
-                make.show_offline_result(payload.get('result') or {})
-                page.apply_library(controller.library, inst_songs=controller.library_inst)
-                title = payload.get('title') or ''
-                if title:
-                    window.switch_to_playback(title)
-                else:
-                    window.switch_to_playback()
-            elif action == 'offline_failed':
-                make.show_offline_failed(payload.get('message', ''))
-            elif action == 'offline_cancelled':
-                make.show_offline_cancelled(payload.get('message', ''))
-            elif action == 'library_updated':
-                page.apply_library(
-                    payload.get('sing_songs') or payload.get('songs', []),
-                    inst_songs=payload.get('inst_songs', []),
-                )
-            elif action == 'song_deleted':
-                page.clear_current_song()
-            elif action == 'playback_tick':
-                page.set_playback_state(payload)
-            elif action == 'smart_switch_tick':
-                overlay = payload.get('overlay_mode') or ''
-                if overlay in ('ai_sing', 'ai_follow', 'reverb_talk', 'normal_talk'):
-                    page.set_selected_mode(overlay)
-                page.set_playback_state(payload)
-            elif action == 'playback_started':
-                page.set_mode('ai_sing', active=True)
-                page.set_playback_state(payload)
-            elif action == 'passthrough_started':
-                page.set_mode(payload.get('mode') or 'normal_talk', active=True)
-                if (payload.get('mode') or '') in ('reverb_talk', 'normal_talk') and float(payload.get('duration', 0) or 0) > 0:
-                    page.set_playback_state(payload)
-            elif action in ('passthrough_stopped', 'passthrough_blocked'):
-                page.set_playback_stopped()
-            elif action == 'realtime_started':
-                page.set_mode('realtime', active=True)
-            elif action == 'realtime_stopped':
-                page.set_mode('idle')
-            elif action == 'ai_follow_preparing':
-                page.set_ai_follow_busy(True)
-                page.set_mode('ai_follow', active=True)
-                if float(payload.get('duration', 0) or 0) > 0 or float(payload.get('position', 0) or 0) > 0:
-                    page.set_playback_state(payload)
-            elif action == 'ai_follow_started':
-                make.set_offline_running(False)
-                page.set_ai_follow_busy(False)
-                page.set_mode('ai_follow', active=True)
-                page.set_playback_state(payload)
-            elif action in ('ai_follow_stopped', 'ai_follow_finished', 'ai_follow_failed'):
-                page.set_ai_follow_busy(False)
-                page.set_playback_stopped()
-            elif action in ('playback_paused', 'playback_resumed'):
-                page.set_playback_state(payload)
-            elif action == 'playback_idle':
-                page.set_mode('idle')
-            elif action in ('playback_stopped', 'playback_finished'):
-                page.set_playback_stopped()
-            elif action == 'mode_selected':
-                page.set_selected_mode(payload.get('mode', 'ai_sing'))
-            elif action == 'lyrics_loaded':
-                page.set_lyrics_lines(payload.get('lines') or [])
-            elif action == 'lyrics_missing':
-                page.set_lyrics_lines([])
-            elif action == 'play_mode_changed':
-                page.set_play_mode(payload.get('mode', 'sequential'))
-            elif action == 'select_song_ui':
-                page.select_song_by_title(payload.get('title', ''))
-            elif action == 'song_switched':
-                page.set_song_switching(False)
-            elif action == 'update_available':
-                from app.ui.update_dialog import show_update_prompt
-
-                window._update_dialog = show_update_prompt(window, bridge, payload)
-            elif action == 'update_checked':
-                if not payload.get('silent'):
-                    QMessageBox.information(window, '检查更新', payload.get('message') or '已是最新版本')
-            elif action == 'update_failed':
-                msg = payload.get('message') or '更新失败'
-                dlg = getattr(window, '_update_dialog', None)
-                if dlg is not None and dlg.isVisible():
-                    dlg.mark_failed(msg)
-                elif not payload.get('silent'):
-                    QMessageBox.warning(window, '更新', msg)
-            elif action == 'update_finished':
-                dlg = getattr(window, '_update_dialog', None)
-                if dlg is not None:
-                    try:
-                        dlg.accept()
-                    except RuntimeError:
-                        pass
-                    window._update_dialog = None
-                if payload.get('updated'):
-                    ans = QMessageBox.question(
-                        window,
-                        '更新完成',
-                        '已更新至 %s，是否立即重启客户端？' % (payload.get('version') or ''),
-                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                    )
-                    if ans == QMessageBox.StandardButton.Yes:
-                        from app.ops.install_root import relaunch_client
-
-                        try:
-                            relaunch_client(ROOT)
-                        except Exception as exc:
-                            QMessageBox.warning(window, '重启失败', str(exc))
-                        else:
-                            app.quit()
-                elif payload.get('message') and not payload.get('silent'):
-                    QMessageBox.information(window, '更新', payload.get('message'))
-            elif action == 'update_skipped':
-                window._update_dialog = None
-            elif action == 'lyric_tick':
-                page.set_lyric_tick(payload)
-
-        bridge.ui_status.connect(_apply_scheduler_status)
-
-        def on_scheduler_status(msg: BusMessage):
-            bridge.ui_status.emit({'source': msg.source, 'payload': msg.payload or {}})
-
-        scheduler.subscribe(SignalType.STATUS, on_scheduler_status)
-
-        def on_scheduler_progress(msg: BusMessage):
-            payload = msg.payload or {}
-            if msg.source == ModuleId.SCHEDULER and payload.get('phase') == 'update':
-                dlg = getattr(window, '_update_dialog', None)
-                if dlg is not None:
-                    dlg.set_progress(int(payload.get('percent', 0) or 0), str(payload.get('message') or ''))
-                return
-            if msg.source != ModuleId.SCHEDULER or not controller.state.offline_running:
-                return
-            bridge.ui_progress.emit(payload)
-
-        bridge.ui_progress.connect(window.page_song_make.apply_offline_progress)
-        scheduler.subscribe(SignalType.PROGRESS, on_scheduler_progress)
-        window.page_playback.apply_library(
-            controller.library,
-            inst_songs=controller.library_inst,
-            auto_select=False,
-        )
-        window.page_playback.set_play_mode(controller.config_store.get('playback.play_mode', 'sequential'))
-        _startup_log('ui wired')
-
         window.show()
         window.raise_()
         window.activateWindow()
         app.processEvents()
-        _startup_log('main window shown')
-        if splash is not None:
-            splash.close()
-            app.processEvents()
+        _startup_log('login window shown')
 
-        tray = None
-        if QSystemTrayIcon.isSystemTrayAvailable():
+        ctx = {'controller': None, 'scheduler': None, 'lyrics': None}
+
+        class BootSignals(QObject):
+            status = pyqtSignal(str)
+            done = pyqtSignal()
+            failed = pyqtSignal(str)
+
+        boot = BootSignals()
+
+        def on_boot_status(text: str):
+            window.set_boot_status(text)
+
+        def on_boot_failed(detail: str):
+            window.page_login.set_busy(False)
+            window._login_pending = False
+            _fatal_startup(app, '后台初始化失败', detail)
+
+        boot.status.connect(on_boot_status)
+        boot.failed.connect(on_boot_failed)
+
+        def _bootstrap_thread():
             try:
-                tray = build_tray(bridge, window, lyrics, controller)
-                if not tray.show():
-                    _startup_log('tray show returned false')
-                else:
-                    _startup_log('tray ready')
+                boot.status.emit('正在初始化…')
+                scheduler = AppScheduler.instance().start()
+                controller = ClientController(scheduler, project_root=ROOT, config=boot_config)
+                controller.set_ui_bridge(bridge)
+                controller.start()
+                install_crash_hooks(ROOT, controller.config_store)
+                ctx['scheduler'] = scheduler
+                ctx['controller'] = controller
+                boot.status.emit('正在扫描歌库…')
+                controller._scan_library_blocking()
+                _startup_log('library scan done count=%s' % len(controller.library))
+                boot.done.emit()
             except Exception as exc:
-                _startup_log('tray failed: %s' % exc)
-        window._quit_tray = tray
+                boot.failed.emit(str(exc))
 
-        QTimer.singleShot(0, window.page_playback.select_initial_song)
-
-        def _auto_check_update():
-            if not controller.config_store.get('update.auto_check', True):
+        def _wire_after_boot():
+            scheduler = ctx['scheduler']
+            controller = ctx['controller']
+            if scheduler is None or controller is None:
                 return
-            url = str(controller.config_store.get('update.check_url', '') or '').strip()
-            if url:
-                bridge.emit_action('check_update', silent=True)
+            _startup_log('controller ready')
 
-        QTimer.singleShot(4000, _auto_check_update)
-        bridge.log_message.emit('客户端已启动（AI 唱歌 / 离线做歌 / 歌词同步已接入）')
+            def on_user_action(action: str, payload: dict):
+                scheduler.publish(BusMessage(SignalType.STATUS, ModuleId.UI, {'action': action, **(payload or {})}))
+                if payload.get('log'):
+                    bridge.log_message.emit(str(payload['log']))
+
+            bridge.user_action.connect(on_user_action)
+            window.set_controller(controller)
+            window._quit_lyrics = None
+            window._quit_tray = None
+            window._quit_shutdown = lambda: scheduler.shutdown() if scheduler.running else None
+
+            def _finalize():
+                try:
+                    mark_clean_exit(ROOT, controller.config_store)
+                except Exception:
+                    pass
+                if scheduler.running:
+                    scheduler.shutdown()
+                lyrics = getattr(window, '_quit_lyrics', None)
+                if lyrics is not None:
+                    lyrics.close()
+                tray = getattr(window, '_quit_tray', None)
+                if tray is not None:
+                    tray.hide()
+
+            app.aboutToQuit.connect(_finalize)
+            _startup_log('hooks ready')
+
+            def _apply_scheduler_status(envelope: dict):
+                source = envelope.get('source')
+                payload = envelope.get('payload') or {}
+                action = payload.get('action')
+                if not window.is_main_ready():
+                    if not str(action or '').startswith('update'):
+                        return
+                page = window.page_playback if window.is_main_ready() else None
+                make = window.page_song_make if window.is_main_ready() else None
+                if action == 'lyric_tick' and source == ModuleId.LYRICS and page is not None:
+                    page.set_lyric_tick(payload)
+                    return
+                if source != ModuleId.SCHEDULER:
+                    return
+                if page is None or make is None:
+                    return
+                if action == 'offline_started':
+                    make.set_offline_running(True)
+                elif action == 'offline_finished':
+                    make.show_offline_result(payload.get('result') or {})
+                    page.apply_library(controller.library, inst_songs=controller.library_inst)
+                    title = payload.get('title') or ''
+                    if title:
+                        window.switch_to_playback(title)
+                    else:
+                        window.switch_to_playback()
+                elif action == 'offline_failed':
+                    make.show_offline_failed(payload.get('message', ''))
+                elif action == 'offline_cancelled':
+                    make.show_offline_cancelled(payload.get('message', ''))
+                elif action == 'library_updated':
+                    page.apply_library(
+                        payload.get('sing_songs') or payload.get('songs', []),
+                        inst_songs=payload.get('inst_songs', []),
+                    )
+                elif action == 'song_deleted':
+                    page.clear_current_song()
+                elif action == 'playback_tick':
+                    page.set_playback_state(payload)
+                elif action == 'smart_switch_tick':
+                    overlay = payload.get('overlay_mode') or ''
+                    if overlay in ('ai_sing', 'ai_follow', 'reverb_talk', 'normal_talk'):
+                        page.set_selected_mode(overlay)
+                    page.set_playback_state(payload)
+                elif action == 'playback_started':
+                    page.set_mode('ai_sing', active=True)
+                    page.set_playback_state(payload)
+                elif action == 'passthrough_started':
+                    page.set_mode(payload.get('mode') or 'normal_talk', active=True)
+                    if (payload.get('mode') or '') in ('reverb_talk', 'normal_talk') and float(payload.get('duration', 0) or 0) > 0:
+                        page.set_playback_state(payload)
+                elif action in ('passthrough_stopped', 'passthrough_blocked'):
+                    page.set_playback_stopped()
+                elif action == 'realtime_started':
+                    page.set_mode('realtime', active=True)
+                elif action == 'realtime_stopped':
+                    page.set_mode('idle')
+                elif action == 'ai_follow_preparing':
+                    page.set_ai_follow_busy(True)
+                    page.set_mode('ai_follow', active=True)
+                    if float(payload.get('duration', 0) or 0) > 0 or float(payload.get('position', 0) or 0) > 0:
+                        page.set_playback_state(payload)
+                elif action == 'ai_follow_started':
+                    make.set_offline_running(False)
+                    page.set_ai_follow_busy(False)
+                    page.set_mode('ai_follow', active=True)
+                    page.set_playback_state(payload)
+                elif action in ('ai_follow_stopped', 'ai_follow_finished', 'ai_follow_failed'):
+                    page.set_ai_follow_busy(False)
+                    page.set_playback_stopped()
+                elif action in ('playback_paused', 'playback_resumed'):
+                    page.set_playback_state(payload)
+                elif action == 'playback_idle':
+                    page.set_mode('idle')
+                elif action in ('playback_stopped', 'playback_finished'):
+                    page.set_playback_stopped()
+                elif action == 'mode_selected':
+                    page.set_selected_mode(payload.get('mode', 'ai_sing'))
+                elif action == 'lyrics_loaded':
+                    page.set_lyrics_lines(payload.get('lines') or [])
+                elif action == 'lyrics_missing':
+                    page.set_lyrics_lines([])
+                elif action == 'play_mode_changed':
+                    page.set_play_mode(payload.get('mode', 'sequential'))
+                elif action == 'select_song_ui':
+                    page.select_song_by_title(payload.get('title', ''))
+                elif action == 'song_switched':
+                    page.set_song_switching(False)
+                elif action == 'update_available':
+                    from app.ui.update_dialog import show_update_prompt
+
+                    window._update_dialog = show_update_prompt(window, bridge, payload)
+                elif action == 'update_checked':
+                    if not payload.get('silent'):
+                        QMessageBox.information(window, '检查更新', payload.get('message') or '已是最新版本')
+                elif action == 'update_failed':
+                    msg = payload.get('message') or '更新失败'
+                    dlg = getattr(window, '_update_dialog', None)
+                    if dlg is not None and dlg.isVisible():
+                        dlg.mark_failed(msg)
+                    elif not payload.get('silent'):
+                        QMessageBox.warning(window, '更新', msg)
+                elif action == 'update_finished':
+                    dlg = getattr(window, '_update_dialog', None)
+                    if dlg is not None:
+                        try:
+                            dlg.accept()
+                        except RuntimeError:
+                            pass
+                        window._update_dialog = None
+                    if payload.get('updated'):
+                        ans = QMessageBox.question(
+                            window,
+                            '更新完成',
+                            '已更新至 %s，是否立即重启客户端？' % (payload.get('version') or ''),
+                            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                        )
+                        if ans == QMessageBox.StandardButton.Yes:
+                            from app.ops.install_root import relaunch_client
+
+                            try:
+                                relaunch_client(ROOT)
+                            except Exception as exc:
+                                QMessageBox.warning(window, '重启失败', str(exc))
+                            else:
+                                app.quit()
+                    elif payload.get('message') and not payload.get('silent'):
+                        QMessageBox.information(window, '更新', payload.get('message'))
+                elif action == 'update_skipped':
+                    window._update_dialog = None
+                elif action == 'lyric_tick':
+                    page.set_lyric_tick(payload)
+
+            def _on_main_entered():
+                window.page_playback.apply_library(
+                    controller.library,
+                    inst_songs=controller.library_inst,
+                    auto_select=False,
+                )
+                window.page_playback.set_play_mode(controller.config_store.get('playback.play_mode', 'sequential'))
+                QTimer.singleShot(120, window.page_playback.select_initial_song)
+                _startup_log('main ui wired after login')
+
+            window.main_entered.connect(_on_main_entered)
+            bridge.ui_status.connect(_apply_scheduler_status)
+
+            def on_scheduler_status(msg: BusMessage):
+                bridge.ui_status.emit({'source': msg.source, 'payload': msg.payload or {}})
+
+            scheduler.subscribe(SignalType.STATUS, on_scheduler_status)
+
+            def on_scheduler_progress(msg: BusMessage):
+                payload = msg.payload or {}
+                if msg.source == ModuleId.SCHEDULER and payload.get('phase') == 'update':
+                    dlg = getattr(window, '_update_dialog', None)
+                    if dlg is not None:
+                        dlg.set_progress(int(payload.get('percent', 0) or 0), str(payload.get('message') or ''))
+                    return
+                if msg.source != ModuleId.SCHEDULER or not controller.state.offline_running:
+                    return
+                bridge.ui_progress.emit(payload)
+
+            def _forward_offline_progress(payload):
+                if window.is_main_ready():
+                    window.page_song_make.apply_offline_progress(payload)
+
+            bridge.ui_progress.connect(_forward_offline_progress)
+            scheduler.subscribe(SignalType.PROGRESS, on_scheduler_progress)
+            _startup_log('ui wired')
+            bridge.log_message.emit('客户端已启动（AI 唱歌 / 离线做歌 / 歌词同步已接入）')
+            window.mark_backend_ready()
+
+            def _init_lyrics_tray():
+                lyrics = LyricsWindow()
+                lyrics.move(window.x() + 40, window.y() + 80)
+                controller.set_lyrics_window(lyrics)
+                ctx['lyrics'] = lyrics
+                window._quit_lyrics = lyrics
+                tray = None
+                if QSystemTrayIcon.isSystemTrayAvailable():
+                    try:
+                        tray = build_tray(bridge, window, lyrics, controller)
+                        if not tray.show():
+                            _startup_log('tray show returned false')
+                        else:
+                            _startup_log('tray ready')
+                    except Exception as exc:
+                        _startup_log('tray failed: %s' % exc)
+                window._quit_tray = tray
+
+            def _auto_check_update():
+                if not controller.config_store.get('update.auto_check', True):
+                    return
+                url = str(controller.config_store.get('update.check_url', '') or '').strip()
+                if url:
+                    bridge.emit_action('check_update', silent=True)
+
+            QTimer.singleShot(0, _init_lyrics_tray)
+            QTimer.singleShot(4000, _auto_check_update)
+
+        boot.done.connect(_wire_after_boot)
+        threading.Thread(target=_bootstrap_thread, name='startup-bootstrap', daemon=True).start()
 
         return app.exec()
     except Exception as exc:
         _fatal_startup(app, '客户端启动失败', str(exc), exc)
-        if splash is not None:
-            try:
-                splash.close()
-            except Exception:
-                pass
         return 1
 
 

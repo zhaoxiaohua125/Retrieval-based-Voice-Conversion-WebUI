@@ -1,25 +1,39 @@
 """RVC 客户端更新与日志上报服务（与 app/ 客户端分离）。"""
 
 import json
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from auth.router import router as auth_router
+from db.engine import close_db, ping_db
+
 ROOT = Path(__file__).resolve().parent
 DATA = ROOT / 'data'
 RELEASES = DATA / 'releases'
 LOGS = DATA / 'logs'
 
-app = FastAPI(title='RVC Client Update Server', version='1.0.0')
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    ping_db()
+    yield
+    close_db()
+
+
+app = FastAPI(title='RVC Client Update Server', version='1.1.0', lifespan=lifespan)
 RELEASES.mkdir(parents=True, exist_ok=True)
 LOGS.mkdir(parents=True, exist_ok=True)
+app.include_router(auth_router)
 
 
 @app.get('/health')
 def health():
-    return {'ok': True}
+    db_ok = ping_db()
+    return {'ok': True, 'db': db_ok}
 
 
 @app.get('/version.json')

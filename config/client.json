@@ -11,6 +11,9 @@
     "auto_check": true,
     "skip_version": ""
   },
+  "auth": {
+    "login_url": "http://127.0.0.1:8765/api/auth/login"
+  },
   "logs": {
     "auto_upload_crash": true,
     "upload_url": ""
@@ -106,8 +109,8 @@
   },
   "ui": {
     "geometry": [
-      596,
-      240,
+      278,
+      322,
       1280,
       875
     ],

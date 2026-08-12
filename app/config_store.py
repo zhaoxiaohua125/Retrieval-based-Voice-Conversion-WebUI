@@ -21,6 +21,9 @@ DEFAULT_CONFIG = {
         'auto_check': True,
         'skip_version': '',
     },
+    'auth': {
+        'login_url': 'http://127.0.0.1:8765/api/auth/login',
+    },
     'logs': {
         'auto_upload_crash': True,
         'upload_url': '',

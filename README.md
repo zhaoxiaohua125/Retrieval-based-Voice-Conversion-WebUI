@@ -2104,3 +2104,110 @@ ewrite；扩展 LyricWord 与字级 matcher
 - **验证**: 63 pyd + 18 ui pyc；pyc-only 的 ui 可正常 import
 - **修改的文件列表**: scripts/compile_app_pyd.py、scripts/build_client_package.py、packaging/INSTALL_RUNTIME.md、README.md
 
+---
+
+## 会话总结 - 2026-08-12 (34)
+
+- **诉求**: 增加登录页作为首屏，登录成功后进入播放页（暂无鉴权业务）
+- **实现**: `LoginPage` + `MainWindow.root_stack`（登录 / 主界面）；登录成功切到 `TAB_PLAYBACK`
+- **修改的文件列表**: app/ui/pages/login_page.py、app/ui/pages/__init__.py、app/ui/main_window.py、README.md
+
+---
+
+## 会话总结 - 2026-08-12 (35)
+
+- **诉求**: 美化登录页；修复登录后进主界面卡顿/未响应
+- **根因**: 启动时在主线程构建全部 Tab + 立即 `select_initial_song` 加载歌词/波形；登录后一次性显示过重
+- **实现**:
+  1. 登录页渐变背景 + 卡片式表单 + 登录中状态
+  2. 主界面懒加载：登录后才 `_ensure_main_shell()`，仅先建播放页
+  3. 制作/公告 Tab 首次切换再创建；歌库与选歌延后到 `main_entered` + 120ms
+- **修改的文件列表**: app/ui/pages/login_page.py、app/ui/main_window.py、scripts/run_ui_skeleton.py、README.md
+
+---
+
+## 会话总结 - 2026-08-12 (36)
+
+- **诉求**: 去掉蓝色 splash「正在扫描歌库…」，启动后立刻显示登录页；初始化与歌库扫描放后台，登录按钮触发后显示进度
+- **实现**:
+  1. 删除启动 splash 与阻塞式扫描循环
+  2. `window.show()` 后立即显示登录页；后台线程 `_bootstrap_thread` 完成 controller 初始化与歌库扫描
+  3. `BootSignals.status/done` 更新登录按钮文案（「正在初始化…」「正在扫描歌库…」）；完成后 `mark_backend_ready()`，若用户已点登录则自动进入播放页
+- **修改的文件列表**: scripts/run_ui_skeleton.py、app/ui/pages/login_page.py、README.md
+
+---
+
+## 会话总结 - 2026-08-12 (37)
+
+- **问题**: 点击登录后窗口「未响应」，卡在「正在进入…」
+- **根因**: `_ensure_main_shell()` 内同步 `_refresh_gpu_status()` 触发 torch/CUDA 检测阻塞主线程；登录页无进度反馈
+- **修复**:
+  1. 登录页增加蓝色状态框（唱歌伴侣客户端 + 正在扫描歌库…）
+  2. 后台 boot 状态同步到登录页；点击登录后分步显示进度并 `processEvents`
+  3. GPU 检测、歌词窗/托盘延后到 `QTimer`；`mark_backend_ready()` 提前以便登录不等待托盘
+- **修改的文件列表**: app/ui/pages/login_page.py、app/ui/main_window.py、scripts/run_ui_skeleton.py、README.md
+
+---
+
+## 会话总结 - 2026-08-12 (38)
+
+- **诉求**: 登录后进度只在按钮上展示，去掉下方重复的蓝色状态框
+- **实现**: 移除 `status_box`，加载态仅更新登录按钮文案；后台扫描进度仍通过底部灰色 hint 显示
+- **修改的文件列表**: app/ui/pages/login_page.py、README.md
+
+---
+
+## 会话总结 - 2026-08-12 (39)
+
+- **诉求**: 在 `server/` 增加 MySQL 登录验证（`bus_user` 表），模块化实现，使用成熟连接池
+- **实现**:
+  1. `config/settings.py` 读取 `config/db.json` 或环境变量（默认 localhost:13306）
+  2. `db/engine.py` SQLAlchemy QueuePool + `pool_pre_ping`
+  3. `auth/service.py` 校验账号密码（明文/MD5）、有效期、更新 `login_time`
+  4. `POST /api/auth/login` API
+- **技术栈**: FastAPI、SQLAlchemy 2、PyMySQL
+- **修改的文件列表**: server/config/、server/db/、server/auth/、server/main.py、server/requirements.txt、server/README.md、README.md
+
+---
+
+## 会话总结 - 2026-08-12 (39)
+
+- **诉求**: 在 `server/` 增加 MySQL 登录验证（`bus_user` 表），模块化实现，使用成熟连接池
+- **实现**:
+  1. `config/settings.py` 读取 `config/db.json` 或环境变量（默认 localhost:13306）
+  2. `db/engine.py` SQLAlchemy QueuePool + `pool_pre_ping`
+  3. `auth/service.py` 校验账号密码（明文/MD5）、有效期、更新 `login_time`
+  4. `POST /api/auth/login` API
+- **技术栈**: FastAPI、SQLAlchemy 2、PyMySQL
+- **修改的文件列表**: server/config/、server/db/、server/auth/、server/main.py、server/requirements.txt、server/README.md、README.md
+
+
+---
+
+## 会话总结 - 2026-08-12 (40)
+
+- **诉求**: 密码仅支持 MD5；登录页对接 server 登录接口
+- **实现**:
+  1. `server/auth/service.py` 去掉明文比对，仅校验 32 位 MD5
+  2. 新增 `app/ops/auth_client.py`，POST `/api/auth/login`
+  3. 登录页 emit `login_requested`；主窗口后台线程请求，成功后再进入主界面
+  4. `config/client.json` 增加 `auth.login_url`
+- **修改的文件列表**: server/auth/service.py、app/ops/auth_client.py、app/config_store.py、app/ui/pages/login_page.py、app/ui/main_window.py、config/client.json、server/README.md、README.md
+
+---
+
+## 会话总结 - 2026-08-12 (41)
+
+- **问题**: 点击登录后一直等待，无任何错误提示
+- **根因**: 后台线程使用 `QTimer.singleShot` 回调 UI，Qt 要求 UI 操作必须在主线程
+- **修复**: 使用 `MainWindow._login_result` 信号回到主线程；登录失败红色 hint + 弹窗；连接/超时错误文案更明确
+- **修改的文件列表**: app/ui/main_window.py、app/ui/pages/login_page.py、app/ops/auth_client.py、README.md
+
+---
+
+## 会话总结 - 2026-08-12 (42)
+
+- **问题**: 用户自检 MySQL 正常，但登录提示「数据库连接失败」
+- **根因**: 只改了 `db.json.example`，server 读 `db.json` 缺失时默认连 `changgebanlv`，实际库名为 `aisound`
+- **修复**: 无 `db.json` 时回退读 `db.json.example`；默认库改为 `aisound`；连接失败返回具体 MySQL 错误
+- **修改的文件列表**: server/config/settings.py、server/db/engine.py、server/auth/router.py、server/config/db.json.example、server/README.md、README.md
