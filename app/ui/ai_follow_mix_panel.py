@@ -4,6 +4,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QSlider, QVBoxLayout
 
 from app.config_store import ConfigStore
+from app.ui.qt_util import clicked
 
 _DEFAULTS = {
     'inst_ui': 77,
@@ -50,7 +51,7 @@ class AiFollowMixPanel(QFrame):
         foot = QHBoxLayout()
         foot.addStretch()
         btn_reset = QPushButton('重置')
-        btn_reset.clicked.connect(self._on_reset)
+        btn_reset.clicked.connect(clicked(self._on_reset))
         foot.addWidget(btn_reset)
         layout.addLayout(foot)
         self._load_from_config()

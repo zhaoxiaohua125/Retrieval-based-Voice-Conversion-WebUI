@@ -3,6 +3,8 @@
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QListWidget, QPushButton, QSplitter, QTextEdit, QVBoxLayout, QWidget
 
+from app.ui.qt_util import clicked
+
 
 class AnnouncePage(QWidget):
     """对标 SoundTrail「公告」页：列表 + 详情。"""
@@ -24,7 +26,7 @@ class AnnouncePage(QWidget):
         row = QHBoxLayout()
         row.addWidget(QLabel('公告列表'))
         btn_refresh = QPushButton('刷新')
-        btn_refresh.clicked.connect(self._reload)
+        btn_refresh.clicked.connect(clicked(self._reload))
         row.addStretch()
         row.addWidget(btn_refresh)
         left_layout.addLayout(row)

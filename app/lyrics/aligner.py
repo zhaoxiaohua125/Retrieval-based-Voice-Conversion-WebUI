@@ -118,8 +118,7 @@ def _words_from_window(tokens: list[str], t0: float, t1: float, clamp: bool = Tr
     return words
 
 
-def _even_line_words(line: LyricLine, tokens: list[str], sing_ratio: float) -> list[LyricWord]:
-    del sing_ratio
+def _even_line_words(line: LyricLine, tokens: list[str], _sing_ratio: float) -> list[LyricWord]:
     n = _content_count(tokens)
     t0 = line.start_sec
     t1 = line.start_sec + max(0.05, line.end_sec - line.start_sec)

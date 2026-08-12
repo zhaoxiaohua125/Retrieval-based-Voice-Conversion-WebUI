@@ -31,6 +31,7 @@ from app.ui.ai_follow_mix_panel import _DEFAULTS as PF_DEFAULTS
 from app.ui.ai_follow_mix_panel import _att_from_slider, _slider_from_att
 from app.ui.layout_store import load_ui_layout
 from app.ui.playback_shortcuts import DEFAULT_SHORTCUTS, SHORTCUT_KEYS, SHORTCUT_LABELS
+from app.ui.qt_util import clicked
 from app.ui.rvc_advanced_dialog import RvcAdvancedDialog
 
 _NAV_STYLE = (
@@ -100,9 +101,9 @@ class SettingsDialog(QDialog):
         btn_row = QHBoxLayout()
         btn_row.addStretch()
         btn_cancel = QPushButton('取消')
-        btn_cancel.clicked.connect(self.reject)
+        btn_cancel.clicked.connect(clicked(self.reject))
         btn_save = QPushButton('保存设置')
-        btn_save.clicked.connect(self.accept)
+        btn_save.clicked.connect(clicked(self.accept))
         btn_row.addWidget(btn_cancel)
         btn_row.addWidget(btn_save)
         right.addLayout(btn_row)
@@ -158,7 +159,7 @@ class SettingsDialog(QDialog):
             layout.addLayout(form)
             sr_row = QHBoxLayout()
             self.btn_reload = QPushButton('重载设备列表')
-            self.btn_reload.clicked.connect(self._reload_devices)
+            self.btn_reload.clicked.connect(clicked(self._reload_devices))
             self.radio_sr_model = QRadioButton('使用模型采样率')
             self.radio_sr_device = QRadioButton('使用设备采样率')
             self.sr_group = QButtonGroup(self)
@@ -183,7 +184,7 @@ class SettingsDialog(QDialog):
             mic_row = QHBoxLayout()
             self.btn_test_mic = QPushButton('试麦')
             self.btn_test_mic.setToolTip('启动干声直通测试，对着麦克风说话；再次点击停止')
-            self.btn_test_mic.clicked.connect(self._toggle_test_mic)
+            self.btn_test_mic.clicked.connect(clicked(self._toggle_test_mic))
             self.lbl_mic_hint = QLabel('试麦：直通输入→输出，不经 RVC')
             self.lbl_mic_hint.setStyleSheet('color:#64748b;font-size:12px;')
             mic_row.addWidget(self.btn_test_mic)
@@ -286,7 +287,7 @@ class SettingsDialog(QDialog):
             self.lbl_model.setStyleSheet('color:#334155;font-size:13px;')
             self.btn_advanced = QPushButton('RVC 高级设置…')
             self.btn_advanced.setToolTip('模型选择、音调/Index/性能参数（对标 realtime_gui）')
-            self.btn_advanced.clicked.connect(self._open_advanced)
+            self.btn_advanced.clicked.connect(clicked(self._open_advanced))
             rvc_row.addWidget(self.lbl_model, stretch=1)
             rvc_row.addWidget(self.btn_advanced)
             root.addLayout(rvc_row)

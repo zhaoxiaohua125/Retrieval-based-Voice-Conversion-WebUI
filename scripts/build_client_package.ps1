@@ -4,6 +4,7 @@ param(
     [string]$CudaVariant = "",
     [switch]$Lite,
     [switch]$CondaPack,
+    [switch]$Pyd,
     [string]$CondaEnv = "",
     [string]$CondaBase = "F:\zxh\anaconda3"
 )
@@ -60,6 +61,7 @@ Write-Host "Output: dist\RVC-Client-$Version"
 
 $pyArgs = @("scripts/build_client_package.py", "--version", $Version, "--output", "dist", "--cuda-variant", $CudaVariant)
 if ($Lite) { $pyArgs += "--lite" }
+if ($Pyd) { $pyArgs += "--pyd" }
 
 & $EnvPython @pyArgs
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

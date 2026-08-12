@@ -2043,3 +2043,64 @@ ewrite；扩展 LyricWord 与字级 matcher
   3. 上报地址默认从 `update.check_url` 推导 `/api/logs/upload`；设置页可开关
 - **修改的文件列表**: app/ops/crash_reporter.py、app/ops/log_reporter.py、app/config_store.py、scripts/run_ui_skeleton.py、app/ui/settings_dialog.py、app/integration/controller.py、config/client.json、server/README.md、README.md
 
+---
+
+## 会话总结 - 2026-08-11 (28)
+
+- **诉求**: 打包时仅将 `app/` 编译为 `.pyd`
+- **实现**: `scripts/compile_app_pyd.py`；`build_client_package.py --pyd` / `-Pyd`；菜单询问；修复 Cython 不兼容 `del`
+- **修改的文件列表**: scripts/compile_app_pyd.py、scripts/build_client_package.py、scripts/build_client_package.ps1、build_demo_package_menu.bat、scripts/verify_client_package.py、packaging/INSTALL_RUNTIME.md、app/lyrics/aligner.py、app/playback/player.py、README.md
+
+---
+
+## 会话总结 - 2026-08-11 (29)
+
+- **诉求**: pyd 打包后设置按钮/制作页按钮无反应；将 `scripts/` 也统一编译为 pyd
+- **根因**: Cython 编译 PyQt6 类未开 `binding=True`，信号/槽在 `.pyd` 中失效
+- **实现**:
+  1. `compile_app_pyd.py` 扩展为编译 `app/` + 打包用 `scripts/`（run_ui_skeleton、list_audio_devices、verify_client_package）
+  2. Cython `binding=True`；临时目录改短路径；`nthreads=0` 避免 Windows 多进程编译失败
+  3. 保留薄入口 `scripts/_launch_ui.py` 等；bat 启动改为 `_launch_ui.py`
+  4. pyd 模式下 `write_launcher` 不再复制 `verify_client_package.py` 源码，避免与 `.pyd` 冲突
+- **验证**: 80 个 pyd 模块编译成功；HeaderBar 设置按钮与 tab 信号烟测通过
+- **技术栈**: Cython、PyQt6 binding、MSVC Build Tools
+- **修改的文件列表**: scripts/compile_app_pyd.py、scripts/build_client_package.py、scripts/_launch_ui.py、scripts/_launch_devices.py、scripts/_launch_verify.py、scripts/__init__.py、packaging/INSTALL_RUNTIME.md、README.md
+
+---
+
+## 会话总结 - 2026-08-11 (30)
+
+- **问题**: pyd 打包后设置按钮仍不弹框、制作页按钮无反应
+- **根因**: **`app/ui/` 整包编译为 pyd 时 PyQt6 信号槽会硬崩溃**（SettingsDialog 初始化 segfault；SongMakePage 按钮点击崩溃），与 scripts 是否 pyd 无关
+- **修复**: `compile_app_pyd.py` **跳过 `app/ui/`**，编译后复制 UI 源码 `.py`；业务层 `app/` 其余模块 + `scripts/` 仍为 pyd
+- **验证**: 新产物下设置弹窗可打开、制作页按钮信号正常
+- **修改的文件列表**: scripts/compile_app_pyd.py、scripts/build_client_package.py、packaging/INSTALL_RUNTIME.md、README.md
+
+---
+
+## 会话总结 - 2026-08-12 (31)
+
+- **问题**: 旧包 Debug 启动点「设置」报 `TypeError: _open_settings_dialog() takes exactly 1 positional argument (2 given)`
+- **根因**: `QPushButton.clicked` 会传入 `checked` 参数，直接 `connect(self._open_settings_dialog)` 参数不匹配
+- **修复**: 改为 `lambda *_: self._open_settings_dialog()`
+- **修改的文件列表**: app/ui/main_window.py、README.md
+
+---
+
+## 会话总结 - 2026-08-12 (32)
+
+- **问题**: 设置修好后制作页按钮仍报 `TypeError: _pick_files() takes exactly 1 positional argument (2 given)`
+- **根因**: 打包内 PyQt6 的 `clicked` 信号会传 `checked`，直接 `connect(self._xxx)` 参数不匹配（全 UI 层同类问题）
+- **修复**: 新增 `app/ui/qt_util.clicked()`，统一包装所有按钮 `clicked` 连接
+- **说明**: **不必重打包 pyd**，只需把 `app/ui/` 下更新后的 `.py` 复制到 dist 包即可
+- **修改的文件列表**: app/ui/qt_util.py、app/ui/main_window.py、app/ui/pages/song_make_page.py、app/ui/pages/playback_page.py、app/ui/pages/announce_page.py、app/ui/settings_dialog.py、app/ui/update_dialog.py、app/ui/ai_follow_mix_panel.py、app/ui/rvc_advanced_dialog.py、README.md
+
+---
+
+## 会话总结 - 2026-08-12 (33)
+
+- **诉求**: `compile_app_pyd.py` 增加「业务层 pyd + ui 层 pyc」自动化
+- **实现**: 复制 `app/ui/` 源码后 `compileall -b`，生成 `.pyc` 并删除 `.py`；可选 `--keep-ui-py` 调试
+- **验证**: 63 pyd + 18 ui pyc；pyc-only 的 ui 可正常 import
+- **修改的文件列表**: scripts/compile_app_pyd.py、scripts/build_client_package.py、packaging/INSTALL_RUNTIME.md、README.md
+

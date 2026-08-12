@@ -20,6 +20,7 @@ from app.ui.header_bar import HeaderBar
 from app.ui.layout_store import load_ui_layout, save_ui_layout
 from app.ui.pages import AnnouncePage, PlaybackPage, SongMakePage
 from app.ui.playback_shortcuts import PlaybackShortcutBinder
+from app.ui.qt_util import clicked
 from app.ui.settings_dialog import SettingsDialog
 
 
@@ -66,7 +67,7 @@ class MainWindow(QMainWindow):
 
         self.header = HeaderBar()
         self.header.tab_changed.connect(self._on_nav_changed)
-        self.header.btn_settings.clicked.connect(self._open_settings_dialog)
+        self.header.btn_settings.clicked.connect(clicked(self._open_settings_dialog))
         outer.addWidget(self.header)
 
         self.stack = QStackedWidget()

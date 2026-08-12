@@ -12,6 +12,8 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
+from app.ui.qt_util import clicked
+
 
 class UpdatePromptDialog(QDialog):
     def __init__(self, bridge, payload: dict, parent=None):
@@ -50,9 +52,9 @@ class UpdatePromptDialog(QDialog):
         self.btn_skip = QPushButton('跳过此版本')
         self.btn_update = QPushButton('立即更新')
         self.btn_update.setDefault(True)
-        self.btn_later.clicked.connect(self.reject)
-        self.btn_skip.clicked.connect(self._on_skip)
-        self.btn_update.clicked.connect(self._on_update)
+        self.btn_later.clicked.connect(clicked(self.reject))
+        self.btn_skip.clicked.connect(clicked(self._on_skip))
+        self.btn_update.clicked.connect(clicked(self._on_update))
         row.addWidget(self.btn_later)
         row.addWidget(self.btn_skip)
         row.addWidget(self.btn_update)

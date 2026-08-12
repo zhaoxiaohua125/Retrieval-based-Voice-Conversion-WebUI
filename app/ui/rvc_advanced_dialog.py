@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (
 
 from app.config_store import ConfigStore
 from app.rvc.vc_context import resolve_index_for_model
+from app.ui.qt_util import clicked
 
 
 def _slider_row(parent_layout, label: str, minimum: int, maximum: int, value: int, fmt=None):
@@ -68,9 +69,9 @@ class RvcAdvancedDialog(QDialog):
         self.cmb_model.setMinimumWidth(360)
         self.cmb_model.currentTextChanged.connect(self._on_model_changed)
         btn_reload = QPushButton('刷新')
-        btn_reload.clicked.connect(self._reload_models)
+        btn_reload.clicked.connect(clicked(self._reload_models))
         btn_import = QPushButton('导入…')
-        btn_import.clicked.connect(self._import_models)
+        btn_import.clicked.connect(clicked(self._import_models))
         model_row.addWidget(self.cmb_model, stretch=1)
         model_row.addWidget(btn_reload)
         model_row.addWidget(btn_import)
@@ -79,7 +80,7 @@ class RvcAdvancedDialog(QDialog):
         self.edit_index = QLineEdit()
         self.edit_index.setPlaceholderText('留空则自动匹配 assets/indices')
         btn_idx = QPushButton('选择 .index')
-        btn_idx.clicked.connect(self._pick_index)
+        btn_idx.clicked.connect(clicked(self._pick_index))
         idx_row.addWidget(self.edit_index, stretch=1)
         idx_row.addWidget(btn_idx)
         model_form.addRow('Index 文件', idx_row)
@@ -138,9 +139,9 @@ class RvcAdvancedDialog(QDialog):
         btn_row = QHBoxLayout()
         btn_row.addStretch()
         btn_cancel = QPushButton('取消')
-        btn_cancel.clicked.connect(self.reject)
+        btn_cancel.clicked.connect(clicked(self.reject))
         btn_save = QPushButton('保存')
-        btn_save.clicked.connect(self.accept)
+        btn_save.clicked.connect(clicked(self.accept))
         btn_row.addWidget(btn_cancel)
         btn_row.addWidget(btn_save)
         root.addLayout(btn_row)

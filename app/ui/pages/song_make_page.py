@@ -4,6 +4,7 @@ import os
 import shutil
 from pathlib import Path
 
+from app.ui.qt_util import clicked
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QDragEnterEvent, QDropEvent
 from PyQt6.QtWidgets import (
@@ -131,7 +132,7 @@ class SongMakePage(QWidget):
             if action == 'resource_lyrics':
                 btn.setStyleSheet(self.RESOURCE_LYRICS_STYLE)
                 btn.setToolTip('选择 LRC 歌词，制作完成后复制到输出目录')
-                btn.clicked.connect(self._pick_lrc)
+                btn.clicked.connect(clicked(self._pick_lrc))
             else:
                 btn.setEnabled(False)
                 btn.setStyleSheet(self.RESOURCE_STUB_STYLE)
@@ -143,10 +144,10 @@ class SongMakePage(QWidget):
         layout.addWidget(self.loaded_files, stretch=1)
         btn_save = QPushButton('保存集合')
         btn_save.clicked.connect(
-            lambda: self.bridge.emit_action('save_collection', log='保存集合：后续接入')
+            clicked(lambda: self.bridge.emit_action('save_collection', log='保存集合：后续接入'))
         )
         btn_clear = QPushButton('清理文件')
-        btn_clear.clicked.connect(self._clear_loaded_files)
+        btn_clear.clicked.connect(clicked(self._clear_loaded_files))
         layout.addWidget(btn_save)
         layout.addWidget(btn_clear)
         return panel
@@ -161,20 +162,20 @@ class SongMakePage(QWidget):
         mode_row.addWidget(self.btn_mode_file)
         mode_row.addWidget(self.btn_mode_link)
         self.btn_mode_file.setChecked(True)
-        self.btn_mode_file.clicked.connect(lambda: self._set_input_mode(0))
+        self.btn_mode_file.clicked.connect(clicked(lambda: self._set_input_mode(0)))
         self.btn_mode_link.setStyleSheet(self.RESOURCE_STUB_STYLE)
         self.btn_mode_link.setToolTip('暂未开放')
-        self.btn_mode_link.clicked.connect(self._on_link_mode_stub)
+        self.btn_mode_link.clicked.connect(clicked(self._on_link_mode_stub))
         layout.addLayout(mode_row)
 
         action_row = QHBoxLayout()
         action_row.addStretch()
         btn_pick = QPushButton('选择文件')
-        btn_pick.clicked.connect(self._pick_files)
+        btn_pick.clicked.connect(clicked(self._pick_files))
         btn_clear_all = QPushButton('清除全部')
-        btn_clear_all.clicked.connect(self._clear_input_list)
+        btn_clear_all.clicked.connect(clicked(self._clear_input_list))
         btn_clear_sel = QPushButton('清除选中')
-        btn_clear_sel.clicked.connect(self._clear_selected_input)
+        btn_clear_sel.clicked.connect(clicked(self._clear_selected_input))
         for btn in (btn_pick, btn_clear_all, btn_clear_sel):
             action_row.addWidget(btn)
         layout.addLayout(action_row)
@@ -253,7 +254,7 @@ class SongMakePage(QWidget):
         self._reload_model_combo()
         self.btn_refresh_model = QPushButton('刷新')
         self.btn_refresh_model.setToolTip('重新扫描 assets/weights 下的 .pth 模型')
-        self.btn_refresh_model.clicked.connect(self._refresh_model_list)
+        self.btn_refresh_model.clicked.connect(clicked(self._refresh_model_list))
         model_row = QHBoxLayout()
         model_row.addWidget(self.offline_model, stretch=1)
         model_row.addWidget(self.btn_refresh_model)
@@ -274,8 +275,8 @@ class SongMakePage(QWidget):
             btn.setCheckable(True)
             mode_layout.addWidget(btn)
         self.btn_preset_normal.setChecked(True)
-        self.btn_preset_normal.clicked.connect(lambda: self._set_preset('normal'))
-        self.btn_preset_powerful.clicked.connect(lambda: self._set_preset('powerful'))
+        self.btn_preset_normal.clicked.connect(clicked(lambda: self._set_preset('normal')))
+        self.btn_preset_powerful.clicked.connect(clicked(lambda: self._set_preset('powerful')))
         layout.addWidget(mode_box)
 
         self.p_f0_key = QSlider(Qt.Orientation.Horizontal)
@@ -317,16 +318,16 @@ class SongMakePage(QWidget):
         layout.addWidget(adv)
 
         btn_adv = QPushButton('高级参数设置')
-        btn_adv.clicked.connect(lambda: adv.setVisible(not adv.isVisible()))
+        btn_adv.clicked.connect(clicked(lambda: adv.setVisible(not adv.isVisible())))
         btn_open = QPushButton('打开输出文件夹')
-        btn_open.clicked.connect(self._open_output_dir)
+        btn_open.clicked.connect(clicked(self._open_output_dir))
         btn_run = QPushButton('开始处理')
         btn_run.setStyleSheet('QPushButton{padding:10px;font-weight:bold;}')
-        btn_run.clicked.connect(self._request_offline_cover)
+        btn_run.clicked.connect(clicked(self._request_offline_cover))
         self.btn_run = btn_run
         self.btn_cancel = QPushButton('取消制作')
         self.btn_cancel.setEnabled(False)
-        self.btn_cancel.clicked.connect(self._cancel_offline)
+        self.btn_cancel.clicked.connect(clicked(self._cancel_offline))
         run_row = QHBoxLayout()
         run_row.addWidget(self.btn_run)
         run_row.addWidget(self.btn_cancel)

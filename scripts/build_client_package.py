@@ -33,6 +33,10 @@ def should_skip(rel: str, manifest: dict) -> bool:
         'resolve_launch_python.ps1',
         'repair_bundled_torch.ps1',
         'verify_client_package.py',
+        '_launch_ui.py',
+        '_launch_devices.py',
+        '_launch_verify.py',
+        '__init__.py',
     ):
         return True
     return False
@@ -79,14 +83,17 @@ def copy_tree(src: Path, dst: Path, manifest: dict, stats: dict):
             stats['bytes'] += target.stat().st_size
 
 
-def write_launcher(out_dir: Path):
+def write_launcher(out_dir: Path, use_pyd: bool = False):
     LAUNCHER_BAT.parent.mkdir(parents=True, exist_ok=True)
     resolve_ps1 = ROOT / 'scripts' / 'resolve_launch_python.ps1'
     if resolve_ps1.is_file():
         dst = out_dir / 'scripts' / 'resolve_launch_python.ps1'
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(resolve_ps1, dst)
-    for script_name in ('repair_bundled_torch.ps1', 'verify_client_package.py'):
+    ship_scripts = ['repair_bundled_torch.ps1', '_launch_ui.py', '_launch_verify.py']
+    if not use_pyd:
+        ship_scripts.append('verify_client_package.py')
+    for script_name in ship_scripts:
         src = ROOT / 'scripts' / script_name
         if src.is_file():
             dst = out_dir / 'scripts' / script_name
@@ -114,7 +121,7 @@ def write_launcher(out_dir: Path):
         '  pause\r\n'
         '  exit /b 1\r\n'
         ')\r\n'
-        'start "" "%PYW%" scripts\\run_ui_skeleton.py\r\n'
+        'start "" "%PYW%" scripts\\_launch_ui.py\r\n'
         'exit /b 0\r\n'
     )
     debug_bat = (
@@ -131,7 +138,7 @@ def write_launcher(out_dir: Path):
         '  exit /b 1\r\n'
         ')\r\n'
         'echo [Debug] Using %PY%\r\n'
-        '"%PY%" scripts\\run_ui_skeleton.py\r\n'
+        '"%PY%" scripts\\_launch_ui.py\r\n'
         'echo Exit: %ERRORLEVEL%\r\n'
         'pause\r\n'
     )
@@ -140,13 +147,13 @@ def write_launcher(out_dir: Path):
         'cd /d "%~dp0"\r\n'
         'set "PATH=%~dp0tools\\ffmpeg;%PATH%"\r\n'
         'if exist "python\\pythonw.exe" (\r\n'
-        '  start "" "python\\pythonw.exe" scripts\\run_ui_skeleton.py\r\n'
+        '  start "" "python\\pythonw.exe" scripts\\_launch_ui.py\r\n'
         '  exit /b 0\r\n'
         ')\r\n'
         'call "%~dp0StartClient.bat"\r\n'
     )
     repair_bat = '@echo off\r\ncd /d "%~dp0"\r\npowershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\\repair_bundled_torch.ps1" -PackageDir "%~dp0"\r\npause\r\n'
-    verify_bat = '@echo off\r\ncd /d "%~dp0"\r\n"%~dp0python\\python.exe" "%~dp0scripts\\verify_client_package.py" "%~dp0"\r\npause\r\n'
+    verify_bat = '@echo off\r\ncd /d "%~dp0"\r\n"%~dp0python\\python.exe" "%~dp0scripts\\_launch_verify.py" "%~dp0"\r\npause\r\n'
     for name, content in (
         ('StartClient.bat', bat),
         ('StartClient_Debug.bat', debug_bat),
@@ -157,7 +164,7 @@ def write_launcher(out_dir: Path):
         (out_dir / name).write_bytes(content.encode('ascii'))
 
 
-def build(version: str, output_root: Path, lite: bool, cuda_variant: str = '') -> Path:
+def build(version: str, output_root: Path, lite: bool, cuda_variant: str = '', use_pyd: bool = False) -> Path:
     manifest = load_manifest()
     if version:
         manifest['version'] = version
@@ -183,6 +190,22 @@ def build(version: str, output_root: Path, lite: bool, cuda_variant: str = '') -
                 (out_dir / 'assets' / sub / 'README.txt').write_text(hint + '\n', encoding='utf-8')
             stats['skipped'] += 1
             continue
+        if name == 'app' and use_pyd:
+            if str(ROOT / 'scripts') not in sys.path:
+                sys.path.insert(0, str(ROOT / 'scripts'))
+            from compile_app_pyd import build_client_pyd
+
+            build_client_pyd(out_dir, sys.executable)
+            for pkg in ('app', 'scripts'):
+                dst = out_dir / pkg
+                for p in dst.rglob('*'):
+                    if p.is_file():
+                        stats['files'] += 1
+                        stats['bytes'] += p.stat().st_size
+            print('  app/(core pyd + ui pyc) + scripts/ -> pyd')
+            continue
+        if name == 'scripts' and use_pyd:
+            continue
         copy_tree(ROOT / name, out_dir / name, manifest, stats)
 
     for rel in manifest.get('include_files', []):
@@ -196,7 +219,7 @@ def build(version: str, output_root: Path, lite: bool, cuda_variant: str = '') -
         stats['files'] += 1
 
     (out_dir / 'VERSION').write_text(ver + '\n', encoding='utf-8')
-    write_launcher(out_dir)
+    write_launcher(out_dir, use_pyd)
     (out_dir / 'config' / 'client.json').parent.mkdir(parents=True, exist_ok=True)
     meta = {
         'product': manifest.get('product', 'RVC Client'),
@@ -205,6 +228,7 @@ def build(version: str, output_root: Path, lite: bool, cuda_variant: str = '') -
         'stats': stats,
         'lite': lite,
         'cuda_variant': cuda_variant or None,
+        'app_pyd': use_pyd,
     }
     (out_dir / 'packaging' / 'build-info.json').write_text(
         json.dumps(meta, ensure_ascii=False, indent=2), encoding='utf-8'
@@ -225,10 +249,11 @@ def main():
     parser.add_argument('--lite', action='store_true', help='不复制 assets 大文件，仅目录占位')
     parser.add_argument('--zip', action='store_true')
     parser.add_argument('--cuda-variant', default='', choices=('', 'cu118', 'cu128'))
+    parser.add_argument('--pyd', action='store_true', help='将 app/ + scripts/ 编译为 .pyd（需 Cython + MSVC）')
     args = parser.parse_args()
     manifest = load_manifest()
     ver = args.version or manifest.get('version', '0.1.0-demo')
-    out_dir = build(ver, Path(args.output), args.lite, args.cuda_variant)
+    out_dir = build(ver, Path(args.output), args.lite, args.cuda_variant, use_pyd=args.pyd)
     if args.zip:
         zip_path = out_dir.parent / ('%s.zip' % out_dir.name)
         if zip_path.exists():

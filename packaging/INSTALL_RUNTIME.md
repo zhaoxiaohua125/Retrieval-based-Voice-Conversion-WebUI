@@ -30,11 +30,31 @@ setup_conda_cu128.bat
 
 ## 打包过程
 
-1. 复制应用 + assets
+1. 复制应用 + assets（可选 `-Pyd`：业务层 `app/`（除 `ui/`）与 `scripts/` 编译为 `.pyd`；**`app/ui/` 保留 `.py`**，避免 PyQt 信号槽崩溃）
 2. `conda pack` 导出对应 conda 环境（约 10 分钟）
 3. 解压到 `python/` → `conda-unpack` → 验证 torch
 4. 生成 `GPU_VARIANT.txt` 标明版本
 5. **手动压缩**文件夹发给客户
+
+### app/ + scripts/ 编译为 pyd（可选）
+
+PyQt6 界面层 **`app/ui/` 不编译 pyd**（会信号槽崩溃），脚本自动 **`compileall` 为 `.pyc` 并删除 `.py`**；其余 `app/` 与打包用 `scripts/` 为 `.pyd`。
+
+打包前需：**与目标 conda 环境相同的 Python**、**Cython**、**Windows MSVC 编译工具**。
+
+```powershell
+# 菜单 build_demo_package.bat 会询问 Compile app/ to pyd?
+# 或手动（app/ + scripts/ → pyd，PyQt binding=True）：
+powershell -File scripts\build_client_package.ps1 -CudaVariant cu118 -CondaPack -Pyd
+
+# 仅编译到 dist\pyd_pack_test（调试，约 90s；ui 输出 .pyc）：
+F:\zxh\anaconda3\envs\rvc312\python.exe scripts\compile_app_pyd.py --output dist\pyd_pack_test
+
+# ui 保留 .py 不转 pyc（调试 UI）：
+F:\zxh\anaconda3\envs\rvc312\python.exe scripts\compile_app_pyd.py --output dist\pyd_pack_test --keep-ui-py
+```
+
+`infer/`、`tools/` 仍为 `.py`；入口为 `scripts/_launch_ui.py`（逻辑在 `run_ui_skeleton.pyd`）。
 
 ## 客户侧
 
@@ -46,3 +66,4 @@ setup_conda_cu128.bat
 - cu118：`envs/rvc312` 已存在且 `import torch` 为 `2.7.1+cu118`
 - cu128：`envs/rvc312_cu128` 需先 `setup_conda_cu128.bat`
 - 磁盘剩余 ≥ 20GB
+- 使用 `-Pyd` 时另需：Cython + Visual Studio Build Tools（C++ 桌面开发）

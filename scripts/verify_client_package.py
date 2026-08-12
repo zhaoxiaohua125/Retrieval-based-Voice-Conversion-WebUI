@@ -65,6 +65,20 @@ print('infer.rtrvc OK (no torchaudio import)')
         errors.append('infer.rtrvc: %s' % (r2.stderr or r2.stdout).strip())
         print('[FAIL] infer.rtrvc import')
         print((r2.stderr or r2.stdout).strip())
+    code3 = r"""
+import sys
+sys.path.insert(0, '.')
+import app.integration
+import app.ui
+print('app package OK')
+"""
+    r3 = subprocess.run([str(PY), '-c', code3], cwd=str(ROOT), capture_output=True, text=True)
+    if r3.returncode == 0:
+        print('[OK] app import')
+    else:
+        errors.append('app import: %s' % (r3.stderr or r3.stdout).strip())
+        print('[FAIL] app import')
+        print((r3.stderr or r3.stdout).strip())
     if errors:
         print('\n=== FAILED (%d) ===' % len(errors))
         for e in errors:

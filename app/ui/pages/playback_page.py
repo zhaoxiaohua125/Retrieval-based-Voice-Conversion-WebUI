@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
 )
 
 from app.ui.ai_follow_mix_panel import AiFollowMixPanel
+from app.ui.qt_util import clicked
 from app.ui.waveform_widget import WaveformWidget
 
 
@@ -71,12 +72,12 @@ class PlaybackPage(QWidget):
         self._lib_tab_group.setExclusive(True)
         self._lib_tab_group.addButton(self.btn_tab_sing)
         self._lib_tab_group.addButton(self.btn_tab_inst)
-        self.btn_tab_sing.clicked.connect(lambda: self._switch_lib_tab('sing'))
-        self.btn_tab_inst.clicked.connect(lambda: self._switch_lib_tab('inst'))
+        self.btn_tab_sing.clicked.connect(clicked(lambda: self._switch_lib_tab('sing')))
+        self.btn_tab_inst.clicked.connect(clicked(lambda: self._switch_lib_tab('inst')))
         lib_head.addWidget(self.btn_tab_sing)
         lib_head.addWidget(self.btn_tab_inst)
         self.btn_refresh = QPushButton('刷新')
-        self.btn_refresh.clicked.connect(lambda: self.bridge.emit_action('playback_refresh_library'))
+        self.btn_refresh.clicked.connect(clicked(lambda: self.bridge.emit_action('playback_refresh_library')))
         lib_head.addStretch()
         lib_head.addWidget(self.btn_refresh)
         lib_layout.addLayout(lib_head)
@@ -141,27 +142,27 @@ class PlaybackPage(QWidget):
         self.btn_play.setCheckable(True)
         self.btn_play.setFixedWidth(52)
         self.btn_play.setToolTip('播放 / 暂停')
-        self.btn_play.clicked.connect(self._on_transport)
+        self.btn_play.clicked.connect(clicked(self._on_transport))
         ctrl.addWidget(self.btn_play)
         self.btn_ai_follow = QPushButton('AI 跟唱')
         self.btn_ai_follow.setCheckable(True)
         self.btn_ai_follow.setToolTip('AI 跟唱：伴奏按时间轴播放；麦克风有声音时门控输出 AI 人声（不识别音准）')
-        self.btn_ai_follow.clicked.connect(self._on_ai_follow)
+        self.btn_ai_follow.clicked.connect(clicked(self._on_ai_follow))
         ctrl.addWidget(self.btn_ai_follow)
         self.btn_ai_sing = QPushButton('AI 唱歌')
         self.btn_ai_sing.setCheckable(True)
         self.btn_ai_sing.setToolTip('播放离线生成的 AI 成品（cover.wav）')
-        self.btn_ai_sing.clicked.connect(self._on_ai_sing)
+        self.btn_ai_sing.clicked.connect(clicked(self._on_ai_sing))
         ctrl.addWidget(self.btn_ai_sing)
         self.btn_reverb_talk = QPushButton('混响说话')
         self.btn_reverb_talk.setCheckable(True)
         self.btn_reverb_talk.setToolTip('麦克风直通并叠加房间混响（不经 RVC）；播放中可听到伴奏')
-        self.btn_reverb_talk.clicked.connect(self._on_reverb_talk)
+        self.btn_reverb_talk.clicked.connect(clicked(self._on_reverb_talk))
         ctrl.addWidget(self.btn_reverb_talk)
         self.btn_normal_talk = QPushButton('普通说话')
         self.btn_normal_talk.setCheckable(True)
         self.btn_normal_talk.setToolTip('麦克风干声直通+伴奏（路由同混响说话，无混响）')
-        self.btn_normal_talk.clicked.connect(self._on_normal_talk)
+        self.btn_normal_talk.clicked.connect(clicked(self._on_normal_talk))
         ctrl.addWidget(self.btn_normal_talk)
         self._play_mode = 'sequential'
         self.btn_play_mode = QToolButton()
@@ -171,7 +172,7 @@ class PlaybackPage(QWidget):
             'QToolButton{padding:8px 10px;border-radius:6px;border:1px solid #cbd5e1;background:#fff;font-size:16px;}'
             'QToolButton:hover{background:#f8fafc;}'
         )
-        self.btn_play_mode.clicked.connect(lambda: self.bridge.emit_action('playback_set_play_mode'))
+        self.btn_play_mode.clicked.connect(clicked(lambda: self.bridge.emit_action('playback_set_play_mode')))
         ctrl.addWidget(self.btn_play_mode)
         self.btn_mix = QToolButton()
         self.btn_mix.setText('🔊')
@@ -180,7 +181,7 @@ class PlaybackPage(QWidget):
             'QToolButton{padding:8px 10px;border-radius:6px;border:1px solid #cbd5e1;background:#fff;font-size:16px;}'
             'QToolButton:hover{background:#f8fafc;}'
         )
-        self.btn_mix.clicked.connect(self._toggle_mix_panel)
+        self.btn_mix.clicked.connect(clicked(self._toggle_mix_panel))
         ctrl.addWidget(self.btn_mix)
         self._mix_panel = AiFollowMixPanel(self.bridge, self)
         self._mode_group = QButtonGroup(self)
@@ -204,7 +205,7 @@ class PlaybackPage(QWidget):
             '按系统设置里的「逐字歌词」参数生成并写入 LRC。'
             '进歌只会快速补齐或沿用文件缓存；改引擎后需再点此按钮才会重算。'
         )
-        self.btn_enhance_lrc.clicked.connect(lambda: self.bridge.emit_action('lyrics_enhance'))
+        self.btn_enhance_lrc.clicked.connect(clicked(lambda: self.bridge.emit_action('lyrics_enhance')))
         right_head.addStretch()
         right_head.addWidget(self.btn_enhance_lrc)
         right_layout.addLayout(right_head)
@@ -216,7 +217,7 @@ class PlaybackPage(QWidget):
         self.lyric_edit.setPlaceholderText('改词：选中一行后编辑')
         right_layout.addWidget(self.lyric_edit)
         self.btn_save_lyric = QPushButton('保存改词')
-        self.btn_save_lyric.clicked.connect(self._on_save_rewrite)
+        self.btn_save_lyric.clicked.connect(clicked(self._on_save_rewrite))
         right_layout.addWidget(self.btn_save_lyric)
         splitter.addWidget(right)
         splitter.setStretchFactor(1, 1)

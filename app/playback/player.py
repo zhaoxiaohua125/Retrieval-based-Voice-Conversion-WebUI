@@ -162,7 +162,7 @@ class WavPlayer:
             out_dev = self._output_device
 
             def callback(outdata, frames, time_info, status):
-                del status
+                _ = status
                 lat = None
                 try:
                     if time_info is not None:
