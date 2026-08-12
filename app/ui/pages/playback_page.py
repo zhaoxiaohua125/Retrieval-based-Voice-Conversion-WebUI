@@ -90,6 +90,7 @@ class PlaybackPage(QWidget):
         self.song_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.song_list.customContextMenuRequested.connect(self._on_song_context_menu)
         self.song_list.itemDoubleClicked.connect(self._on_song_double_clicked)
+        self.song_list.currentRowChanged.connect(self._on_song_row_changed)
         lib_layout.addWidget(self.song_list)
         splitter.addWidget(lib)
 
@@ -242,24 +243,29 @@ class PlaybackPage(QWidget):
         self.search_box.setPlaceholderText('搜索原唱' if tab == 'inst' else '搜索歌曲')
         self._filter_songs(self.search_box.text(), auto_select=False)
         row = self._row_by_tab.get(tab, -1)
+        self.song_list.blockSignals(True)
         if 0 <= row < self.song_list.count():
             self.song_list.setCurrentRow(row)
-            self._apply_row_song(row, resume_if_playing=False, show_switching=False)
         elif self.song_list.count() > 0:
-            self.select_initial_song()
+            self.song_list.setCurrentRow(0)
         else:
-            self.clear_current_song()
-        self._sync_mode_for_library()
+            self.song_list.setCurrentRow(-1)
+        self.song_list.blockSignals(False)
+        self._sync_mode_for_library(emit=False)
 
-    def _sync_mode_for_library(self):
+    def _sync_mode_for_library(self, emit: bool = True):
         inst_only = self._is_accompaniment_selected()
         self.btn_ai_follow.setEnabled(not inst_only)
+        if not emit:
+            return
         if inst_only and self.btn_ai_follow.isChecked():
             self.btn_ai_follow.blockSignals(True)
             self.btn_ai_follow.setChecked(False)
             self.btn_ai_follow.blockSignals(False)
             if self._selected:
-                self._select_mode_ui('normal_talk')
+                self._select_mode_ui('ai_sing')
+        elif not inst_only and (self.btn_normal_talk.isChecked() or self.btn_reverb_talk.isChecked()):
+            self._select_mode_ui('ai_sing')
 
     def _is_accompaniment_selected(self) -> bool:
         return str((self._selected or {}).get('library_type') or '') == 'accompaniment'
@@ -279,13 +285,24 @@ class PlaybackPage(QWidget):
         if auto_select and self.song_list.count() and self.song_list.currentRow() < 0:
             self.select_initial_song()
 
-    def select_initial_song(self):
+    def select_initial_song(self, force_switch: bool = False, library_tab_switch: bool = False):
         if self.song_list.count() <= 0:
             return
         self.song_list.blockSignals(True)
         self.song_list.setCurrentRow(0)
         self.song_list.blockSignals(False)
-        self._apply_row_song(0, resume_if_playing=False, show_switching=False)
+        self._apply_row_song(
+            0,
+            resume_if_playing=False,
+            show_switching=False,
+            force_switch=force_switch,
+            library_tab_switch=library_tab_switch,
+        )
+
+    def _on_song_row_changed(self, row: int):
+        if row < 0 or self._switching or self.song_list.signalsBlocked():
+            return
+        self._apply_row_song(row, resume_if_playing=False, show_switching=False, force_switch=True)
 
     def _on_song_context_menu(self, pos):
         if self._switching:
@@ -314,14 +331,28 @@ class PlaybackPage(QWidget):
         if self._switching or not item:
             return
         song = item.data(Qt.ItemDataRole.UserRole) or {}
-        cur_id = (self._selected or {}).get('id') or (self._selected or {}).get('play_path')
+        cur = self._selected or {}
+        cur_id = cur.get('id') or cur.get('play_path')
         new_id = song.get('id') or song.get('play_path')
-        if cur_id and new_id and cur_id == new_id:
+        if (
+            cur_id
+            and new_id
+            and cur_id == new_id
+            and str(cur.get('library_type') or '') == str(song.get('library_type') or '')
+        ):
             return
         row = self.song_list.row(item)
-        self._apply_row_song(row, resume_if_playing=True, show_switching=True)
+        self._apply_row_song(row, resume_if_playing=True, show_switching=True, force_switch=True, autoplay=True)
 
-    def _apply_row_song(self, row: int, resume_if_playing: bool = True, show_switching: bool = False):
+    def _apply_row_song(
+        self,
+        row: int,
+        resume_if_playing: bool = True,
+        show_switching: bool = False,
+        force_switch: bool = False,
+        library_tab_switch: bool = False,
+        autoplay: bool = False,
+    ):
         if row < 0:
             self._selected = None
             return
@@ -340,7 +371,14 @@ class PlaybackPage(QWidget):
         self.waveform.load_file(wave_path or '')
         self.waveform.set_position_ratio(0.0)
         self._sync_mode_for_library()
-        self.bridge.emit_action('playback_select_song', song=song, resume_if_playing=resume_if_playing)
+        self.bridge.emit_action(
+            'playback_select_song',
+            song=song,
+            resume_if_playing=resume_if_playing,
+            force_switch=force_switch,
+            library_tab_switch=library_tab_switch,
+            autoplay=autoplay,
+        )
 
     def set_song_switching(self, busy: bool, title: str = ''):
         self._switching = bool(busy)

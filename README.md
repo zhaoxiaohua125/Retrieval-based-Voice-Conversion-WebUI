@@ -2211,3 +2211,81 @@ ewrite；扩展 LyricWord 与字级 matcher
 - **根因**: 只改了 `db.json.example`，server 读 `db.json` 缺失时默认连 `changgebanlv`，实际库名为 `aisound`
 - **修复**: 无 `db.json` 时回退读 `db.json.example`；默认库改为 `aisound`；连接失败返回具体 MySQL 错误
 - **修改的文件列表**: server/config/settings.py、server/db/engine.py、server/auth/router.py、server/config/db.json.example、server/README.md、README.md
+
+---
+
+## 会话总结 - 2026-08-12 (43)
+
+- **问题**: 「原唱」播放后切到「唱歌」再播放，仍播原唱音频
+- **根因**: 切 Tab 时 `resume_if_playing=False` 未释放统一音频流/播放器；单击列表未同步 `selected_song`
+- **修复**: Tab 切换 `force_switch`；`library_type` 变化时释放并重载；列表 `currentRowChanged` 同步选曲
+- **修改的文件列表**: app/ui/pages/playback_page.py、app/integration/controller.py、README.md
+
+---
+
+## 会话总结 - 2026-08-12 (44)
+
+- **问题**: 原唱/唱歌 Tab 切换卡死；播放按钮仍续播旧歌
+- **根因**: 切 Tab 在 UI 线程同步释放播放/加载歌词；暂停态 transport 直接 resume 未校验当前歌曲
+- **修复**: 歌库切换后台线程处理并停止旧播放；`_playback_matches_selection` + `_active_playback_song_key`；Tab 切换去重信号并同步模式
+- **修改的文件列表**: app/integration/controller.py、app/ui/pages/playback_page.py、README.md
+
+---
+
+## 会话总结 - 2026-08-12 (45)
+
+- **诉求**: 切换「原唱/唱歌」Tab 不要自动停止当前播放
+- **实现**: Tab 仅切换列表视图（不通知控制器）；跨歌库选曲时若正在播放则无缝切歌而非 stop
+- **修改的文件列表**: app/ui/pages/playback_page.py、app/integration/controller.py、README.md
+
+---
+
+## 会话总结 - 2026-08-12 (46)
+
+- **诉求**: 原唱 Tab 播放时保持「AI 唱歌」模式，不要自动切到「普通说话」
+- **实现**: 移除原唱条目强制 `normal_talk`；跨歌库仅 `ai_follow` 降级为 `ai_sing`
+- **修改的文件列表**: app/ui/pages/playback_page.py、app/integration/controller.py、README.md
+
+---
+
+## 会话总结 - 2026-08-12 (47)
+
+- **问题**: 跨歌库切歌后两路声音同时播放；进度条不走
+- **根因**: 统一音频流（唱歌 AI）未释放即启动 WavPlayer（原唱）；tick 仍读旧流位置
+- **修复**: 切到非 unified 歌曲前先 `_release_playback_source`；`_start_ai_sing_impl` 走播放器路径前停统一流
+- **修改的文件列表**: app/integration/controller.py、README.md
+
+---
+
+## 会话总结 - 2026-08-12 (48)
+
+- **问题**: 从「唱歌」切到「原唱」后双击歌曲处于暂停就绪态，需手动点播放；反向切回正常
+- **根因**: 跨歌库选曲在释放旧播放源之后才读 `autoplay`，释放后 `_is_timeline_playing()` 为 False；空闲态双击未传自动播放意图
+- **修复**: 释放前记录 `was_active`；UI 双击传 `autoplay=True`；`autoplay = was_active or user_autoplay`；单击列表不传 autoplay
+- **修改的文件列表**: app/ui/pages/playback_page.py、app/integration/controller.py、README.md
+
+---
+
+## 会话总结 - 2026-08-12 (49)
+
+- **问题**: 原唱 Tab 歌词与播放进度匹配不准
+- **根因**: 原唱可能误用同目录 AI 人声/缓存逐字轴对齐；LRC 开头词曲/标题行在前奏阶段抢显示；子目录歌曲 title 带路径影响查找
+- **修复**: 原唱仅用 play_path 做能量逐字；加载后强制 refresh；strip_lrc_credits 过滤元数据行；song_lookup_stem 统一取文件名
+- **修改的文件列表**: app/playback/library.py、app/lyrics/aligner.py、app/lyrics/service.py、app/integration/controller.py、README.md
+
+---
+
+## 会话总结 - 2026-08-12 (50)
+
+- **诉求**: 保留 LRC 中「歌名 - 歌手」「词：」「曲：」等行，不要过滤
+- **处理**: 移除 strip_lrc_credits 及 load_lrc 调用，歌词展示恢复完整 LRC 原文
+- **保留**: 原唱 play_path 对齐、song_lookup_stem、跨库 autoplay 等此前修复
+- **修改的文件列表**: app/lyrics/aligner.py、app/lyrics/service.py、README.md
+
+---
+
+## 会话总结 - 2026-08-12 (51)
+
+- **结论**: 原唱歌词与进度偏差大，主因是 LRC 与音频不匹配（非程序 bug）；换对词后即可
+- **保留**: 原唱 play_path 对齐、完整展示词曲/标题行、Tab 切歌 autoplay 等修复
+- **修改的文件列表**: README.md

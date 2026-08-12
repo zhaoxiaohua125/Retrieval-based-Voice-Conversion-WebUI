@@ -23,6 +23,13 @@ def _stem_from_wav_name(name: str) -> str:
     return stem
 
 
+def song_lookup_stem(song: dict) -> str:
+    pp = song.get('play_path')
+    if pp:
+        return Path(pp).stem
+    return str(song.get('title') or '').rsplit('/', 1)[-1]
+
+
 def find_lrc_in_dir(folder: Path, stem: str):
     """在同目录查找 LRC：优先 {stem}.lrc，兼容 {stem}_cover.lrc 等。"""
     folder = Path(folder)

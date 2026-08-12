@@ -24,7 +24,7 @@ from app.playback.waveform_peaks import (
 )
 from app.ops.exceptions import classify_exception
 from app.playback import WavPlayer
-from app.playback.library import delete_song_from_disk, find_lrc_in_dir, scan_accompaniment_library, scan_song_library
+from app.playback.library import delete_song_from_disk, find_lrc_in_dir, scan_accompaniment_library, scan_song_library, song_lookup_stem
 from app.rvc.types import RvcInferParams
 from app.rvc.vc_context import discover_first_model, resolve_index_for_model
 from app.scheduler import AppScheduler
@@ -81,9 +81,43 @@ class ClientController:
         self._smart_silent_acc = 0.0
         self._smart_vocal_acc = 0.0
         self._update_running = False
+        self._active_playback_song_key = ''
 
-    @property
-    def pitch_follow(self):
+    @staticmethod
+    def _song_key(song: dict | None) -> str:
+        if not song:
+            return ''
+        return '%s:%s' % (str(song.get('library_type') or 'sing'), str(song.get('id') or song.get('play_path') or ''))
+
+    def _mark_playback_song(self, song: dict | None):
+        self._active_playback_song_key = self._song_key(song)
+
+    def _clear_playback_song(self):
+        self._active_playback_song_key = ''
+
+    def _playback_matches_selection(self) -> bool:
+        song = self.state.selected_song or {}
+        key = self._song_key(song)
+        if not key:
+            return True
+        if self._active_playback_song_key:
+            return self._active_playback_song_key == key
+        play_path = str(song.get('play_path') or song.get('cover_path') or '')
+        if self.state.mode == 'ai_sing' and self._player.is_active and self._player.path and play_path:
+            try:
+                return str(Path(self._player.path).resolve()) == str(Path(play_path).resolve())
+            except OSError:
+                return False
+        mgr = self._unified_mgr()
+        if mgr is not None and mgr.inst_duration > 0:
+            inst = str(song.get('instrumental_path') or song.get('play_path') or '')
+            loaded = str(getattr(mgr, '_inst_path', '') or '')
+            if inst and loaded:
+                try:
+                    return str(Path(inst).resolve()) == str(Path(loaded).resolve())
+                except OSError:
+                    return False
+        return False
         if self._pitch_follow is None:
             from app.pitchfix import PitchFollowService
             self._pitch_follow = PitchFollowService(self.scheduler, self.config_store)
@@ -581,6 +615,7 @@ class ClientController:
                 base_mode=self.state.selected_mode,
                 smart_overlay=(mode == 'reverb_talk' and self.state.selected_mode in ('ai_sing', 'ai_follow')),
             )
+        self._mark_playback_song(song)
         return True
 
     def _toggle_reverb_talk(self, payload=None):
@@ -681,6 +716,7 @@ class ClientController:
                 self.state.lyrics_running = False
         if self._is_talk_mode():
             self.state.mode = 'idle'
+        self._clear_playback_song()
         self._publish_status('passthrough_stopped', log='%s已停止' % label)
 
     def _stop_playback_all(self, payload=None):
@@ -899,6 +935,12 @@ class ClientController:
             self._pause_timeline()
             return
         if self._has_paused_session():
+            if not self._playback_matches_selection():
+                self._release_playback_source(handoff=False)
+                self._clear_playback_song()
+                mode = self.state.selected_mode if self.state.selected_mode in MODE_IDS else 'ai_sing'
+                self._apply_mode(mode, autoplay=True, song=self.state.selected_song)
+                return
             self._resume_timeline()
             return
         mode = self.state.selected_mode if self.state.selected_mode in MODE_IDS else 'ai_sing'
@@ -936,19 +978,45 @@ class ClientController:
         prev = self.state.selected_song or {}
         prev_id = prev.get('id') or prev.get('play_path')
         new_id = song.get('id') or song.get('play_path')
-        switching = bool(prev_id and new_id and prev_id != new_id)
+        prev_lib = str(prev.get('library_type') or '')
+        new_lib = str(song.get('library_type') or '')
+        lib_changed = bool(prev_id and prev_lib != new_lib)
+        switching = bool(prev_id and new_id and (prev_id != new_id or lib_changed))
+        force_switch = bool(payload.get('force_switch')) or lib_changed
         if switching:
             self._reset_smart_switch()
-        resume_if_playing = payload.get('resume_if_playing', True)
         self.state.selected_song = dict(song)
+        defer = lib_changed and (switching or force_switch)
+        if defer:
+            threading.Thread(
+                target=self._select_song_apply,
+                args=(dict(song), dict(payload), switching, lib_changed, force_switch),
+                name='select-song',
+                daemon=True,
+            ).start()
+        else:
+            self._select_song_apply(song, payload, switching, lib_changed, force_switch)
+
+    def _select_song_apply(self, song: dict, payload: dict, switching: bool, lib_changed: bool, force_switch: bool):
+        resume_if_playing = payload.get('resume_if_playing', True)
+        user_autoplay = bool(payload.get('autoplay'))
         self._schedule_smart_peaks(song)
-        lrc = song.get('lrc_path') or find_lrc_in_dir(song.get('dir') or Path(song.get('play_path', '')).parent, song.get('title', ''))
+        lrc = song.get('lrc_path') or find_lrc_in_dir(
+            song.get('dir') or Path(song.get('play_path', '')).parent,
+            song_lookup_stem(song),
+        )
         if lrc and Path(lrc).is_file():
             prev_lrc = self.lyrics._loaded_path
-            from app.lyrics.aligner import find_vocal_for_song
+            from app.lyrics.aligner import find_vocal_for_song, refresh_karaoke_timing
 
-            vocal = find_vocal_for_song(song.get('dir') or Path(lrc).parent, song.get('title') or '', song)
-            self.lyrics.load_lrc(lrc, vocal_path=vocal, force=True)
+            vocal = find_vocal_for_song(song.get('dir') or Path(lrc).parent, song_lookup_stem(song), song)
+            is_accomp = str(song.get('library_type') or '') == 'accompaniment'
+            self.lyrics.load_lrc(lrc, vocal_path=None if is_accomp else vocal, force=True)
+            if is_accomp and vocal and Path(vocal).is_file():
+                doc = refresh_karaoke_timing(self.lyrics.document, vocal_path=vocal)
+                self.lyrics.document = doc
+                self.lyrics.matcher.set_document(doc)
+                self.lyrics._timing_from_file = False
             self.state.loaded_lyrics = True
             self.state.selected_song['lrc_path'] = lrc
             if switching or self.lyrics._loaded_path != prev_lrc:
@@ -979,34 +1047,70 @@ class ClientController:
                 lines=[],
                 log='未找到歌词文件（期望同名 %s），仅播放音频' % hint,
             )
-        if resume_if_playing and switching:
-            mode = self._session_playback_mode()
-            if mode:
+        if lib_changed:
+            was_active = self._is_timeline_playing() or self._has_paused_session()
+            if was_active or user_autoplay:
+                if was_active and self._unified_stream_active() and not self._song_unified_ready(song, 'ai_sing'):
+                    self._release_playback_source(handoff=False)
+                    time.sleep(0.03)
+                mode = self._session_playback_mode()
+                if not mode:
+                    mode = self.state.selected_mode if self.state.selected_mode in MODE_IDS else 'ai_sing'
+                new_lib = str(song.get('library_type') or '')
+                if new_lib == 'accompaniment' and mode == 'ai_follow':
+                    mode = 'ai_sing'
+                elif new_lib != 'accompaniment' and mode in ('reverb_talk', 'normal_talk'):
+                    mode = 'ai_sing'
                 title = song.get('title') or Path(song.get('play_path') or '').stem
                 self._inst_end_sent = False
-                autoplay = self._is_timeline_playing()
+                autoplay = was_active or user_autoplay
                 self._continue_mode_with_song(mode, dict(self.state.selected_song), 0.0, autoplay)
                 self._publish_status('track_advance', title=title, log='切换歌曲：%s' % title)
                 return
+            try:
+                self._preload_song_assets(dict(self.state.selected_song))
+            finally:
+                title = (self.state.selected_song or {}).get('title') or ''
+                self._publish_status('song_switched', title=title)
+            return
+        if switching and (resume_if_playing or force_switch):
+            mode = self._session_playback_mode()
+            if not mode:
+                mode = self.state.selected_mode if self.state.selected_mode in MODE_IDS else 'ai_sing'
+            was_active = self._is_timeline_playing() or self._has_paused_session()
+            if was_active or user_autoplay:
+                song_now = dict(self.state.selected_song)
+                if was_active and self._unified_stream_active() and not self._song_unified_ready(song_now, mode):
+                    self._release_playback_source(handoff=False)
+                    time.sleep(0.03)
+                title = song.get('title') or Path(song.get('play_path') or '').stem
+                self._inst_end_sent = False
+                autoplay = was_active or user_autoplay
+                self._continue_mode_with_song(mode, dict(self.state.selected_song), 0.0, autoplay)
+                self._publish_status('track_advance', title=title, log='切换歌曲：%s' % title)
+                return
+            if force_switch:
+                self._release_playback_source(handoff=False)
+                self._clear_playback_song()
+        elif force_switch and self._unified_stream_active():
+            self._release_playback_source(handoff=False)
+            self._clear_playback_song()
+
         def _preload_done():
             try:
                 self._preload_song_assets(dict(self.state.selected_song))
             finally:
                 t = (self.state.selected_song or {}).get('title') or ''
                 self._publish_status('song_switched', title=t)
-        threading.Thread(
-            target=_preload_done,
-            name='song-preload',
-            daemon=True,
-        ).start()
+
+        threading.Thread(target=_preload_done, name='song-preload', daemon=True).start()
 
     def _preload_song_assets(self, song: dict):
         try:
             self._sync_playback_output_device()
             play_path = song.get('play_path') or song.get('cover_path')
             if play_path and Path(play_path).is_file():
-                if str(play_path) != self._player.path or not self._player.is_active:
-                    self._player.load(str(play_path))
+                self._player.load(str(play_path))
             if song.get('instrumental_path') and song.get('vocal_path'):
                 self.pitch_follow.preload(song)
         except Exception:
@@ -1105,6 +1209,14 @@ class ClientController:
                         log='AI 唱歌：已就绪 %s（按播放键开始）' % title,
                     )
                 return
+        if self._unified_stream_active():
+            self._release_playback_source(handoff=False)
+            if 'position' not in payload:
+                carry_pos = 0.0
+            time.sleep(0.03)
+        elif self._player.is_active:
+            self._player.stop()
+            time.sleep(0.02)
         play_path = song.get('play_path') or song.get('cover_path') or song.get('vocal_path')
         if not play_path:
             self._publish_error('请先在歌库选择已生成的 AI 歌曲（需 cover.wav 或 converted_vocal.wav）')
@@ -1242,6 +1354,7 @@ class ClientController:
             playing=True,
             paused=False,
         )
+        self._mark_playback_song(song)
         song_assets = dict(self.state.selected_song) if self.state.selected_song else dict(song)
         if song_assets.get('instrumental_path') and song_assets.get('vocal_path'):
             threading.Thread(
@@ -1463,6 +1576,7 @@ class ClientController:
                 self.lyrics.stop()
                 self.state.lyrics_running = False
                 self.state.mode = 'idle'
+            self._clear_playback_song()
             self._publish_status('playback_stopped', log='播放已停止')
             return
         if handoff:
@@ -1478,6 +1592,7 @@ class ClientController:
             self.lyrics.stop()
             self.state.lyrics_running = False
             self.state.mode = 'idle'
+        self._clear_playback_song()
         self._publish_status('playback_stopped', log='播放已停止')
 
     def _toggle_ai(self, payload=None):
@@ -1540,6 +1655,11 @@ class ClientController:
     def _release_playback_source(self, handoff: bool = True) -> float:
         pos = self._current_song_position()
         if handoff and self._unified_stream_active():
+            return pos
+        if self._unified_stream_active() and not handoff:
+            pos = self._current_song_position()
+            self._stop_playback(handoff=False)
+            time.sleep(0.03)
             return pos
         if self.state.mode in ('reverb_talk', 'normal_talk') or (
             self.state.passthrough_running and self.audio.manager and self.audio.manager.inst_duration > 0

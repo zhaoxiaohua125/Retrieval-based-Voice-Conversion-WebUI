@@ -708,14 +708,17 @@ def enhance_lrc_file(
 
 
 def find_vocal_for_song(song_dir: str | Path, title: str = '', song: dict | None = None) -> Path | None:
-    """优先干声轨，便于对齐。"""
+    """优先干声轨，便于对齐；原唱条目只用实际播放文件。"""
+    if song and str(song.get('library_type') or '') == 'accompaniment':
+        p = song.get('play_path')
+        return Path(p) if p and Path(p).is_file() else None
     if song:
         for key in ('vocal_path', 'converted_vocal_path', 'original_vocal_path', 'cover_path', 'play_path'):
             p = song.get(key)
             if p and Path(p).is_file() and 'instrumental' not in Path(p).name.lower():
                 return Path(p)
     d = Path(song_dir)
-    title = title or ''
+    title = (title or '').rsplit('/', 1)[-1]
     candidates = []
     if title:
         candidates.extend(
