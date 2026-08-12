@@ -12,6 +12,19 @@ python main.py
 
 默认监听 `http://127.0.0.1:8765`。
 
+## Docker 部署（仅 API，MySQL 外置）
+
+```bash
+cd server
+cp .env.example .env   # 填写 MYSQL_*；宿主机 MySQL 可用 host.docker.internal
+docker compose up -d --build
+curl http://127.0.0.1:8765/health
+```
+
+- 端口：`8765`
+- 数据卷：`./data` → 容器内 `/app/data`（`version.json` / `releases/` / `logs/`）
+- MySQL 在宿主机时：在 `docker-compose.yml` 取消注释 `extra_hosts`，且 `.env` 中 `MYSQL_HOST=host.docker.internal`
+
 ## 接口
 
 | 路径 | 说明 |

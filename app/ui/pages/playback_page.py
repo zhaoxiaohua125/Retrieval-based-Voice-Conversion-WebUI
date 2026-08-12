@@ -39,9 +39,10 @@ class PlaybackPage(QWidget):
         'QPushButton:disabled{color:#94a3b8;background:#f1f5f9;}'
     )
 
-    def __init__(self, bridge, parent=None):
+    def __init__(self, bridge, parent=None, ui_pump=None):
         super().__init__(parent)
         self.bridge = bridge
+        self._ui_pump = ui_pump
         self._songs_sing = []
         self._songs_inst = []
         self._lib_tab = 'sing'
@@ -50,6 +51,10 @@ class PlaybackPage(QWidget):
         self._switching = False
         self._mode = 'idle'
         self._build_ui()
+
+    def _pump(self):
+        if self._ui_pump:
+            self._ui_pump()
 
     def _build_ui(self):
         root = QHBoxLayout(self)
@@ -93,6 +98,7 @@ class PlaybackPage(QWidget):
         self.song_list.currentRowChanged.connect(self._on_song_row_changed)
         lib_layout.addWidget(self.song_list)
         splitter.addWidget(lib)
+        self._pump()
 
         center = QWidget()
         center_layout = QVBoxLayout(center)
@@ -125,9 +131,11 @@ class PlaybackPage(QWidget):
         lyric_layout.addStretch()
         self.lyric_panel.setStyleSheet('background:#fff;border-radius:12px;')
         center_layout.addWidget(self.lyric_panel, stretch=1)
+        self._pump()
         self.waveform = WaveformWidget()
         self.waveform.seek_requested.connect(self._on_wave_seek)
         center_layout.addWidget(self.waveform)
+        self._pump()
         progress_row = QHBoxLayout()
         self.time_label = QLabel('00:00 / 00:00')
         self.progress = QSlider(Qt.Orientation.Horizontal)
@@ -225,6 +233,7 @@ class PlaybackPage(QWidget):
         splitter.setSizes([220, 760, 220])
         self._lyric_lines = []
         self._lyric_row = -1
+        self._pump()
 
     def apply_library(self, songs: list, inst_songs: list | None = None, auto_select: bool = True):
         keep = self._selected

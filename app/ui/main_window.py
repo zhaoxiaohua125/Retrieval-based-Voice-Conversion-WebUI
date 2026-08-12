@@ -3,7 +3,7 @@
 import threading
 from pathlib import Path
 
-from PyQt6.QtCore import QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QApplication,
     QDialog,
@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (
 )
 from app.ui.header_bar import HeaderBar
 from app.ui.layout_store import load_ui_layout, save_ui_layout
-from app.ui.pages import AnnouncePage, LoginPage, PlaybackPage, SongMakePage
+from app.ui.pages import AnnouncePage, BootSplashPage, LoginPage, PlaybackPage, SongMakePage
 from app.ui.playback_shortcuts import PlaybackShortcutBinder
 from app.ui.qt_util import clicked
 from app.ui.settings_dialog import SettingsDialog
@@ -39,6 +39,7 @@ class MainWindow(QMainWindow):
             from app.config_store import ConfigStore
             config_store = ConfigStore().load()
         self.config_store = config_store
+        self._require_login = bool(config_store.get('auth.show_login', True))
         self._controller = None
         self._main_ready = False
         self._backend_ready = False
@@ -49,6 +50,8 @@ class MainWindow(QMainWindow):
         self._page_playback = None
         self._page_song_make = None
         self._page_announce = None
+        self._shell_frame = False
+        self._load_slot = None
         self._shortcut_binder = None
         self.setWindowTitle('唱歌伴侣客户端 v%s' % self._client_version())
         self.resize(1280, 800)
@@ -71,6 +74,9 @@ class MainWindow(QMainWindow):
         except Exception:
             return 'dev'
 
+    def require_login(self) -> bool:
+        return self._require_login
+
     def is_main_ready(self) -> bool:
         return self._main_ready
 
@@ -80,21 +86,44 @@ class MainWindow(QMainWindow):
     def mark_backend_ready(self):
         self._backend_ready = True
         if self._login_pending:
-            self._login_pending = False
-            self.page_login.set_status('正在进入…')
+            if self._require_login:
+                self.page_login.set_status('正在进入…')
+            else:
+                self.page_boot.set_status('正在进入…')
             QTimer.singleShot(0, self._enter_main)
 
+    def begin_guest_boot(self):
+        if self._require_login or self._main_ready:
+            return
+        self._login_pending = True
+        self.page_boot.set_status('正在初始化…')
+        self.page_boot.progress.start_anim()
+
+    def on_boot_failed(self):
+        self._login_pending = False
+        if self._require_login:
+            self.page_login.set_busy(False)
+
     def set_login_wait_text(self, text: str):
-        if self._login_pending or not self.page_login.btn_login.isEnabled():
+        if self._require_login and (self._login_pending or not self.page_login.btn_login.isEnabled()):
             self.page_login.set_busy_text(text)
 
     def set_boot_status(self, text: str):
         if self._main_ready:
             return
-        if self._login_pending or not self.page_login.btn_login.isEnabled():
-            self.page_login.set_busy_text(text)
+        if self._require_login:
+            if self._login_pending or not self.page_login.btn_login.isEnabled():
+                self.page_login.set_busy_text(text)
+            else:
+                self.page_login.set_boot_hint(text)
         else:
-            self.page_login.set_boot_hint(text)
+            self.page_boot.set_status(text)
+
+    def _pump_boot_splash(self):
+        if self._require_login or self._main_ready:
+            QApplication.processEvents()
+            return
+        self.page_boot.pump()
 
     def _build_ui(self):
         root = QWidget()
@@ -104,15 +133,27 @@ class MainWindow(QMainWindow):
         outer.setSpacing(0)
         self.root_stack = QStackedWidget()
         outer.addWidget(self.root_stack)
+        self.page_boot = BootSplashPage()
         self.page_login = LoginPage(self.bridge)
         self.page_login.login_requested.connect(self._on_login_requested)
-        self.root_stack.addWidget(self.page_login)
+        if self._require_login:
+            self.root_stack.addWidget(self.page_login)
+            self.root_stack.setCurrentWidget(self.page_login)
+        else:
+            self.root_stack.addWidget(self.page_boot)
+            self.root_stack.setCurrentWidget(self.page_boot)
         self.main_shell = QWidget()
         self.root_stack.addWidget(self.main_shell)
-        self.root_stack.setCurrentWidget(self.page_login)
 
-    def _ensure_main_shell(self):
-        if self._main_ready:
+    def _clear_boot_chrome(self):
+        self.root_stack.setStyleSheet('')
+        root = self.centralWidget()
+        if root is not None:
+            root.setAutoFillBackground(False)
+            root.setPalette(QApplication.style().standardPalette())
+
+    def _build_main_shell_frame(self):
+        if self._shell_frame:
             return
         shell = QVBoxLayout(self.main_shell)
         shell.setContentsMargins(0, 0, 0, 0)
@@ -122,12 +163,12 @@ class MainWindow(QMainWindow):
         self.header.btn_settings.clicked.connect(clicked(self._open_settings_dialog))
         shell.addWidget(self.header)
         self.stack = QStackedWidget()
-        self._page_playback = PlaybackPage(self.bridge)
-        self._page_song_make = None
-        self._page_announce = None
+        self._load_slot = QLabel('正在加载播放页…')
+        self._load_slot.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._load_slot.setStyleSheet('font-size:16px;color:#64748b;background:#f8fafc;')
+        self.stack.addWidget(self._load_slot)
         self._slot_make = QWidget()
         self._slot_announce = QWidget()
-        self.stack.addWidget(self._page_playback)
         self.stack.addWidget(self._slot_make)
         self.stack.addWidget(self._slot_announce)
         shell.addWidget(self.stack, stretch=1)
@@ -145,6 +186,22 @@ class MainWindow(QMainWindow):
         self.status.addPermanentWidget(self.gpu_label)
         self.status.addPermanentWidget(self.plugin_label)
         self.bridge.log_message.connect(self.append_log)
+        self._shell_frame = True
+
+    def _build_playback_page(self):
+        if self._page_playback is not None:
+            return
+        pump = None if self._require_login else self._pump_boot_splash
+        if pump:
+            pump()
+        self._page_playback = PlaybackPage(self.bridge, ui_pump=pump)
+        if pump:
+            pump()
+        if self._load_slot is not None:
+            self.stack.removeWidget(self._load_slot)
+            self._load_slot.deleteLater()
+            self._load_slot = None
+        self.stack.insertWidget(HeaderBar.TAB_PLAYBACK, self._page_playback)
         self._shortcut_binder = PlaybackShortcutBinder(
             self, self._page_playback, self.config_store, playback_tab_index=HeaderBar.TAB_PLAYBACK
         )
@@ -153,6 +210,12 @@ class MainWindow(QMainWindow):
         if isinstance(tab, int) and 0 <= tab < self.stack.count():
             self.header.set_active_tab(tab)
         QTimer.singleShot(0, self._refresh_gpu_status)
+
+    def _ensure_main_shell(self):
+        if self._main_ready:
+            return
+        self._build_main_shell_frame()
+        self._build_playback_page()
 
     def _ensure_tab_page(self, index: int):
         if index == HeaderBar.TAB_SONG_MAKE and self._page_song_make is None:
@@ -235,20 +298,42 @@ class MainWindow(QMainWindow):
         self.page_login.set_status('正在初始化…')
 
     def _enter_main(self):
-        self.page_login.set_status('正在加载界面…')
+        if self._require_login:
+            self.page_login.set_status('正在加载界面…')
+        else:
+            self.page_boot.set_status('正在加载界面…')
         QTimer.singleShot(10, self._enter_main_build)
 
     def _enter_main_build(self):
-        self.page_login.set_busy_text('正在加载播放页…')
+        if self._require_login:
+            self.page_login.set_busy_text('正在加载播放页…')
+        else:
+            self.page_boot.set_status('正在加载播放页')
+            self.page_boot.progress.start_anim()
         QApplication.processEvents()
-        self._ensure_main_shell()
-        QTimer.singleShot(0, self._enter_main_show)
+        QTimer.singleShot(0, self._enter_main_load)
+
+    def _enter_main_load(self):
+        self._build_main_shell_frame()
+        QApplication.processEvents()
+        if not self._require_login:
+            self.page_boot.progress.start_anim()
+        self._build_playback_page()
+        QApplication.processEvents()
+        self._enter_main_show()
+        self._enter_main_finish()
 
     def _enter_main_show(self):
+        if not self._require_login:
+            self._clear_boot_chrome()
         self.root_stack.setCurrentWidget(self.main_shell)
         self.header.set_active_tab(HeaderBar.TAB_PLAYBACK)
-        self.status.showMessage('登录成功，已进入播放页')
-        self.page_login.set_busy(False)
+        if self._require_login:
+            self.page_login.set_busy(False)
+        self._login_pending = False
+
+    def _enter_main_finish(self):
+        self.status.showMessage('已进入播放页' if not self._require_login else '登录成功，已进入播放页')
         QTimer.singleShot(0, self._emit_main_entered)
         self.bridge.emit_action('login_success', log='已进入播放页')
 

@@ -2289,3 +2289,102 @@ ewrite；扩展 LyricWord 与字级 matcher
 - **结论**: 原唱歌词与进度偏差大，主因是 LRC 与音频不匹配（非程序 bug）；换对词后即可
 - **保留**: 原唱 play_path 对齐、完整展示词曲/标题行、Tab 切歌 autoplay 等修复
 - **修改的文件列表**: README.md
+
+---
+
+## 会话总结 - 2026-08-12 (52)
+
+- **会话主要目的**: 为 server 提供 Docker Compose 部署（仅 API，MySQL 在宿主机/外机）
+- **完成的主要任务**: 新增 Dockerfile、docker-compose.yml、.env.example、.dockerignore；补充 server/README Docker 说明；.gitignore 忽略 .env
+- **关键决策与解决方案**: 不内置 MySQL；用 MYSQL_* 环境变量连接外库；挂载 ./data 持久化；宿主机库通过 host.docker.internal + extra_hosts
+- **使用的技术栈**: Docker / docker-compose、Python 3.11-slim、FastAPI
+- **修改的文件列表**: server/Dockerfile、server/docker-compose.yml、server/.env.example、server/.dockerignore、server/README.md、.gitignore、README.md
+
+---
+
+## 会话总结 - 2026-08-12 (53)
+
+- **诉求**: Server 未部署时给客户发版，可配置是否显示登录页；免登录时显示蓝色启动闪屏并自动进主页
+- **实现**: `auth.show_login`（true=登录页，false=闪屏+自动进入）；新增 BootSplashPage；后台扫库完成后自动切主界面
+- **修改的文件列表**: config/client.json、app/config_store.py、app/ui/pages/boot_splash_page.py、app/ui/pages/__init__.py、app/ui/main_window.py、scripts/run_ui_skeleton.py、README.md
+
+---
+
+## 会话总结 - 2026-08-12 (54)
+
+- **问题**: 免登录启动闪屏背景未渲染成蓝色，白字叠浅灰底难以辨认
+- **修复**: autoFillBackground + 渐变蓝底；QStackedWidget/根控件同步设色；居中标题+状态+进度条+版本号
+- **修改的文件列表**: app/ui/pages/boot_splash_page.py、app/ui/main_window.py、README.md
+
+---
+
+## 会话总结 - 2026-08-12 (55)
+
+- **问题**: 免登录闪屏蓝色样式写在 root_stack/根控件上，进入主页后整页仍偏蓝
+- **修复**: 蓝色仅 BootSplashPage 自绘（WA_StyledBackground）；进入主页时 _clear_boot_chrome 恢复默认 palette
+- **修改的文件列表**: app/ui/pages/boot_splash_page.py、app/ui/main_window.py、README.md
+
+---
+
+## 会话总结 - 2026-08-12 (56)
+
+- **诉求**: 启动闪屏进度条要有动感，减轻等待感（无需真实进度）
+- **实现**: 自绘 _BootProgressBar，QTimer 驱动白色滑块左右循环；显示/隐藏时启停定时器
+- **修复**: 子控件 showEvent 未触发导致不动；改 BootSplashPage.showEvent + singleShot 显式 start_anim
+- **修改的文件列表**: app/ui/pages/boot_splash_page.py、README.md
+
+---
+
+## 会话总结 - 2026-08-12 (57)
+
+- **问题**: 闪屏进度条仍静止（定时器未启动）
+- **修复**: BootSplashPage.showEvent/set_status 显式 start_anim；repaint 强制刷新；略提速滑块
+- **修改的文件列表**: app/ui/pages/boot_splash_page.py、README.md
+
+---
+
+## 会话总结 - 2026-08-12 (58)
+
+- **问题**: 进度条看似不动（白轨+白块对比弱，paintEvent 刷新不明显）
+- **修复**: 改 QFrame move() 滑块 + 深色底轨；状态文字追加点动画；加载主界面时 processEvents
+- **修改的文件列表**: app/ui/pages/boot_splash_page.py、app/ui/main_window.py、README.md
+
+---
+
+## 会话总结 - 2026-08-12 (59)
+
+- **问题**: 闪屏进度条一闪后卡在「正在加载播放页」；PlaybackPage 同步构建阻塞主线程
+- **修复**: 主框架先切换（占位「正在加载播放页」），QTimer 异步构建 PlaybackPage 再 emit main_entered
+- **修改的文件列表**: app/ui/main_window.py、README.md
+
+---
+
+## 会话总结 - 2026-08-12 (60)
+
+- **问题**: 启动进入主界面报 NameError: Qt is not defined（_build_main_shell_frame）
+- **修复**: main_window.py 补充 `from PyQt6.QtCore import Qt`
+- **修改的文件列表**: app/ui/main_window.py、README.md
+
+---
+
+## 会话总结 - 2026-08-12 (61)
+
+- **问题**: 启动过渡出现空白「正在加载播放页」中间页（闪屏过早关闭）
+- **修复**: 保持蓝色闪屏直至主框架+PlaybackPage 全部建好，再一次切换到完整主界面
+- **修改的文件列表**: app/ui/main_window.py、README.md
+
+---
+
+## 会话总结 - 2026-08-12 (62)
+
+- **问题**: 保持闪屏至加载完成后，进度条不动（PlaybackPage 构建阻塞主线程）
+- **修复**: BootSplashPage.pump() 手动推进滑块；PlaybackPage 构建分段 ui_pump + processEvents
+- **修改的文件列表**: app/ui/pages/boot_splash_page.py、app/ui/pages/playback_page.py、app/ui/main_window.py、README.md
+
+---
+
+## 会话总结 - 2026-08-12 (63)
+
+- **问题**: AI 唱歌 ↔ AI 跟唱切换报 AttributeError: pitch_follow（属性体误并入 _playback_matches_selection）
+- **修复**: 恢复 `@property pitch_follow` 懒加载 PitchFollowService
+- **修改的文件列表**: app/integration/controller.py、README.md

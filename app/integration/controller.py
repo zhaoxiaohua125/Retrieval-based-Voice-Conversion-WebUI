@@ -118,6 +118,9 @@ class ClientController:
                 except OSError:
                     return False
         return False
+
+    @property
+    def pitch_follow(self):
         if self._pitch_follow is None:
             from app.pitchfix import PitchFollowService
             self._pitch_follow = PitchFollowService(self.scheduler, self.config_store)

@@ -22,6 +22,8 @@ temp/
 logs/
 opt/
 dist/
+.env
+server/.env
 
 # FFmpeg binaries (keep README.txt; download exe locally)
 tools/ffmpeg/*.exe

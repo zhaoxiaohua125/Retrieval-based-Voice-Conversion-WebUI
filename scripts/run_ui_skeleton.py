@@ -166,7 +166,9 @@ def main():
         window.raise_()
         window.activateWindow()
         app.processEvents()
-        _startup_log('login window shown')
+        _startup_log('startup window shown login=%s' % boot_config.get('auth.show_login', True))
+        if not boot_config.get('auth.show_login', True):
+            window.begin_guest_boot()
 
         ctx = {'controller': None, 'scheduler': None, 'lyrics': None}
 
@@ -181,8 +183,7 @@ def main():
             window.set_boot_status(text)
 
         def on_boot_failed(detail: str):
-            window.page_login.set_busy(False)
-            window._login_pending = False
+            window.on_boot_failed()
             _fatal_startup(app, '后台初始化失败', detail)
 
         boot.status.connect(on_boot_status)
