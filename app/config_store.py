@@ -100,6 +100,10 @@ DEFAULT_CONFIG = {
         'smart_switch': False,
         'smart_switch_min_gap_sec': 3.0,
     },
+    'brand': {
+        'app_name': '来趣文化',
+        'product_name': '唱歌伴侣',
+    },
 }
 
 

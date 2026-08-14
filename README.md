@@ -2425,3 +2425,17 @@ ewrite；扩展 LyricWord 与字级 matcher
 - **关键决策与解决方案**: 抖音继续采 VoiceMeeter Output；客户端 auto→Aux，两边无需改抖音配置；VM 需将麦勾到 Aux 相关总线并按需混到直播
 - **使用的技术栈**: sounddevice、Voicemeeter Potato
 - **修改的文件列表**: app/audio/devices.py、app/ui/settings_dialog.py、scripts/list_audio_devices.py、README.md
+
+
+---
+
+## 会话总结 - 2026-08-14 (3)
+
+- **会话主要目的**: 将界面品牌文案（来趣文化、唱歌伴侣）外置到 client.json，便于随时修改
+- **完成的主要任务**:
+  1. config/client.json 与 ConfigStore 默认配置增加 brand.app_name / brand.product_name
+  2. 窗口标题、登录页标题、退出确认文案读取 brand.app_name
+  3. 顶栏「唱歌伴侣」读取 brand.product_name
+- **关键决策与解决方案**: 独立 brand 段，避免与 ui 布局持久化互相覆盖；改 JSON 后重启客户端即可生效
+- **使用的技术栈**: PyQt6、ConfigStore
+- **修改的文件列表**: config/client.json、app/config_store.py、app/ui/main_window.py、app/ui/header_bar.py、app/ui/pages/login_page.py、README.md

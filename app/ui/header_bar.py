@@ -14,12 +14,12 @@ class HeaderBar(QWidget):
     TAB_ANNOUNCE = 2
     TAB_NAMES = ('播放', '制作歌曲', '公告')
 
-    def __init__(self, parent=None):
+    def __init__(self, product_name='唱歌伴侣', parent=None):
         super().__init__(parent)
         self._buttons = []
         layout = QHBoxLayout(self)
         layout.setContentsMargins(12, 8, 12, 8)
-        self.title = QLabel('唱歌伴侣')
+        self.title = QLabel(product_name)
         self.title.setStyleSheet('font-size: 18px; font-weight: bold; color: #2563eb;')
         layout.addWidget(self.title)
         layout.addStretch()

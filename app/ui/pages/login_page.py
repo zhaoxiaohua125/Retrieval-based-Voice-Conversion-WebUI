@@ -43,7 +43,7 @@ QLineEdit:focus {
 class LoginPage(QWidget):
     login_requested = pyqtSignal(str, str)
 
-    def __init__(self, bridge, parent=None):
+    def __init__(self, bridge, app_name='来趣文化', parent=None):
         super().__init__(parent)
         self.bridge = bridge
         self.setObjectName('LoginPage')
@@ -57,23 +57,12 @@ class LoginPage(QWidget):
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(36, 32, 36, 28)
         card_layout.setSpacing(10)
-        # badge = QLabel('来取文化')
-        # badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        # badge.setFixedSize(65, 65)
-        # badge.setStyleSheet(
-        #     'background:#2563eb;color:#fff;font-size:15px;font-weight:700;border-radius:26px;'
-        # )
-        title = QLabel('来趣文化')
+        title = QLabel(app_name)
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet('font-size:26px;font-weight:700;color:#0f172a;margin-top:4px;')
         sub = QLabel('登录后使用客户端')
         sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
         sub.setStyleSheet('color:#64748b;font-size:13px;margin-bottom:8px;')
-        badge_row = QHBoxLayout()
-        badge_row.addStretch()
-        # badge_row.addWidget(badge)
-        badge_row.addStretch()
-        card_layout.addLayout(badge_row)
         card_layout.addWidget(title)
         card_layout.addWidget(sub)
         user_lbl = QLabel('账号')

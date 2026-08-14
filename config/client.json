@@ -90,6 +90,10 @@
     "smart_switch": false,
     "smart_switch_min_gap_sec": 1.0
   },
+  "brand": {
+    "app_name": "来趣文化",
+    "product_name": "来趣文化"
+  },
   "pitchfix": {
     "strength": 0.85,
     "inst_gain": 0.55,
@@ -110,8 +114,8 @@
   },
   "ui": {
     "geometry": [
-      408,
-      411,
+      572,
+      375,
       1280,
       875
     ],

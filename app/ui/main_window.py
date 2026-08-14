@@ -40,6 +40,8 @@ class MainWindow(QMainWindow):
             config_store = ConfigStore().load()
         self.config_store = config_store
         self._require_login = bool(config_store.get('auth.show_login', True))
+        self._app_name = str(config_store.get('brand.app_name', '来趣文化') or '来趣文化')
+        self._product_name = str(config_store.get('brand.product_name', '唱歌伴侣') or '唱歌伴侣')
         self._controller = None
         self._main_ready = False
         self._backend_ready = False
@@ -53,7 +55,7 @@ class MainWindow(QMainWindow):
         self._shell_frame = False
         self._load_slot = None
         self._shortcut_binder = None
-        self.setWindowTitle('来取文化 v%s' % self._client_version())
+        self.setWindowTitle('%s v%s' % (self._app_name, self._client_version()))
         self.resize(1280, 800)
         self._build_ui()
         self._login_result.connect(self._on_login_result)
@@ -134,7 +136,7 @@ class MainWindow(QMainWindow):
         self.root_stack = QStackedWidget()
         outer.addWidget(self.root_stack)
         self.page_boot = BootSplashPage()
-        self.page_login = LoginPage(self.bridge)
+        self.page_login = LoginPage(self.bridge, app_name=self._app_name)
         self.page_login.login_requested.connect(self._on_login_requested)
         if self._require_login:
             self.root_stack.addWidget(self.page_login)
@@ -158,7 +160,7 @@ class MainWindow(QMainWindow):
         shell = QVBoxLayout(self.main_shell)
         shell.setContentsMargins(0, 0, 0, 0)
         shell.setSpacing(0)
-        self.header = HeaderBar()
+        self.header = HeaderBar(product_name=self._product_name)
         self.header.tab_changed.connect(self._on_nav_changed)
         self.header.btn_settings.clicked.connect(clicked(self._open_settings_dialog))
         shell.addWidget(self.header)
@@ -426,7 +428,7 @@ class MainWindow(QMainWindow):
             btn = QMessageBox.question(
                 self,
                 '确认退出',
-                '确定要退出 来取文化吗？\n进行中的任务将被停止。',
+                '确定要退出 %s吗？\n进行中的任务将被停止。' % self._app_name,
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )
