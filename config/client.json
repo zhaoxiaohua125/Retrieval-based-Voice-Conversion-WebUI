@@ -12,7 +12,7 @@
     "skip_version": ""
   },
   "auth": {
-    "show_login": false,
+    "show_login": true,
     "login_url": "http://127.0.0.1:8765/api/auth/login"
   },
   "logs": {
@@ -114,8 +114,8 @@
   },
   "ui": {
     "geometry": [
-      373,
-      419,
+      494,
+      297,
       1280,
       875
     ],

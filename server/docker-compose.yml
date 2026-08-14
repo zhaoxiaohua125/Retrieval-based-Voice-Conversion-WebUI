@@ -1,7 +1,7 @@
 services:
-  rvc-update-server:
+  aisound-server:
     build: .
-    container_name: rvc-update-server
+    container_name: aisound-server
     restart: unless-stopped
     ports:
       - "8765:8765"
@@ -13,6 +13,10 @@ services:
       MYSQL_DATABASE: ${MYSQL_DATABASE:-aisound}
     volumes:
       - ./data:/app/data
+      - ./config:/app/config
+      - ./auth:/app/auth
+      - ./tools:/app/tools
+      - ./main.py:/app/main.py
     # MySQL 在宿主机时取消注释，并将 .env 中 MYSQL_HOST 设为 host.docker.internal
     # extra_hosts:
     #   - "host.docker.internal:host-gateway"
