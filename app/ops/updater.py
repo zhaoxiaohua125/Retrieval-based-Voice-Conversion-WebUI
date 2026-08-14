@@ -100,6 +100,8 @@ def download_file(url, dest_path, expected_md5=None, on_progress=None):
 
 
 def apply_zip_update(zip_path, install_dir, backup_dir=None):
+    import time
+
     install = Path(install_dir)
     install.mkdir(parents=True, exist_ok=True)
     backup = Path(backup_dir) if backup_dir else install.parent / 'backup_prev'
@@ -107,9 +109,16 @@ def apply_zip_update(zip_path, install_dir, backup_dir=None):
         shutil.rmtree(backup)
     if install.exists() and any(install.iterdir()):
         shutil.copytree(install, backup)
-    with zipfile.ZipFile(zip_path, 'r') as zf:
-        zf.extractall(install)
-    return str(backup.resolve()) if backup.exists() else ''
+    last_err = None
+    for attempt in range(10):
+        try:
+            with zipfile.ZipFile(zip_path, 'r') as zf:
+                zf.extractall(install)
+            return str(backup.resolve()) if backup.exists() else ''
+        except (PermissionError, OSError) as exc:
+            last_err = exc
+            time.sleep(0.4 * (attempt + 1))
+    raise last_err
 
 
 def rollback_update(backup_dir, install_dir):

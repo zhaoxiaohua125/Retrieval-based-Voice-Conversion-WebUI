@@ -1,11 +1,12 @@
-"""客户端自动更新：检查 / 下载 / 应用 / 跳过版本。"""
+"""客户端自动更新：检查 / 下载 / 退出后安全覆盖 / 跳过版本。"""
 
 import logging
-import tempfile
+import os
 import traceback
 from pathlib import Path
 
 from app.ops.install_root import get_install_root
+from app.ops.safe_updater import launch_deferred_apply, staging_dir
 from app.ops.updater import check_update, download_file
 from app.ops.version import CLIENT_VERSION
 
@@ -67,18 +68,19 @@ class UpdateClient:
             expected_md5 = info.md_patch if use_patch and info.patch_url else info.md_full
             if not pkg_url:
                 return {'ok': False, 'error': 'version.json 未提供更新包地址'}
-            with tempfile.TemporaryDirectory(prefix='rvc-update-') as tmp:
-                package = Path(tmp) / 'update.zip'
-                download_file(pkg_url, package, expected_md5 or None, on_progress=_progress)
-                if on_progress:
-                    on_progress(0.95, '正在解压并替换文件…')
-                from app.ops.updater import apply_zip_update
-
-                backup_dir = apply_zip_update(package, self.root)
-            if (self.root / 'VERSION').is_file():
-                (self.root / 'VERSION').write_text(info.latest_version + '\n', encoding='utf-8')
-            self.config_store.set('update.backup_dir', backup_dir or '')
-            self.config_store.set('update.last_version', info.latest_version)
+            stage = staging_dir(self.root)
+            package = stage / 'update.zip'
+            if package.is_file():
+                package.unlink(missing_ok=True)
+            download_file(pkg_url, package, expected_md5 or None, on_progress=_progress)
+            if on_progress:
+                on_progress(0.96, '准备退出并安装更新…')
+            backup_dir = self.root.parent / ('backup_prev_' + self.root.name)
+            deferred = launch_deferred_apply(
+                package, self.root, info.latest_version, wait_pid=os.getpid(), backup_dir=backup_dir,
+            )
+            self.config_store.set('update.backup_dir', deferred.get('backup_dir') or '')
+            self.config_store.set('update.pending_version', info.latest_version)
             try:
                 self.config_store.save()
             except OSError:
@@ -86,9 +88,11 @@ class UpdateClient:
             return {
                 'ok': True,
                 'updated': True,
+                'pending_apply': True,
                 'version': info.latest_version,
-                'backup_dir': backup_dir,
+                'backup_dir': deferred.get('backup_dir'),
                 'install_dir': str(self.root),
+                'staging_zip': str(package),
             }
         except Exception as exc:
             logger.error('update apply failed:\n%s', traceback.format_exc())

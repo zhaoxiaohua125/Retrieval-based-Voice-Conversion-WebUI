@@ -345,13 +345,17 @@ def main():
                         QMessageBox.warning(window, '更新', msg)
                 elif action == 'update_finished':
                     dlg = getattr(window, '_update_dialog', None)
-                    if dlg is not None:
-                        try:
-                            dlg.accept()
-                        except RuntimeError:
-                            pass
-                        window._update_dialog = None
-                    if payload.get('updated'):
+                    if payload.get('updated') and payload.get('pending_apply'):
+                        if dlg is not None:
+                            dlg.set_progress(100, '即将退出并安装更新，完成后自动重启…')
+                        QTimer.singleShot(600, lambda: window.request_quit(confirm=False))
+                    elif payload.get('updated'):
+                        if dlg is not None:
+                            try:
+                                dlg.accept()
+                            except RuntimeError:
+                                pass
+                            window._update_dialog = None
                         ans = QMessageBox.question(
                             window,
                             '更新完成',
@@ -367,8 +371,15 @@ def main():
                                 QMessageBox.warning(window, '重启失败', str(exc))
                             else:
                                 app.quit()
-                    elif payload.get('message') and not payload.get('silent'):
-                        QMessageBox.information(window, '更新', payload.get('message'))
+                    else:
+                        if dlg is not None:
+                            try:
+                                dlg.accept()
+                            except RuntimeError:
+                                pass
+                            window._update_dialog = None
+                        if payload.get('message') and not payload.get('silent'):
+                            QMessageBox.information(window, '更新', payload.get('message'))
                 elif action == 'update_skipped':
                     window._update_dialog = None
                 elif action == 'lyric_tick':

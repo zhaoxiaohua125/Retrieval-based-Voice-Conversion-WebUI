@@ -2439,3 +2439,18 @@ ewrite；扩展 LyricWord 与字级 matcher
 - **关键决策与解决方案**: 独立 brand 段，避免与 ui 布局持久化互相覆盖；改 JSON 后重启客户端即可生效
 - **使用的技术栈**: PyQt6、ConfigStore
 - **修改的文件列表**: config/client.json、app/config_store.py、app/ui/main_window.py、app/ui/header_bar.py、app/ui/pages/login_page.py、README.md
+
+
+---
+
+## 会话总结 - 2026-08-14 (4)
+
+- **会话主要目的**: 将自动更新改为安全流程，避免运行中覆盖被占用的 .pyd
+- **完成的主要任务**:
+  1. 新增 app/ops/safe_updater.py：下载到临时目录后启动独立脚本，等待进程退出再解压覆盖并自动重启
+  2. UpdateClient.apply 改为 pending_apply，不再进程内直接 extractall
+  3. 用户点击「立即更新」后自动退出安装并重启，无需再确认
+  4. apply_zip_update 增加占用重试；补充 scripts/test_safe_update.py 烟测
+- **关键决策与解决方案**: 进程内只负责下载；文件替换放到退出后的独立 Python 进程，绕过 Windows 对已加载 .pyd 的锁定
+- **使用的技术栈**: subprocess DETACHED_PROCESS、zipfile、PyQt6 QTimer
+- **修改的文件列表**: app/ops/safe_updater.py、install_root.py、update_client.py、updater.py、app/integration/controller.py、scripts/run_ui_skeleton.py、app/ui/update_dialog.py、scripts/test_safe_update.py、README.md

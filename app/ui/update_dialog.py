@@ -85,7 +85,7 @@ class UpdatePromptDialog(QDialog):
         self.btn_skip.setEnabled(False)
         self.btn_update.setEnabled(False)
         self.progress.setVisible(True)
-        self.lbl_status.setText('正在下载更新包…')
+        self.lbl_status.setText('正在下载更新包（完成后将自动退出安装并重启）…')
         self.bridge.emit_action('apply_update', use_patch=True)
 
     def set_progress(self, percent: int, message: str = ''):

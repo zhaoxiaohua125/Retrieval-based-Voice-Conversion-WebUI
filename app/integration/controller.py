@@ -2352,13 +2352,16 @@ class ClientController:
                 self._publish_status('update_failed', message=result.get('error', '更新失败'))
                 return
             if result.get('updated'):
+                pending = bool(result.get('pending_apply'))
                 self._publish_status(
                     'update_finished',
                     updated=True,
+                    pending_apply=pending,
                     version=result.get('version'),
                     install_dir=result.get('install_dir'),
                     backup_dir=result.get('backup_dir'),
-                    log='已更新至 %s，请重启客户端' % result.get('version'),
+                    log=('下载完成，即将退出安装并自动重启（%s）' if pending else '已更新至 %s，请重启客户端')
+                    % result.get('version'),
                 )
             else:
                 self._publish_status('update_finished', updated=False, message='无需更新')
