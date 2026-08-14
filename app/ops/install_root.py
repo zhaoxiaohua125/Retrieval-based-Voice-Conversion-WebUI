@@ -20,7 +20,7 @@ def is_packaged_install(root: Path | None = None) -> bool:
 def relaunch_client(project_root=None):
     root = get_install_root(project_root)
     bat = None
-    for name in ('启动声迹客户端.bat', '启动唱歌伴侣客户端.bat'):
+    for name in ('启动声迹客户端.bat', '启动来取文化.bat'):
         p = root / name
         if p.is_file():
             bat = p

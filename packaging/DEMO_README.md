@@ -1,4 +1,4 @@
-# 唱歌伴侣客户端 — 阶段性演示版
+# 来取文化 — 阶段性演示版
 
 ## 演示功能
 
@@ -27,7 +27,7 @@
 1. 解压到任意目录（路径建议无中文、无空格）
 2. 将 RVC 模型（`.pth` + 可选 `.index`）放入 `assets/weights` 与 `assets/indices`（完整包可能已含示例模型）
 3. MSST 权重需在 `assets/pymss_weights`（完整包已含）
-4. 双击 **`StartClient.bat`** 或 **`启动唱歌伴侣客户端.bat`**
+4. 双击 **`StartClient.bat`** 或 **`启动来取文化.bat`**
 5. **设置** → 配置音频 IN/OUT → **RVC 高级设置** 选模型 → 保存
 
 ## AI 唱歌演示流程（推荐）

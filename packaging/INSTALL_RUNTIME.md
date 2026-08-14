@@ -58,7 +58,7 @@ F:\zxh\anaconda3\envs\rvc312\python.exe scripts\compile_app_pyd.py --output dist
 
 ## 客户侧
 
-解压 → 双击 `启动唱歌伴侣客户端.bat`，包内 `python/` 已含对应 CUDA 版 PyTorch。
+解压 → 双击 `启动来取文化.bat`，包内 `python/` 已含对应 CUDA 版 PyTorch。
 
 ## 前置条件（打包机）
 

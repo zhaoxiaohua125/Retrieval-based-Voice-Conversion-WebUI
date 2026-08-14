@@ -73,7 +73,7 @@ class BootSplashPage(QWidget):
         col = QVBoxLayout(inner)
         col.setSpacing(14)
         col.setContentsMargins(0, 0, 0, 0)
-        self.lbl_title = QLabel('唱歌伴侣客户端')
+        self.lbl_title = QLabel('来取文化')
         self.lbl_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_title.setStyleSheet('color:#ffffff;font-size:26px;font-weight:700;')
         self.lbl_status = QLabel('正在扫描歌库…')

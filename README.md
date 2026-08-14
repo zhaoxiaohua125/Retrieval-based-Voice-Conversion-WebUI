@@ -1679,7 +1679,7 @@ ewrite；扩展 LyricWord 与字级 matcher
 
 ## 会话总结 - 2026-08-10 (8)
 
-- **会话主要目的**: 修复打包后双击「启动唱歌伴侣客户端.bat」闪退（splash 消失、主界面不出现）
+- **会话主要目的**: 修复打包后双击「启动来取文化.bat」闪退（splash 消失、主界面不出现）
 - **完成的主要任务**:
   1. `StartClient.bat` 由 `start /B pythonw` 改为 `start /wait`，失败时 pause 并提示查看 `logs/client/startup.log`
   2. `run_ui_skeleton.py` 增加分阶段 startup 日志、启动异常 QMessageBox、打包目录 Qt 插件/DLL 路径补齐
@@ -1706,7 +1706,7 @@ ewrite；扩展 LyricWord 与字级 matcher
 
 ## 会话总结 - 2026-08-10 (10)
 
-- **会话主要目的**: 修复「StartClient_Debug.bat 正常、启动唱歌伴侣客户端.bat 不行」
+- **会话主要目的**: 修复「StartClient_Debug.bat 正常、启动来取文化.bat 不行」
 - **根因**: `StartClient.bat` 优先用 `pythonw.exe`（无控制台，`sys.stderr is None`）；Qt 日志过滤器与 logging 仍写 stderr，触发异常导致进程退出；Debug 用 `python.exe` 故正常
 - **完成的主要任务**:
   1. 启动最早 `_ensure_stdio()`，pythonw 下重定向到 `logs/client/stderr.log`
@@ -1721,7 +1721,7 @@ ewrite；扩展 LyricWord 与字级 matcher
 
 - **会话主要目的**: 消除正常启动后 CMD 黑窗口一直驻留
 - **根因**: `StartClient.bat` 使用 `start /wait`，bat 会阻塞到客户端退出才关闭控制台
-- **完成的主要任务**: 改为 `pythonw` + `start` 不等待、立即 `exit`；「启动唱歌伴侣客户端.bat」直接 detached 启动 pythonw
+- **完成的主要任务**: 改为 `pythonw` + `start` 不等待、立即 `exit`；「启动来取文化.bat」直接 detached 启动 pythonw
 - **修改的文件列表**: scripts/build_client_package.py、README.md
 
 ---
@@ -2142,7 +2142,7 @@ ewrite；扩展 LyricWord 与字级 matcher
 - **问题**: 点击登录后窗口「未响应」，卡在「正在进入…」
 - **根因**: `_ensure_main_shell()` 内同步 `_refresh_gpu_status()` 触发 torch/CUDA 检测阻塞主线程；登录页无进度反馈
 - **修复**:
-  1. 登录页增加蓝色状态框（唱歌伴侣客户端 + 正在扫描歌库…）
+  1. 登录页增加蓝色状态框（来取文化 + 正在扫描歌库…）
   2. 后台 boot 状态同步到登录页；点击登录后分步显示进度并 `processEvents`
   3. GPU 检测、歌词窗/托盘延后到 `QTimer`；`mark_backend_ready()` 提前以便登录不等待托盘
 - **修改的文件列表**: app/ui/pages/login_page.py、app/ui/main_window.py、scripts/run_ui_skeleton.py、README.md

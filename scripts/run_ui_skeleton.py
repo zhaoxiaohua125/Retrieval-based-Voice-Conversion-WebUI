@@ -149,7 +149,7 @@ def main():
         _startup_log('logging ready')
         app = QApplication(sys.argv)
         app.setQuitOnLastWindowClosed(False)
-        app.setApplicationName('唱歌伴侣客户端')
+        app.setApplicationName('来取文化')
         app.setApplicationVersion(CLIENT_VERSION)
         app_icon = fallback_app_icon()
         app.setWindowIcon(app_icon)

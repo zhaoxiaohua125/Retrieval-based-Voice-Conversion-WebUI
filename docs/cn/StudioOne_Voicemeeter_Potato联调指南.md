@@ -1,6 +1,6 @@
 # Studio One + Voicemeeter Potato + RVC 联调指南
 
-> 适用：Windows 10/11 · Voicemeeter **Potato** · Studio One 6/7 64 位 · 本仓库 唱歌伴侣客户端 + `RVCRealtimeVST`  
+> 适用：Windows 10/11 · Voicemeeter **Potato** · Studio One 6/7 64 位 · 本仓库 来取文化 + `RVCRealtimeVST`  
 > 目标：过渡方案跑通直播链路；后期再在客户端内 1:1 复刻声迹 Pro（内置修音 / VST 宿主）。
 
 ---
@@ -9,7 +9,7 @@
 
 | 软件 | 负责什么 |
 | --- | --- |
-| **唱歌伴侣客户端** | 离线做歌、AI 唱歌（播成品）、歌词悬浮窗、（可选）普通说话直通 |
+| **来取文化** | 离线做歌、AI 唱歌（播成品）、歌词悬浮窗、（可选）普通说话直通 |
 | **Studio One** | 播伴奏、音轨加载 **RVC Realtime VST3** 做实时变声 |
 | **Voicemeeter Potato** | 汇总麦克风 / 客户端 / S1 输出 → 耳机监听 & OBS 采集 |
 | **OBS**（可选） | 采集 VM 的 B2 虚拟声卡 |

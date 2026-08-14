@@ -53,7 +53,7 @@ class MainWindow(QMainWindow):
         self._shell_frame = False
         self._load_slot = None
         self._shortcut_binder = None
-        self.setWindowTitle('唱歌伴侣客户端 v%s' % self._client_version())
+        self.setWindowTitle('来取文化 v%s' % self._client_version())
         self.resize(1280, 800)
         self._build_ui()
         self._login_result.connect(self._on_login_result)
@@ -426,7 +426,7 @@ class MainWindow(QMainWindow):
             btn = QMessageBox.question(
                 self,
                 '确认退出',
-                '确定要退出 唱歌伴侣客户端吗？\n进行中的任务将被停止。',
+                '确定要退出 来取文化吗？\n进行中的任务将被停止。',
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )
