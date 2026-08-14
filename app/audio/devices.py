@@ -41,14 +41,20 @@ def _tag_device(name: str) -> tuple[list[str], str | None]:
     role = None
     if 'voicemeeter' in lower:
         tags.append('voicemeeter')
-        if 'aux' in lower and 'input' in lower:
-            role = 'voicemeeter_aux_in'
-        elif 'vaio' in lower and 'input' in lower:
+        is_in = 'input' in lower or 'speakers (' in lower
+        is_out = ('output' in lower or ' out' in lower) and not is_in
+        if 'aux' in lower:
+            role = 'voicemeeter_aux_in' if is_in else 'voicemeeter_aux_out'
+        elif 'vaio3' in lower:
+            role = 'voicemeeter_vaio3_in' if is_in else 'voicemeeter_vaio3_out'
+        elif 'b1' in lower and is_out:
+            role = 'voicemeeter_b1_out'
+        elif is_in and ('vaio' in lower or 'input' in lower):
             role = 'voicemeeter_vaio_in'
-        elif 'input' in lower or 'hardware' in lower:
-            role = 'voicemeeter_hardware_in'
-        elif 'out' in lower:
+        elif is_out:
             role = 'voicemeeter_out'
+        elif 'hardware' in lower:
+            role = 'voicemeeter_hardware_in'
     if 'vb-audio' in lower or 'vb cable' in lower or 'cable input' in lower or 'cable output' in lower:
         tags.append('vb_cable')
         if role is None:
@@ -114,42 +120,56 @@ def is_auto_device(ref) -> bool:
     return str(ref).strip().lower() in _AUTO_ALIASES
 
 
+def _first_device(items: list[AudioDeviceInfo], predicates) -> int | None:
+    for pred in predicates:
+        for dev in items:
+            if pred(dev):
+                return dev.index
+    return None
+
+
 def pick_voicemeeter_defaults(devices: list[AudioDeviceInfo] | None = None):
-    """RVC 客户端推荐设备：采集 Voicemeeter Out B1，播放到 Voicemeeter Input VAIO。"""
+    """Potato 优先 Aux，避开主 VAIO（留给抖音/直播采 VoiceMeeter Output）。
+
+    采集：Out B1 → Aux Output → VAIO3 Output → 其它 VM Output
+    播放：Aux Input → VAIO3 Input → 主 VAIO Input
+    """
     items = devices if devices is not None else list_devices()
-    input_idx = None
-    output_idx = None
-    for dev in items:
-        lower = dev.name.lower()
-        if dev.max_input_channels > 0 and 'voicemeeter' in lower and 'out' in lower:
-            if 'b1' in lower:
-                input_idx = dev.index
-                break
-    if input_idx is None:
-        for dev in items:
-            if dev.max_input_channels > 0 and dev.voicemeeter_role == 'voicemeeter_out':
-                input_idx = dev.index
-                break
-    for dev in items:
-        lower = dev.name.lower()
-        if dev.max_output_channels > 0 and 'voicemeeter' in lower and 'input' in lower and 'vaio' in lower:
-            output_idx = dev.index
-            break
-    if output_idx is None:
-        for dev in items:
-            if dev.max_output_channels > 0 and dev.voicemeeter_role == 'voicemeeter_vaio_in':
-                output_idx = dev.index
-                break
-    if input_idx is None:
-        for dev in items:
-            if dev.max_input_channels > 0:
-                input_idx = dev.index
-                break
-    if output_idx is None:
-        for dev in items:
-            if dev.max_output_channels > 0:
-                output_idx = dev.index
-                break
+
+    def _in(dev):
+        return dev.max_input_channels > 0
+
+    def _out(dev):
+        return dev.max_output_channels > 0
+
+    def _vm(dev):
+        return 'voicemeeter' in dev.name.lower()
+
+    input_idx = _first_device(
+        items,
+        (
+            lambda d: _in(d) and _vm(d) and 'b1' in d.name.lower(),
+            lambda d: _in(d) and d.voicemeeter_role == 'voicemeeter_aux_out',
+            lambda d: _in(d) and _vm(d) and 'aux' in d.name.lower() and 'out' in d.name.lower(),
+            lambda d: _in(d) and d.voicemeeter_role == 'voicemeeter_vaio3_out',
+            lambda d: _in(d) and _vm(d) and 'vaio3' in d.name.lower() and 'out' in d.name.lower(),
+            lambda d: _in(d) and d.voicemeeter_role in ('voicemeeter_b1_out', 'voicemeeter_out'),
+            lambda d: _in(d) and _vm(d) and 'out' in d.name.lower(),
+            lambda d: _in(d),
+        ),
+    )
+    output_idx = _first_device(
+        items,
+        (
+            lambda d: _out(d) and d.voicemeeter_role == 'voicemeeter_aux_in',
+            lambda d: _out(d) and _vm(d) and 'aux' in d.name.lower() and 'input' in d.name.lower(),
+            lambda d: _out(d) and d.voicemeeter_role == 'voicemeeter_vaio3_in',
+            lambda d: _out(d) and _vm(d) and 'vaio3' in d.name.lower() and 'input' in d.name.lower(),
+            lambda d: _out(d) and d.voicemeeter_role == 'voicemeeter_vaio_in',
+            lambda d: _out(d) and _vm(d) and 'input' in d.name.lower(),
+            lambda d: _out(d),
+        ),
+    )
     return input_idx, output_idx
 
 

@@ -2411,3 +2411,17 @@ ewrite；扩展 LyricWord 与字级 matcher
 - **关键决策与解决方案**: 配置层存稳定引用（auto/名称），运行时再解析 sounddevice index；失效数字回退 Voicemeeter 推荐
 - **使用的技术栈**: sounddevice、PyQt6、现有 AudioStreamManager
 - **修改的文件列表**: app/audio/devices.py、stream_manager.py、service.py、__init__.py、app/config_store.py、config/client.json、app/ui/settings_dialog.py、app/integration/controller.py、app/pitchfix/service.py、scripts/list_audio_devices.py、README.md
+
+
+---
+
+## 会话总结 - 2026-08-14 (2)
+
+- **会话主要目的**: Potato 下 auto 默认改走 Aux，避开抖音占用的主 VAIO Output
+- **完成的主要任务**:
+  1. `pick_voicemeeter_defaults` 采集优先 Out B1/Aux Output/VAIO3，播放优先 Aux/VAIO3 Input
+  2. 设备角色标记区分 aux / vaio3 / vaio
+  3. 设置页与 list_audio_devices 文案同步
+- **关键决策与解决方案**: 抖音继续采 VoiceMeeter Output；客户端 auto→Aux，两边无需改抖音配置；VM 需将麦勾到 Aux 相关总线并按需混到直播
+- **使用的技术栈**: sounddevice、Voicemeeter Potato
+- **修改的文件列表**: app/audio/devices.py、app/ui/settings_dialog.py、scripts/list_audio_devices.py、README.md

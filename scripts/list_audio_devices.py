@@ -21,14 +21,11 @@ def main():
             io.append('OUT')
         print('[index=%s] [%s] %s' % (d.index, '/'.join(io) or '-', d.name))
     in_idx, out_idx = pick_voicemeeter_defaults(devices)
-    print('\n=== 推荐（麦克风→Out B1 录，RVC→Input VAIO 播）===')
-    in_name = out_name = None
+    print('\n=== auto 推荐（Potato：Aux，避开主 VAIO 留给抖音）===')
     if in_idx is not None:
-        in_name = next(d.name for d in devices if d.index == in_idx)
-        print('input_device  (RVC 采集): auto → [%s] %s' % (in_idx, in_name))
+        print('input_device  (RVC 采集): auto → [%s] %s' % (in_idx, next(d.name for d in devices if d.index == in_idx)))
     if out_idx is not None:
-        out_name = next(d.name for d in devices if d.index == out_idx)
-        print('output_device (RVC 播放): auto → [%s] %s' % (out_idx, out_name))
+        print('output_device (RVC 播放): auto → [%s] %s' % (out_idx, next(d.name for d in devices if d.index == out_idx)))
     print('\n=== config/client.json 示例 ===')
     print("""{
   "audio": {

@@ -509,7 +509,7 @@ class SettingsDialog(QDialog):
         def fill_combo(combo, items, selected_ref, default_idx, need_input=False, need_output=False):
             combo.blockSignals(True)
             combo.clear()
-            combo.addItem('自动识别 Voicemeeter', 'auto')
+            combo.addItem('自动识别 Voicemeeter（优先 Aux）', 'auto')
             sel_row = 0 if is_auto_device(selected_ref) else -1
             selected_idx = None
             if not is_auto_device(selected_ref):
