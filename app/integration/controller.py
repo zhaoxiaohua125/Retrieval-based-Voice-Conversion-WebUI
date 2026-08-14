@@ -119,6 +119,19 @@ class ClientController:
                     return False
         return False
 
+    def _offline_allows_playback(self, song: dict | None = None) -> bool:
+        if not self.state.offline_running:
+            return True
+        song = dict(song or self.state.selected_song or {})
+        if str(song.get('library_type') or '') == 'accompaniment':
+            p = song.get('play_path') or song.get('instrumental_path') or ''
+            return bool(p and Path(p).is_file())
+        for key in ('play_path', 'cover_path', 'vocal_path'):
+            p = song.get(key) or ''
+            if p and Path(p).is_file():
+                return True
+        return False
+
     @property
     def pitch_follow(self):
         if self._pitch_follow is None:
@@ -651,14 +664,20 @@ class ClientController:
             self._publish_status('passthrough_blocked', log='离线做歌进行中，请稍后再试')
             return
         audio_cfg = self.config_store.get('audio', {}) or {}
-        if audio_cfg.get('input_device') is None or audio_cfg.get('output_device') is None:
-            self._publish_error('请先在 config/client.json 配置 audio.input_device 与 output_device')
-            self._publish_status('passthrough_blocked', log='%s：未配置音频设备' % label)
+        from app.audio.devices import resolve_io_devices
+        in_dev, out_dev = resolve_io_devices(
+            audio_cfg.get('input_device'),
+            audio_cfg.get('output_device'),
+            hostapi=audio_cfg.get('hostapi'),
+        )
+        if in_dev is None or out_dev is None:
+            self._publish_error('未找到可用音频输入/输出设备，请检查 Voicemeeter 是否已启动')
+            self._publish_status('passthrough_blocked', log='%s：未找到音频设备' % label)
             return
         hot = self._unified_stream_active()
         if self._switch_unified_playback(mode, song, carry_pos, autoplay):
-            in_dev = self.audio.manager.config.input_device if self.audio.manager else None
-            out_dev = self.audio.manager.config.output_device if self.audio.manager else None
+            in_dev = self.audio.manager.config.input_device if self.audio.manager else in_dev
+            out_dev = self.audio.manager.config.output_device if self.audio.manager else out_dev
             gain = passthrough_gain_from_audio(audio_cfg)
             pos, dur, playing, paused = self._timeline_inst_state()
             has_inst = bool(inst_path)
@@ -1121,8 +1140,9 @@ class ClientController:
 
     def _sync_playback_output_device(self):
         audio = self.config_store.get('audio', {}) or {}
-        dev = audio.get('output_device')
-        self._player.set_output_device(dev)
+        from app.audio.devices import resolve_io_devices
+        _, out = resolve_io_devices(audio.get('input_device'), audio.get('output_device'), hostapi=audio.get('hostapi'))
+        self._player.set_output_device(out)
         self._player.set_target_sr(int(audio.get('sample_rate', 48000)))
 
     @staticmethod
@@ -1173,13 +1193,13 @@ class ClientController:
         self._dispatch_mode_switch(self._start_ai_sing_impl, self._with_autoplay(payload))
 
     def _start_ai_sing_impl(self, payload: dict):
-        if self.state.offline_running:
+        payload = payload or {}
+        song = (payload or {}).get('song') or self.state.selected_song or {}
+        if self.state.offline_running and not self._offline_allows_playback(song):
             self._publish_status('playback_blocked', log='离线做歌进行中，请稍后再播放')
             return
-        payload = payload or {}
         autoplay = bool(payload.get('autoplay', True))
         carry_pos = float(payload.get('position', 0) or 0) if 'position' in payload else self._current_song_position()
-        song = (payload or {}).get('song') or self.state.selected_song or {}
         if self.state.realtime_running:
             self.stop_realtime()
         self._select_song({'song': song})
@@ -2357,9 +2377,15 @@ class ClientController:
     def _save_settings(self, payload: dict):
         payload = payload or {}
         audio = payload.get('audio') or {}
-        for key in ('hostapi', 'wasapi_exclusive', 'input_device', 'output_device', 'sample_rate', 'passthrough_gain', 'passthrough_ui', 'reverb_mix', 'reverb_decay'):
+        from app.audio.devices import device_ref_for_config, list_devices
+        devices = list_devices(hostapi=audio.get('hostapi') or self.config_store.get('audio.hostapi'))
+        for key in ('hostapi', 'wasapi_exclusive', 'sample_rate', 'passthrough_gain', 'passthrough_ui', 'reverb_mix', 'reverb_decay'):
             if key in audio:
                 self.config_store.set('audio.%s' % key, audio[key])
+        if 'input_device' in audio:
+            self.config_store.set('audio.input_device', device_ref_for_config(audio['input_device'], devices))
+        if 'output_device' in audio:
+            self.config_store.set('audio.output_device', device_ref_for_config(audio['output_device'], devices))
         if 'passthrough_ui' in audio:
             from app.audio.service import passthrough_gain_from_audio
             merged = dict(self.config_store.get('audio', {}) or {})

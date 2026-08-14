@@ -101,6 +101,19 @@ def list_devices(hostapi: str | None = None) -> list[AudioDeviceInfo]:
     return result
 
 
+_AUTO_ALIASES = frozenset({'', 'auto', 'voicemeeter', 'default'})
+
+
+def is_auto_device(ref) -> bool:
+    if ref is None:
+        return True
+    if isinstance(ref, bool):
+        return False
+    if isinstance(ref, (int, float)):
+        return False
+    return str(ref).strip().lower() in _AUTO_ALIASES
+
+
 def pick_voicemeeter_defaults(devices: list[AudioDeviceInfo] | None = None):
     """RVC 客户端推荐设备：采集 Voicemeeter Out B1，播放到 Voicemeeter Input VAIO。"""
     items = devices if devices is not None else list_devices()
@@ -138,6 +151,95 @@ def pick_voicemeeter_defaults(devices: list[AudioDeviceInfo] | None = None):
                 output_idx = dev.index
                 break
     return input_idx, output_idx
+
+
+def find_device_by_name(
+    name: str,
+    devices: list[AudioDeviceInfo] | None = None,
+    *,
+    need_input: bool = False,
+    need_output: bool = False,
+) -> AudioDeviceInfo | None:
+    items = devices if devices is not None else list_devices()
+    needle = str(name or '').strip().lower()
+    if not needle:
+        return None
+    partial = []
+    for dev in items:
+        if need_input and dev.max_input_channels <= 0:
+            continue
+        if need_output and dev.max_output_channels <= 0:
+            continue
+        lower = dev.name.lower()
+        if lower == needle:
+            return dev
+        if needle in lower:
+            partial.append(dev)
+    return partial[0] if partial else None
+
+
+def resolve_device_index(
+    ref,
+    *,
+    need_input: bool = False,
+    need_output: bool = False,
+    hostapi: str | None = None,
+    devices: list[AudioDeviceInfo] | None = None,
+) -> int | None:
+    """把配置中的设备引用解析为 sounddevice index；支持 auto / 名称 / 旧版数字。"""
+    items = devices if devices is not None else list_devices(hostapi=hostapi)
+    if is_auto_device(ref):
+        return None
+    if isinstance(ref, (int, float)) or (isinstance(ref, str) and str(ref).strip().isdigit()):
+        idx = int(ref)
+        for dev in items:
+            if dev.index != idx:
+                continue
+            if need_input and dev.max_input_channels <= 0:
+                return None
+            if need_output and dev.max_output_channels <= 0:
+                return None
+            return idx
+        return None
+    found = find_device_by_name(str(ref), items, need_input=need_input, need_output=need_output)
+    return found.index if found else None
+
+
+def resolve_io_devices(
+    input_ref=None,
+    output_ref=None,
+    hostapi: str | None = None,
+    devices: list[AudioDeviceInfo] | None = None,
+):
+    """解析输入/输出设备；auto 或失效引用时回退 Voicemeeter 推荐。"""
+    items = devices if devices is not None else list_devices(hostapi=hostapi)
+    def_in, def_out = pick_voicemeeter_defaults(items)
+    in_idx = def_in if is_auto_device(input_ref) else resolve_device_index(
+        input_ref, need_input=True, devices=items
+    )
+    out_idx = def_out if is_auto_device(output_ref) else resolve_device_index(
+        output_ref, need_output=True, devices=items
+    )
+    if in_idx is None:
+        in_idx = def_in
+    if out_idx is None:
+        out_idx = def_out
+    return in_idx, out_idx
+
+
+def device_ref_for_config(ref, devices: list[AudioDeviceInfo] | None = None) -> str:
+    """写入 client.json 的稳定引用：auto 或设备名，永不写易变 index。"""
+    if is_auto_device(ref):
+        return 'auto'
+    if isinstance(ref, (int, float)) or (isinstance(ref, str) and str(ref).strip().isdigit()):
+        items = devices if devices is not None else list_devices()
+        idx = int(ref)
+        for dev in items:
+            if dev.index == idx:
+                return dev.name
+        return 'auto'
+    name = str(ref or '').strip()
+    return name or 'auto'
 
 
 def device_summary(devices: list[AudioDeviceInfo] | None = None) -> dict:

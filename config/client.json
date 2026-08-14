@@ -24,8 +24,8 @@
     "block_ms": 200,
     "channels": 1,
     "dtype": "float32",
-    "input_device": 27,
-    "output_device": 22,
+    "input_device": "auto",
+    "output_device": "auto",
     "hostapi": "Windows WASAPI",
     "wasapi_exclusive": false,
     "ring_ms": 500,
@@ -86,15 +86,15 @@
     "normal_talk": "F4"
   },
   "playback": {
-    "play_mode": "repeat_one",
+    "play_mode": "shuffle",
     "smart_switch": false,
     "smart_switch_min_gap_sec": 1.0
   },
   "pitchfix": {
     "strength": 0.85,
-    "inst_gain": 0.4,
+    "inst_gain": 0.55,
     "mic_gain": 1.01,
-    "inst_ui": 40,
+    "inst_ui": 55,
     "mic_ui": 101,
     "orig_ui": 3,
     "threshold": 100,
@@ -110,8 +110,8 @@
   },
   "ui": {
     "geometry": [
-      952,
-      256,
+      55,
+      233,
       1280,
       875
     ],

@@ -104,13 +104,18 @@ class AudioService:
             reverb_decay=float(audio.get('reverb_decay', 0.72)),
         )
 
-    def save_device_selection(self, input_device: int, output_device: int, hostapi: str | None = None):
-        self.config_store.set('audio.input_device', input_device)
-        self.config_store.set('audio.output_device', output_device)
+    def save_device_selection(self, input_device, output_device, hostapi: str | None = None):
+        from app.audio.devices import device_ref_for_config, list_devices
+
+        devices = list_devices(hostapi=hostapi or self.config_store.get('audio.hostapi'))
+        in_ref = device_ref_for_config(input_device, devices)
+        out_ref = device_ref_for_config(output_device, devices)
+        self.config_store.set('audio.input_device', in_ref)
+        self.config_store.set('audio.output_device', out_ref)
         if hostapi:
             self.config_store.set('audio.hostapi', hostapi)
         self.config_store.save()
-        self._publish(SignalType.CONFIG_CHANGED, {'section': 'audio', 'input_device': input_device, 'output_device': output_device})
+        self._publish(SignalType.CONFIG_CHANGED, {'section': 'audio', 'input_device': in_ref, 'output_device': out_ref})
 
     def list_devices(self, hostapi: str | None = None):
         host = hostapi or self.config_store.get('audio.hostapi')

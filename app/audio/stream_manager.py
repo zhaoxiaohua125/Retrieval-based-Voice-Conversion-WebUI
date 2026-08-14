@@ -9,7 +9,7 @@ from pathlib import Path
 
 import numpy as np
 
-from app.audio.devices import pick_voicemeeter_defaults
+from app.audio.devices import resolve_io_devices
 from app.audio.follow_vad import follow_vad_tick, smooth_follow_gate
 from app.audio.ring_buffer import RingBuffer
 
@@ -24,8 +24,8 @@ class AudioStreamConfig:
     block_ms: int = 200
     channels: int = 1
     dtype: str = 'float32'
-    input_device: int | None = None
-    output_device: int | None = None
+    input_device: int | str | None = None
+    output_device: int | str | None = None
     hostapi: str | None = None
     wasapi_exclusive: bool = False
     ring_ms: int = 500
@@ -103,9 +103,11 @@ class AudioStreamManager:
         return self._error
 
     def resolve_devices(self):
-        if self.config.input_device is not None and self.config.output_device is not None:
-            return self.config.input_device, self.config.output_device
-        return pick_voicemeeter_defaults()
+        return resolve_io_devices(
+            self.config.input_device,
+            self.config.output_device,
+            hostapi=self.config.hostapi,
+        )
 
     @property
     def inst_position(self) -> float:

@@ -11,7 +11,7 @@ import numpy as np
 import sounddevice as sd
 import soundfile as sf
 
-from app.audio.devices import pick_voicemeeter_defaults
+from app.audio.devices import resolve_io_devices
 from app.audio.follow_vad import follow_vad_tick, smooth_follow_gate
 from app.audio.ring_buffer import RingBuffer
 from app.config_store import ConfigStore
@@ -187,10 +187,12 @@ class PitchFollowService:
         block = max(1, int(sr * max(50, min(500, self._cfg['block_ms'])) / 1000))
         cap = block * 8
         self._in_ring = RingBuffer(cap, 1)
-        in_dev = self._cfg['input_device']
-        out_dev = self._cfg['output_device']
-        if in_dev is None or out_dev is None:
-            in_dev, out_dev = pick_voicemeeter_defaults()
+        audio = self.config_store.get('audio', {}) or {}
+        in_dev, out_dev = resolve_io_devices(
+            self._cfg.get('input_device'),
+            self._cfg.get('output_device'),
+            hostapi=audio.get('hostapi'),
+        )
         if in_dev is None or out_dev is None:
             raise RuntimeError('未找到音频输入/输出设备')
         self._running = True

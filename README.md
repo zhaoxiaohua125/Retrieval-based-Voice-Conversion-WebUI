@@ -2388,3 +2388,26 @@ ewrite；扩展 LyricWord 与字级 matcher
 - **问题**: AI 唱歌 ↔ AI 跟唱切换报 AttributeError: pitch_follow（属性体误并入 _playback_matches_selection）
 - **修复**: 恢复 `@property pitch_follow` 懒加载 PitchFollowService
 - **修改的文件列表**: app/integration/controller.py、README.md
+
+---
+
+## 会话总结 - 2026-08-12 (64)
+
+- **诉求**: 离线做歌进行中允许听原唱、播已有 AI 成品（非硬性技术限制）
+- **实现**: `_offline_allows_playback` 判断原唱/已有 wav；仅 `_start_ai_sing_impl` 放宽；跟唱/说话/实时仍互斥
+- **修改的文件列表**: app/integration/controller.py、README.md
+
+
+---
+
+## 会话总结 - 2026-08-14
+
+- **会话主要目的**: 音频设备改为自动识别 Voicemeeter，client.json 不再保存易变的设备 index
+- **完成的主要任务**:
+  1. `devices.py` 新增 `resolve_io_devices` / `device_ref_for_config`，支持 `auto`、设备名、兼容旧数字
+  2. 默认与 `client.json` 的 `input_device`/`output_device` 改为 `"auto"`
+  3. 设置页下拉增加「自动识别 Voicemeeter」，保存时写名称或 auto
+  4. stream / player / pitchfix / controller 启动时按名称解析为当前 index
+- **关键决策与解决方案**: 配置层存稳定引用（auto/名称），运行时再解析 sounddevice index；失效数字回退 Voicemeeter 推荐
+- **使用的技术栈**: sounddevice、PyQt6、现有 AudioStreamManager
+- **修改的文件列表**: app/audio/devices.py、stream_manager.py、service.py、__init__.py、app/config_store.py、config/client.json、app/ui/settings_dialog.py、app/integration/controller.py、app/pitchfix/service.py、scripts/list_audio_devices.py、README.md

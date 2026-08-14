@@ -24,7 +24,14 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from app.audio.devices import list_devices, list_hostapis, pick_voicemeeter_defaults
+from app.audio.devices import (
+    device_ref_for_config,
+    is_auto_device,
+    list_devices,
+    list_hostapis,
+    pick_voicemeeter_defaults,
+    resolve_device_index,
+)
 from app.config_store import ConfigStore
 from app.integration.controller import PLAY_MODE_LABELS, PLAY_MODES
 from app.ui.ai_follow_mix_panel import _DEFAULTS as PF_DEFAULTS
@@ -495,31 +502,41 @@ class SettingsDialog(QDialog):
     def _reload_devices(self):
         hostapi = self._hostapi_filter()
         devices = list_devices(hostapi=hostapi)
-        in_idx = self.config.get('audio.input_device')
-        out_idx = self.config.get('audio.output_device')
-        if in_idx is None or out_idx is None:
-            def_in, def_out = pick_voicemeeter_defaults(devices)
-            in_idx = in_idx if in_idx is not None else def_in
-            out_idx = out_idx if out_idx is not None else def_out
+        in_ref = self.config.get('audio.input_device')
+        out_ref = self.config.get('audio.output_device')
+        def_in, def_out = pick_voicemeeter_defaults(devices)
 
-        def fill_combo(combo, items, selected):
+        def fill_combo(combo, items, selected_ref, default_idx, need_input=False, need_output=False):
             combo.blockSignals(True)
             combo.clear()
-            sel_row = -1
+            combo.addItem('自动识别 Voicemeeter', 'auto')
+            sel_row = 0 if is_auto_device(selected_ref) else -1
+            selected_idx = None
+            if not is_auto_device(selected_ref):
+                selected_idx = resolve_device_index(
+                    selected_ref, need_input=need_input, need_output=need_output, devices=items
+                )
             for dev in items:
-                combo.addItem('[%s] %s' % (dev.index, dev.name), dev.index)
-                if selected is not None and dev.index == selected:
+                combo.addItem('[%s] %s' % (dev.index, dev.name), dev.name)
+                if sel_row >= 0:
+                    continue
+                if selected_idx is not None and dev.index == selected_idx:
                     sel_row = combo.count() - 1
-            if sel_row >= 0:
-                combo.setCurrentIndex(sel_row)
-            elif combo.count():
-                combo.setCurrentIndex(0)
+                elif isinstance(selected_ref, str) and selected_ref.strip().lower() == dev.name.lower():
+                    sel_row = combo.count() - 1
+            if sel_row < 0 and default_idx is not None:
+                for i in range(1, combo.count()):
+                    name = combo.itemData(i)
+                    if any(d.index == default_idx and d.name == name for d in items):
+                        sel_row = i
+                        break
+            combo.setCurrentIndex(sel_row if sel_row >= 0 else 0)
             combo.blockSignals(False)
 
         inputs = [d for d in devices if d.max_input_channels > 0]
         outputs = [d for d in devices if d.max_output_channels > 0]
-        fill_combo(self.cmb_input, inputs, in_idx)
-        fill_combo(self.cmb_output, outputs, out_idx)
+        fill_combo(self.cmb_input, inputs, in_ref, def_in, need_input=True)
+        fill_combo(self.cmb_output, outputs, out_ref, def_out, need_output=True)
         self._sync_device_sample_rate_hint()
 
     def _sync_sr_controls(self):
@@ -532,11 +549,16 @@ class SettingsDialog(QDialog):
     def _sync_device_sample_rate_hint(self):
         if not self.radio_sr_device.isChecked():
             return
-        dev = self.cmb_input.currentData()
-        if dev is None:
+        ref = self.cmb_input.currentData()
+        hostapi = self._hostapi_filter()
+        devices = list_devices(hostapi=hostapi)
+        idx = resolve_device_index(ref, need_input=True, devices=devices)
+        if idx is None and is_auto_device(ref):
+            idx, _ = pick_voicemeeter_defaults(devices)
+        if idx is None:
             return
-        for d in list_devices(hostapi=self._hostapi_filter()):
-            if d.index == dev and d.default_samplerate:
+        for d in devices:
+            if d.index == idx and d.default_samplerate:
                 self.lbl_sample_rate.setText('采样率：%s（输入设备）' % int(d.default_samplerate))
                 break
 
@@ -576,11 +598,17 @@ class SettingsDialog(QDialog):
     def collect_payload(self) -> dict:
         sr_type = 'sr_device' if self.radio_sr_device.isChecked() else 'sr_model'
         sample_rate = int(self.spin_sample_rate.value())
+        hostapi = self._hostapi_filter()
+        devices = list_devices(hostapi=hostapi)
+        in_ref = device_ref_for_config(self.cmb_input.currentData(), devices)
+        out_ref = device_ref_for_config(self.cmb_output.currentData(), devices)
         if sr_type == 'sr_device':
-            dev = self.cmb_input.currentData()
-            if dev is not None:
-                for d in list_devices(hostapi=self._hostapi_filter()):
-                    if d.index == dev and d.default_samplerate:
+            idx = resolve_device_index(in_ref, need_input=True, devices=devices)
+            if idx is None and is_auto_device(in_ref):
+                idx, _ = pick_voicemeeter_defaults(devices)
+            if idx is not None:
+                for d in devices:
+                    if d.index == idx and d.default_samplerate:
                         sample_rate = int(d.default_samplerate)
                         break
         payload = {
@@ -599,10 +627,10 @@ class SettingsDialog(QDialog):
                 'offset_ms': int(self.spin_offset_ms.value()),
             },
             'audio': {
-                'hostapi': self._hostapi_filter(),
+                'hostapi': hostapi,
                 'wasapi_exclusive': self.chk_wasapi.isChecked(),
-                'input_device': self.cmb_input.currentData(),
-                'output_device': self.cmb_output.currentData(),
+                'input_device': in_ref,
+                'output_device': out_ref,
                 'sample_rate': sample_rate,
                 'passthrough_ui': int(self.slider_passthrough.value()),
                 'passthrough_gain': round(int(self.slider_passthrough.value()) / 50.0, 3),

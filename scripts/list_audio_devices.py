@@ -1,4 +1,4 @@
-"""列出 sounddevice 设备编号，便于填写 config/client.json。"""
+"""列出 sounddevice 设备，便于核对 Voicemeeter 自动识别结果。"""
 import sys
 from pathlib import Path
 
@@ -11,7 +11,7 @@ from app.audio.devices import list_devices, pick_voicemeeter_defaults
 
 def main():
     devices = list_devices()
-    print('=== Voicemeeter 相关设备（填 audio.input_device / output_device 用 index）===\n')
+    print('=== Voicemeeter 相关设备（client.json 请写 auto 或设备名，勿写 index）===\n')
     vm = [d for d in devices if 'voicemeeter' in d.name.lower()]
     for d in vm:
         io = []
@@ -22,22 +22,26 @@ def main():
         print('[index=%s] [%s] %s' % (d.index, '/'.join(io) or '-', d.name))
     in_idx, out_idx = pick_voicemeeter_defaults(devices)
     print('\n=== 推荐（麦克风→Out B1 录，RVC→Input VAIO 播）===')
+    in_name = out_name = None
     if in_idx is not None:
-        print('input_device  (RVC 采集): %s  →  %s' % (in_idx, next(d.name for d in devices if d.index == in_idx)))
+        in_name = next(d.name for d in devices if d.index == in_idx)
+        print('input_device  (RVC 采集): auto → [%s] %s' % (in_idx, in_name))
     if out_idx is not None:
-        print('output_device (RVC 播放): %s  →  %s' % (out_idx, next(d.name for d in devices if d.index == out_idx)))
+        out_name = next(d.name for d in devices if d.index == out_idx)
+        print('output_device (RVC 播放): auto → [%s] %s' % (out_idx, out_name))
     print('\n=== config/client.json 示例 ===')
     print("""{
   "audio": {
-    "input_device": %s,
-    "output_device": %s,
+    "input_device": "auto",
+    "output_device": "auto",
+    "hostapi": "Windows WASAPI",
     "sample_rate": 48000,
     "block_ms": 200
   },
   "realtime": {
     "model_sid": "孙悟空模型.pth"
   }
-}""" % (in_idx if in_idx is not None else 'null', out_idx if out_idx is not None else 'null'))
+}""")
 
 
 if __name__ == '__main__':
