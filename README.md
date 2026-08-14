@@ -2454,3 +2454,14 @@ ewrite；扩展 LyricWord 与字级 matcher
 - **关键决策与解决方案**: 进程内只负责下载；文件替换放到退出后的独立 Python 进程，绕过 Windows 对已加载 .pyd 的锁定
 - **使用的技术栈**: subprocess DETACHED_PROCESS、zipfile、PyQt6 QTimer
 - **修改的文件列表**: app/ops/safe_updater.py、install_root.py、update_client.py、updater.py、app/integration/controller.py、scripts/run_ui_skeleton.py、app/ui/update_dialog.py、scripts/test_safe_update.py、README.md
+
+
+---
+
+## 会话总结 - 2026-08-14 (3)
+
+- **会话主要目的**: 按当前 Potato 路由（B2 干麦 / B1 抖音 / Aux 客户端）重写 Studio One 联调指南
+- **完成的主要任务**: 更新 `docs/cn/StudioOne_Voicemeeter_Potato联调指南.md`：总线约定、方案 B/C、AI 跟唱说明、与 S1 互斥、抖音/OBS、验收与排错
+- **关键决策与解决方案**: 以现行 auto=Aux 为准，废弃旧文档 H1→B1、OBS 采 B2 的主路径；S1 采 Aux Output、出 Aux Input
+- **使用的技术栈**: Markdown 文档、Voicemeeter Potato、Studio One、抖音直播伴侣
+- **修改的文件列表**: docs/cn/StudioOne_Voicemeeter_Potato联调指南.md、README.md

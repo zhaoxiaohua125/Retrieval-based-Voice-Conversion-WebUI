@@ -13,7 +13,7 @@
   },
   "auth": {
     "show_login": true,
-    "login_url": "http://127.0.0.1:8765/api/auth/login"
+    "login_url": "http://59.110.142.252/ai-sound/api/auth/login"
   },
   "logs": {
     "auto_upload_crash": true,
@@ -114,8 +114,8 @@
   },
   "ui": {
     "geometry": [
-      494,
-      297,
+      878,
+      292,
       1280,
       875
     ],
