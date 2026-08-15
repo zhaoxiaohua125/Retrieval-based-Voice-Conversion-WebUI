@@ -12,7 +12,7 @@
     "skip_version": ""
   },
   "auth": {
-    "show_login": true,
+    "show_login": false,
     "login_url": "http://59.110.142.252/ai-sound/api/auth/login"
   },
   "logs": {
@@ -114,10 +114,10 @@
   },
   "ui": {
     "geometry": [
-      878,
-      292,
+      243,
+      173,
       1280,
-      875
+      912
     ],
     "active_tab": 3,
     "active_nav_tab": 0

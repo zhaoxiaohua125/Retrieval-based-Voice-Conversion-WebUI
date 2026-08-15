@@ -30,6 +30,7 @@ class MainWindow(QMainWindow):
     TAB_NAMES = HeaderBar.TAB_NAMES
     main_entered = pyqtSignal()
     _login_result = pyqtSignal(dict)
+    _gpu_status_ready = pyqtSignal(str)
 
     def __init__(self, bridge, project_root=None, config_store=None):
         super().__init__()
@@ -55,10 +56,12 @@ class MainWindow(QMainWindow):
         self._shell_frame = False
         self._load_slot = None
         self._shortcut_binder = None
+        self._gpu_probe_busy = False
         self.setWindowTitle('%s v%s' % (self._app_name, self._client_version()))
         self.resize(1280, 800)
         self._build_ui()
         self._login_result.connect(self._on_login_result)
+        self._gpu_status_ready.connect(self._on_gpu_status_ready)
         self._restore_layout()
         self._gpu_timer = QTimer(self)
         self._gpu_timer.timeout.connect(self._refresh_gpu_status)
@@ -377,20 +380,32 @@ class MainWindow(QMainWindow):
             return
         self.log_view.append(text)
 
-    def _refresh_gpu_status(self):
-        if not self._main_ready:
-            return
+    def _on_gpu_status_ready(self, text: str):
+        self._gpu_probe_busy = False
+        if self._main_ready and getattr(self, 'gpu_label', None) is not None:
+            self.gpu_label.setText(text)
+
+    def _probe_gpu_worker(self):
         try:
             from app.ops.hardware import collect_environment_info
             cuda = collect_environment_info().get('cuda', {})
             if cuda.get('available'):
-                name = cuda.get('device_name', 'CUDA')
-                mem = cuda.get('total_memory_gb', '')
-                self.gpu_label.setText('GPU: %s %sGB' % (name, mem))
+                text = 'GPU: %s %sGB' % (cuda.get('device_name', 'CUDA'), cuda.get('total_memory_gb', ''))
             else:
-                self.gpu_label.setText('GPU: CPU 模式')
+                text = 'GPU: CPU 模式'
         except Exception:
-            self.gpu_label.setText('GPU: 未检测')
+            text = 'GPU: 未检测'
+        self._gpu_status_ready.emit(text)
+
+    def _refresh_gpu_status(self):
+        if not self._main_ready or self._gpu_probe_busy:
+            return
+        if getattr(self, 'gpu_label', None) is None:
+            return
+        self._gpu_probe_busy = True
+        if self.gpu_label.text() in ('GPU: --', 'GPU: 检测中…'):
+            self.gpu_label.setText('GPU: 检测中…')
+        threading.Thread(target=self._probe_gpu_worker, name='gpu-probe', daemon=True).start()
 
     def _restore_layout(self):
         layout = load_ui_layout()

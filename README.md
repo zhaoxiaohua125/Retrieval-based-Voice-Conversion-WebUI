@@ -2465,3 +2465,16 @@ ewrite；扩展 LyricWord 与字级 matcher
 - **关键决策与解决方案**: 以现行 auto=Aux 为准，废弃旧文档 H1→B1、OBS 采 B2 的主路径；S1 采 Aux Output、出 Aux Input
 - **使用的技术栈**: Markdown 文档、Voicemeeter Potato、Studio One、抖音直播伴侣
 - **修改的文件列表**: docs/cn/StudioOne_Voicemeeter_Potato联调指南.md、README.md
+
+---
+
+## 会话总结 - 2026-08-15
+
+- **会话主要目的**: 排查 `run_ui_skeleton.py` 启动变慢，并将 GPU 探测改为异步
+- **完成的主要任务**:
+  1. 定位卡点：`ui wired` 后进主界面时，UI 线程同步 `import torch` / CUDA 探测导致闪屏卡住约 2 分钟
+  2. `MainWindow._refresh_gpu_status` 改为后台线程探测，通过 `_gpu_status_ready` 信号回写状态栏
+  3. 探测中显示 `GPU: 检测中…`，并用 `_gpu_probe_busy` 避免 8 秒定时器叠加重入
+- **关键决策与解决方案**: 不改启动接线顺序；仅将 `collect_environment_info` 的 GPU 探测移出 UI 线程，避免挡住 `main_entered`
+- **使用的技术栈**: PyQt6 信号、threading
+- **修改的文件列表**: app/ui/main_window.py、README.md
