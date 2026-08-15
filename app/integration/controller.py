@@ -275,12 +275,22 @@ class ClientController:
         if self.state.mode == 'idle' and not self.state.playback_running and not self.state.passthrough_running:
             if not self.state.ai_follow_running:
                 return None
+        mgr = self._unified_mgr()
+        paused = False
+        if mgr is not None and mgr.inst_duration > 0:
+            paused = mgr.inst_paused and mgr.inst_playing
+        elif self.state.mode == 'ai_sing' and self._player.is_active:
+            paused = not self._player.is_playing
         return {
             'mode': self.state.mode,
             'position': self._current_song_position(),
             'playback_running': self.state.playback_running,
             'passthrough_running': self.state.passthrough_running,
             'ai_follow_running': self.state.ai_follow_running,
+            'unified_active': self._unified_stream_active(),
+            'paused': paused,
+            'song': dict(self.state.selected_song or {}),
+            'selected_mode': self.state.selected_mode,
         }
 
     def restore_playback_after_settings(self, snap: dict | None):
@@ -300,9 +310,25 @@ class ClientController:
                 mgr.config.ref_vocal_gain = mix['ref_vocal_gain']
                 mgr.config.follow_threshold = mix['follow_threshold']
                 mgr.config.follow_attenuation = mix['follow_attenuation']
+            if snap.get('playback_running') and (self._playback_tick is None or not self._playback_tick.is_alive()):
+                self._restart_playback_tick()
+                pos, dur, playing, paused = self._timeline_inst_state()
+                self._publish_status('playback_tick', position=pos, duration=dur, playing=playing, paused=paused)
             return
         pos = float(snap.get('position', 0) or 0)
         mode = snap.get('mode')
+        song = snap.get('song') or self.state.selected_song or {}
+        was_playing = bool(snap.get('playback_running'))
+        was_paused = bool(snap.get('paused'))
+        if snap.get('unified_active') and mode in MODE_IDS and self._song_unified_ready(song, mode):
+            autoplay = was_playing and not was_paused
+            if was_playing or was_paused or snap.get('passthrough_running'):
+                try:
+                    if self._switch_unified_playback(mode, song, pos, autoplay):
+                        logger.info('playback resumed after settings: unified %s pos=%.2fs', mode, pos)
+                        return
+                except Exception as exc:
+                    logger.warning('resume unified after settings failed: %s', exc)
         if snap.get('ai_follow_running') and not (self._pitch_follow and self._pitch_follow.running):
             song = self.state.selected_song or {}
             if song.get('instrumental_path') and song.get('vocal_path'):
@@ -321,7 +347,7 @@ class ClientController:
                 except Exception as exc:
                     logger.warning('resume ai_follow after settings failed: %s', exc)
             return
-        if mode == 'ai_sing' and snap.get('playback_running') and not self._player.is_active:
+        if mode == 'ai_sing' and snap.get('playback_running') and not snap.get('unified_active') and not self._player.is_active:
             try:
                 dur = self._player.duration
                 if dur > 0 and pos > 0:
@@ -661,6 +687,7 @@ class ClientController:
         if self.state.realtime_running:
             self.stop_realtime()
         if self.state.offline_running:
+            self._revert_selected_mode_on_block()
             self._publish_status('passthrough_blocked', log='离线做歌进行中，请稍后再试')
             return
         audio_cfg = self.config_store.get('audio', {}) or {}
@@ -671,6 +698,7 @@ class ClientController:
             hostapi=audio_cfg.get('hostapi'),
         )
         if in_dev is None or out_dev is None:
+            self._revert_selected_mode_on_block()
             self._publish_error('未找到可用音频输入/输出设备，请检查 Voicemeeter 是否已启动')
             self._publish_status('passthrough_blocked', log='%s：未找到音频设备' % label)
             return
@@ -714,6 +742,7 @@ class ClientController:
                 log=log,
             )
             return
+        self._revert_selected_mode_on_block()
         self._publish_status('passthrough_blocked', log='%s启动失败' % label)
 
     def stop_passthrough(self, payload=None, handoff: bool = False):
@@ -1145,6 +1174,71 @@ class ClientController:
         self._player.set_output_device(out)
         self._player.set_target_sr(int(audio.get('sample_rate', 48000)))
 
+    def _revert_selected_mode_on_block(self):
+        if self.state.mode in MODE_IDS:
+            self.state.selected_mode = self.state.mode
+            self._publish_status('mode_selected', mode=self.state.mode)
+
+    def _restart_playback_after_device_change(self):
+        song = dict(self.state.selected_song or {})
+        pos = self._current_song_position()
+        mode = self.state.mode
+        playing = self._is_timeline_playing()
+        paused = self._has_paused_session()
+        if not playing and not paused and not self.state.playback_running and not self.state.passthrough_running:
+            return
+        logger.info('restart playback after device change mode=%s pos=%.2fs playing=%s paused=%s', mode, pos, playing, paused)
+        if mode in MODE_IDS and (self._unified_stream_active() or self._song_unified_ready(song, mode)):
+            self.audio.stop_stream()
+            self._halt_playback_tick(wait=0.35)
+            self.state.passthrough_running = False
+            self.state.ai_follow_running = False
+            autoplay = playing or (paused and self.state.playback_running)
+            if self._switch_unified_playback(mode, song, pos, autoplay):
+                return
+        if mode == 'ai_sing':
+            path = song.get('play_path') or song.get('cover_path') or song.get('vocal_path')
+            if path:
+                self._player.stop()
+                self._sync_playback_output_device()
+                self._halt_playback_tick(wait=0.2)
+                try:
+                    self._player.load(path)
+                    if pos > 0 and self._player.duration > 0:
+                        self._player.seek_ratio(pos / self._player.duration)
+                    if paused and not playing:
+                        if self._player.play(on_finish=self._on_playback_finished):
+                            self._player.pause()
+                            self.state.mode = 'ai_sing'
+                            self.state.playback_running = True
+                            self._restart_playback_tick()
+                            self._publish_status(
+                                'playback_tick',
+                                position=self._player.position,
+                                duration=self._player.duration,
+                                playing=False,
+                                paused=True,
+                            )
+                            return
+                    if playing or self.state.playback_running:
+                        if self._player.play(on_finish=self._on_playback_finished):
+                            self.state.mode = 'ai_sing'
+                            self.state.playback_running = True
+                            self._restart_playback_tick()
+                            self._publish_status(
+                                'playback_resumed',
+                                playing=True,
+                                paused=False,
+                                position=self._player.position,
+                                duration=self._player.duration,
+                            )
+                            return
+                except Exception as exc:
+                    logger.warning('restart wav player after device change failed: %s', exc)
+        self.state.playback_running = False
+        self._halt_playback_tick()
+        self._publish_status('playback_stopped', log='音频设备已变更，请重新按播放')
+
     @staticmethod
     def _wav_duration(path: str) -> float:
         try:
@@ -1196,6 +1290,7 @@ class ClientController:
         payload = payload or {}
         song = (payload or {}).get('song') or self.state.selected_song or {}
         if self.state.offline_running and not self._offline_allows_playback(song):
+            self._revert_selected_mode_on_block()
             self._publish_status('playback_blocked', log='离线做歌进行中，请稍后再播放')
             return
         autoplay = bool(payload.get('autoplay', True))
@@ -1425,7 +1520,7 @@ class ClientController:
                 )
             elif self.state.mode == 'ai_sing' and self.state.playback_running:
                 stuck += 1
-                if stuck in (3, 10, 30):
+                if stuck in (3, 10, 25):
                     logger.warning(
                         'ai_sing tick stalled gen=%s stuck=%s player_active=%s pos=%.2fs mode=%s',
                         gen,
@@ -1434,6 +1529,25 @@ class ClientController:
                         self._player.position,
                         self.state.mode,
                     )
+                if stuck >= 25:
+                    if self._player.is_active:
+                        stuck = 0
+                        pos = self._player.position
+                        playing = self._player.is_playing
+                        paused = not self._player.is_playing and self._player.is_active
+                        self._publish_status(
+                            'playback_tick',
+                            position=pos,
+                            duration=self._player.duration,
+                            playing=playing,
+                            paused=paused,
+                            **self._playback_tick_extra(),
+                        )
+                    else:
+                        self.state.playback_running = False
+                        self._halt_playback_tick()
+                        self._publish_status('playback_stopped', log='播放进度异常，请重新按播放')
+                        break
             if self._playback_stop.wait(0.03) or self._tick_generation != gen:
                 break
 
@@ -1741,6 +1855,7 @@ class ClientController:
         if self.state.realtime_running:
             self.stop_realtime()
         if self.state.offline_running:
+            self._revert_selected_mode_on_block()
             self._publish_status('realtime_blocked', log='离线任务进行中，请稍后再启动 AI 跟唱')
             return
         if self.state.ai_follow_preparing:
@@ -2428,6 +2543,8 @@ class ClientController:
     def _save_settings(self, payload: dict):
         payload = payload or {}
         audio = payload.get('audio') or {}
+        old_audio_keys = ('input_device', 'output_device', 'hostapi', 'sample_rate', 'wasapi_exclusive')
+        old_audio = {k: self.config_store.get('audio.%s' % k) for k in old_audio_keys}
         from app.audio.devices import device_ref_for_config, list_devices
         devices = list_devices(hostapi=audio.get('hostapi') or self.config_store.get('audio.hostapi'))
         for key in ('hostapi', 'wasapi_exclusive', 'sample_rate', 'passthrough_gain', 'passthrough_ui', 'reverb_mix', 'reverb_decay'):
@@ -2526,6 +2643,17 @@ class ClientController:
             )
         self.config_store.save()
         self._sync_playback_output_device()
+        device_changed = any(
+            str(old_audio.get(k, '')) != str(self.config_store.get('audio.%s' % k, ''))
+            for k in old_audio_keys
+        )
+        if device_changed and (
+            self._is_timeline_playing()
+            or self._has_paused_session()
+            or self.state.playback_running
+            or self.state.passthrough_running
+        ):
+            self._restart_playback_after_device_change()
         mgr = self.audio.manager
         if mgr and mgr.running:
             audio_cfg = dict(self.config_store.get('audio', {}) or {})
@@ -2542,7 +2670,9 @@ class ClientController:
                 mgr.config.follow_threshold = mix['follow_threshold']
                 mgr.config.follow_attenuation = mix['follow_attenuation']
         hint = ''
-        if self.state.passthrough_running or self.state.realtime_running:
+        if device_changed and not (self._is_timeline_playing() or self._has_paused_session() or self.state.playback_running):
+            hint = '（音频路由已更新）'
+        elif self.state.passthrough_running or self.state.realtime_running:
             hint = '（请重新开启普通说话/混响说话/AI 跟唱使新设备生效）'
         self._publish_status('settings_saved', log='音频与系统设置已写入 config/client.json%s' % hint)
         if play_mode in PLAY_MODES:

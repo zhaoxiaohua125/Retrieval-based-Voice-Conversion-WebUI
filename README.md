@@ -2572,3 +2572,17 @@ ewrite；扩展 LyricWord 与字级 matcher
 - **关键决策与解决方案**: Windows 前台策略限制下无法 100% 保证覆盖全屏应用；闪烁作为兜底
 - **使用的技术栈**: PyQt6 QTimer、ctypes user32
 - **修改的文件列表**: app/ops/single_instance.py、app/ui/main_window.py、README.md
+
+---
+
+## 会话总结 - 2026-08-15 (10)
+
+- **会话主要目的**: 排查四模式切换/设置改设备后播放界面卡住，并修复根因
+- **完成的主要任务**:
+  1. 设置保存时检测输入/输出/hostapi/采样率变更，播放中自动 stop+restart 音频流
+  2. `restore_playback_after_settings` 支持 unified 流恢复、tick 线程复活
+  3. ai_sing tick 停滞约 0.75s 后自动 `playback_stopped`，避免进度条假死
+  4. 模式切换被阻断时回滚 `selected_mode` 与 UI 按钮；处理 `playback_blocked`/`realtime_blocked`
+- **关键决策与解决方案**: 切 Tab 不影响播放后端；卡住主因是设备热更新不重启流 + tick 线程停更 UI
+- **使用的技术栈**: PyQt6、AudioStreamManager、WavPlayer、Controller tick 线程
+- **修改的文件列表**: app/integration/controller.py、scripts/run_ui_skeleton.py、README.md

@@ -299,7 +299,10 @@ def main():
                     page.set_mode(payload.get('mode') or 'normal_talk', active=True)
                     if (payload.get('mode') or '') in ('reverb_talk', 'normal_talk') and float(payload.get('duration', 0) or 0) > 0:
                         page.set_playback_state(payload)
-                elif action in ('passthrough_stopped', 'passthrough_blocked'):
+                elif action in ('passthrough_stopped', 'passthrough_blocked', 'playback_blocked', 'realtime_blocked'):
+                    rm = controller.state.mode
+                    if rm in ('ai_sing', 'ai_follow', 'reverb_talk', 'normal_talk'):
+                        page.set_selected_mode(rm)
                     page.set_playback_stopped()
                 elif action == 'realtime_started':
                     page.set_mode('realtime', active=True)
@@ -315,8 +318,14 @@ def main():
                     page.set_ai_follow_busy(False)
                     page.set_mode('ai_follow', active=True)
                     page.set_playback_state(payload)
-                elif action in ('ai_follow_stopped', 'ai_follow_finished', 'ai_follow_failed'):
+                elif action in ('ai_follow_stopped', 'ai_follow_finished'):
                     page.set_ai_follow_busy(False)
+                    page.set_playback_stopped()
+                elif action == 'ai_follow_failed':
+                    page.set_ai_follow_busy(False)
+                    rm = controller.state.mode
+                    if rm in ('ai_sing', 'ai_follow', 'reverb_talk', 'normal_talk'):
+                        page.set_selected_mode(rm)
                     page.set_playback_stopped()
                 elif action in ('playback_paused', 'playback_resumed'):
                     page.set_playback_state(payload)
