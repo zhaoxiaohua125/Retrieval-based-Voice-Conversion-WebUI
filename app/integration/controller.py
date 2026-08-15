@@ -2228,18 +2228,26 @@ class ClientController:
         try:
             for batch_idx, input_path in enumerate(inputs):
                 title = Path(input_path).name
-                self._publish_progress(
-                    percent=int(batch_idx / batch_total * 100),
-                    message='正在处理 %d/%d：%s' % (batch_idx + 1, batch_total, title),
-                    phase='msst',
-                )
+                if batch_total > 1:
+                    self._publish_progress(
+                        event='phase',
+                        percent=0,
+                        phase='msst',
+                        message='第 %d/%d 首 · %s' % (batch_idx + 1, batch_total, title),
+                        batch_index=batch_idx + 1,
+                        batch_total=batch_total,
+                    )
 
-                def _event_cb(event, bi=batch_idx, bt=batch_total):
+                def _event_cb(event, bi=batch_idx, bt=batch_total, song_title=title):
                     e = dict(event)
-                    inner = float(e.get('percent', 0) or 0)
-                    e['percent'] = int((bi + inner / 100.0) / bt * 100)
-                    if bt > 1 and not e.get('message'):
-                        e['message'] = '第 %d/%d 首' % (bi + 1, bt)
+                    if bt > 1:
+                        e['batch_index'] = bi + 1
+                        e['batch_total'] = bt
+                        if e.get('event') == 'phase' and e.get('phase') == 'done' and bi < bt - 1:
+                            e['message'] = '第 %d/%d 首已完成' % (bi + 1, bt)
+                        else:
+                            base = str(e.get('message') or '').strip()
+                            e['message'] = '第 %d/%d 首 · %s' % (bi + 1, bt, base or song_title)
                     self._publish_progress(**e)
 
                 terminal = None

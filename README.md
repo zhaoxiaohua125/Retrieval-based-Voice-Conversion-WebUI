@@ -2513,3 +2513,36 @@ ewrite；扩展 LyricWord 与字级 matcher
 - **关键决策与解决方案**: 单 pipeline 实例复用、worker 内循环；任一首失败或取消则终止整批；歌词仍按每首 stem 复制同一 lrc 源（若提供）
 - **使用的技术栈**: PyQt6、OfflineSongPipeline、Controller 线程 worker
 - **修改的文件列表**: app/ui/pages/song_make_page.py、app/integration/controller.py、scripts/run_ui_skeleton.py、README.md
+
+---
+
+## 会话总结 - 2026-08-15 (5)
+
+- **会话主要目的**: 批量做歌进度条与单首一致，逐首完成后再处理下一首
+- **完成的主要任务**:
+  1. 取消整批进度缩放（原先 `(当前首+内层%)/总数` 导致第二首分离阶段显示 75% 等错乱）
+  2. 每首开始前重置进度为 0、阶段回到「分离」；状态文案前缀「第 N/M 首 · …」
+  3. 非最后一首完成时提示「第 N/M 首已完成」，再进入下一首
+- **关键决策与解决方案**: 进度条始终表示当前单曲 0–100%；批量信息仅体现在状态文字，不混入百分比
+- **使用的技术栈**: PyQt6、Controller 进度事件
+- **修改的文件列表**: app/integration/controller.py、app/ui/pages/song_make_page.py、README.md
+
+---
+
+## 会话总结 - 2026-08-15 (6)
+
+- **会话主要目的**: 做歌成功后自动从待处理列表移除已转换文件
+- **完成的主要任务**: `show_offline_result` 根据结果 `source_path` 调用 `_remove_input_paths`，批量/单首成功后清空对应队列项
+- **关键决策与解决方案**: 路径用 `normcase+normpath` 比对，避免 Windows 大小写差异；失败/取消不触发清除
+- **使用的技术栈**: PyQt6 QListWidget
+- **修改的文件列表**: app/ui/pages/song_make_page.py、README.md
+
+---
+
+## 会话总结 - 2026-08-15 (7)
+
+- **会话主要目的**: 恢复歌库列表双击切歌，避免单击误切
+- **完成的主要任务**: 移除 `song_list.currentRowChanged` → `_on_song_row_changed` 连接；仅保留 `itemDoubleClicked` 触发 `_apply_row_song`
+- **关键决策与解决方案**: 单击只高亮选中行，不通知 controller；程序内切歌（自动下一首、按标题选中）仍走 `_apply_row_song`
+- **使用的技术栈**: PyQt6 QListWidget
+- **修改的文件列表**: app/ui/pages/playback_page.py、README.md

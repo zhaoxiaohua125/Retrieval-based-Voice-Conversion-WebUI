@@ -455,6 +455,19 @@ class SongMakePage(QWidget):
             self.file_list.takeItem(self.file_list.row(item))
         self._sync_loaded_files()
 
+    def _remove_input_paths(self, paths):
+        done = {os.path.normcase(os.path.normpath(str(p))) for p in (paths or []) if p}
+        if not done:
+            return
+        i = 0
+        while i < self.file_list.count():
+            cur = os.path.normcase(os.path.normpath(self.file_list.item(i).text()))
+            if cur in done:
+                self.file_list.takeItem(i)
+            else:
+                i += 1
+        self._sync_loaded_files()
+
     def _clear_loaded_files(self):
         self.loaded_files.clear()
         self.file_list.clear()
@@ -595,6 +608,8 @@ class SongMakePage(QWidget):
                     item = QListWidgetItem('%s：%s' % (label, path))
                     item.setData(Qt.ItemDataRole.UserRole, path)
                     self.result_list.addItem(item)
+        success_inputs = [res.get('source_path') for res in results if res.get('source_path')]
+        self._remove_input_paths(success_inputs)
         self.set_offline_running(False)
 
     def show_offline_failed(self, message: str):

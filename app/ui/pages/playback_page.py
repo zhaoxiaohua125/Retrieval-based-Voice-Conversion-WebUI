@@ -95,7 +95,6 @@ class PlaybackPage(QWidget):
         self.song_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.song_list.customContextMenuRequested.connect(self._on_song_context_menu)
         self.song_list.itemDoubleClicked.connect(self._on_song_double_clicked)
-        self.song_list.currentRowChanged.connect(self._on_song_row_changed)
         lib_layout.addWidget(self.song_list)
         splitter.addWidget(lib)
         self._pump()
@@ -307,11 +306,6 @@ class PlaybackPage(QWidget):
             force_switch=force_switch,
             library_tab_switch=library_tab_switch,
         )
-
-    def _on_song_row_changed(self, row: int):
-        if row < 0 or self._switching or self.song_list.signalsBlocked():
-            return
-        self._apply_row_song(row, resume_if_playing=False, show_switching=False, force_switch=True)
 
     def _on_song_context_menu(self, pos):
         if self._switching:
