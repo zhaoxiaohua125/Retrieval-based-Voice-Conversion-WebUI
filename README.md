@@ -2622,3 +2622,15 @@ ewrite；扩展 LyricWord 与字级 matcher
 - **关键决策与解决方案**: 播放会话跟 controller.selected_song 绑定，仅双击切歌才切换
 - **使用的技术栈**: PyQt6、Controller 切歌链路
 - **修改的文件列表**: app/ui/pages/playback_page.py、app/integration/controller.py、README.md
+
+---
+
+## 会话总结 - 2026-08-15 (3)
+
+- **会话主要目的**: 修复编译为 .pyd 后切换普通/混响说话报 `must be real number, not NoneType`
+- **完成的主要任务**:
+  1. 定位为 Cython 将 `seek_sec: float` 做运行时强制转换，热切换传入的 `None`（保持进度）被拒收
+  2. `set_playback_mode` / `switch_playback_mode` / `load_instrumental` 去掉会拒收 None 的 float 注解；冷启动将 None 按 0 处理
+- **关键决策与解决方案**: 保留 `seek_sec is None` 表示同曲不 seek 的语义；避免 Cython 注解 typing 破坏该约定
+- **使用的技术栈**: Cython .pyd、AudioStreamManager
+- **修改的文件列表**: app/audio/stream_manager.py、app/audio/service.py、README.md

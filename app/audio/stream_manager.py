@@ -155,7 +155,7 @@ class AudioStreamManager:
             self._inst_paused = False
             self._reset_clock_locked(0, active=self._running and not self._inst_paused)
 
-    def load_instrumental(self, path: str, seek_sec: float = 0.0):
+    def load_instrumental(self, path: str, seek_sec=0.0):
         import soundfile as sf
 
         data, sr = sf.read(str(path), dtype='float32', always_2d=True)
@@ -166,9 +166,10 @@ class AudioStreamManager:
             import librosa
 
             data = librosa.resample(data.T, orig_sr=int(sr), target_sr=target_sr).T.reshape(-1, 1)
+        seek = float(seek_sec or 0)
         with self._lock:
             self._inst_data = np.asarray(data[:, 0], dtype=np.float32)
-            self._inst_pos = max(0, int(float(seek_sec) * target_sr))
+            self._inst_pos = max(0, int(seek * target_sr))
             self._inst_duration = len(self._inst_data) / target_sr if target_sr else 0.0
             self._inst_paused = False
             self._inst_finished = False
@@ -249,7 +250,8 @@ class AudioStreamManager:
                 self._inst_finished = True
             return inst, ref
 
-    def set_playback_mode(self, cfg: AudioStreamConfig, inst_path: str | None = None, vocal_path: str | None = None, seek_sec: float = 0.0):
+    def set_playback_mode(self, cfg: AudioStreamConfig, inst_path: str | None = None, vocal_path: str | None = None, seek_sec=None):
+        """seek_sec=None 表示同曲热切换时保持当前进度（勿标成 float，Cython 会拒收 None）。"""
         prev_mode = self.config.playback_mode
         prev_reverb = self.config.passthrough_reverb
         self.config.playback_mode = cfg.playback_mode

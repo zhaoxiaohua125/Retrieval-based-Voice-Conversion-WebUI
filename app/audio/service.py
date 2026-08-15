@@ -129,9 +129,10 @@ class AudioService:
         mode: str,
         inst_path: str | None = None,
         vocal_path: str | None = None,
-        inst_seek: float | None = 0.0,
+        inst_seek=None,
         reverb: bool | None = None,
     ):
+        """inst_seek=None：热切换保持进度；冷启动按 0 处理。勿标 float，避免 Cython 拒收 None。"""
         if mode not in PLAYBACK_MODES:
             raise ValueError('unsupported playback mode: %s' % mode)
         self._ensure_shutdown_hook()
@@ -141,7 +142,7 @@ class AudioService:
             return self.manager
         self.manager = AudioStreamManager(cfg)
         if inst_path:
-            self.manager.load_instrumental(inst_path, inst_seek)
+            self.manager.load_instrumental(inst_path, float(inst_seek or 0))
         if vocal_path and mode in ('ai_sing', 'ai_follow'):
             self.manager.load_ref_vocal(vocal_path)
         self.manager.start()
@@ -161,7 +162,7 @@ class AudioService:
         passthrough: bool | None = None,
         reverb: bool = False,
         inst_path: str | None = None,
-        inst_seek: float = 0.0,
+        inst_seek=0.0,
     ):
         mode = 'reverb_talk' if reverb else 'normal_talk'
         return self.switch_playback_mode(mode, inst_path=inst_path, vocal_path=None, inst_seek=inst_seek, reverb=reverb)
