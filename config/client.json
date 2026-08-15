@@ -6,14 +6,18 @@
     "model_dir": "assets/weights",
     "index_dir": "assets/indices"
   },
+  "server": {
+    "base_url": "http://59.110.142.252",
+    "nginx_prefix": "ai-sound"
+  },
   "update": {
     "check_url": "",
     "auto_check": true,
     "skip_version": ""
   },
   "auth": {
-    "show_login": false,
-    "login_url": "http://59.110.142.252/ai-sound/api/auth/login"
+    "show_login": true,
+    "login_url": ""
   },
   "logs": {
     "auto_upload_crash": true,
@@ -114,8 +118,8 @@
   },
   "ui": {
     "geometry": [
-      243,
-      173,
+      528,
+      250,
       1280,
       912
     ],

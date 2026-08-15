@@ -16,6 +16,10 @@ DEFAULT_CONFIG = {
         'model_dir': 'assets/weights',
         'index_dir': 'assets/indices',
     },
+    'server': {
+        'base_url': '',
+        'nginx_prefix': '',
+    },
     'update': {
         'check_url': '',
         'auto_check': True,
@@ -23,7 +27,7 @@ DEFAULT_CONFIG = {
     },
     'auth': {
         'show_login': True,
-        'login_url': 'http://127.0.0.1:8765/api/auth/login',
+        'login_url': '',
     },
     'logs': {
         'auto_upload_crash': True,

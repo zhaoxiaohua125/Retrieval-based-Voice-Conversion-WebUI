@@ -6,11 +6,11 @@ import threading
 import traceback
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import urljoin, urlparse
 
 from app.ops.hardware import collect_environment_info
 from app.ops.log_bundle import bundle_log_files
 from app.ops.log_reporter import upload_log_bundle
+from app.ops.server_url import cfg_get, join_server_api
 from app.ops.version import CLIENT_VERSION
 
 logger = logging.getLogger('rvc_client.crash')
@@ -18,33 +18,14 @@ _CLEAN_MARKER = '.last_exit_clean'
 
 
 def resolve_log_upload_url(config) -> str:
-    explicit = str(_cfg_get(config, 'logs.upload_url', '') or '').strip()
+    explicit = str(cfg_get(config, 'logs.upload_url', '') or '').strip()
     if explicit:
         return explicit
-    check = str(_cfg_get(config, 'update.check_url', '') or '').strip()
-    if not check:
-        return ''
-    parsed = urlparse(check)
-    if not parsed.scheme or not parsed.netloc:
-        return ''
-    return urljoin('%s://%s/' % (parsed.scheme, parsed.netloc), 'api/logs/upload')
-
-
-def _cfg_get(config, key, default=None):
-    if hasattr(config, 'get'):
-        return config.get(key, default)
-    if isinstance(config, dict):
-        node = config
-        for part in str(key).split('.'):
-            if not isinstance(node, dict) or part not in node:
-                return default
-            node = node[part]
-        return node
-    return default
+    return join_server_api(config, 'api/logs/upload')
 
 
 def _log_dir(project_root, config) -> Path:
-    rel = str(_cfg_get(config, 'paths.log_dir', 'logs/client') or 'logs/client').strip()
+    rel = str(cfg_get(config, 'paths.log_dir', 'logs/client') or 'logs/client').strip()
     return (Path(project_root) / rel).resolve()
 
 
@@ -70,7 +51,7 @@ def mark_clean_exit(project_root, config):
 
 
 def upload_crash_logs(project_root, config, reason: str = 'crash', detail: str = '', sync: bool = False):
-    if not bool(_cfg_get(config, 'logs.auto_upload_crash', True)):
+    if not bool(cfg_get(config, 'logs.auto_upload_crash', True)):
         return
     url = resolve_log_upload_url(config)
     if not url:

@@ -357,12 +357,18 @@ class SettingsDialog(QDialog):
         def build(root):
             box = QGroupBox('常规')
             form = QFormLayout(box)
+            self.edit_server_base = QLineEdit()
+            self.edit_server_base.setPlaceholderText('如 http://59.110.142.252')
+            self.edit_nginx_prefix = QLineEdit()
+            self.edit_nginx_prefix.setPlaceholderText('如 ai-sound，无前缀留空')
             self.edit_update_url = QLineEdit()
             self.edit_log_dir = QLineEdit()
             self.chk_auto_check = QCheckBox('启动时自动检查更新')
             self.chk_crash_upload = QCheckBox('崩溃时自动上报日志')
             self.edit_log_upload_url = QLineEdit()
-            self.edit_log_upload_url.setPlaceholderText('留空则从更新地址推导 /api/logs/upload')
+            self.edit_log_upload_url.setPlaceholderText('留空则按服务器地址+前缀推导 /api/logs/upload')
+            form.addRow('服务器地址', self.edit_server_base)
+            form.addRow('Nginx 前缀', self.edit_nginx_prefix)
             form.addRow('更新地址', self.edit_update_url)
             form.addRow('', self.chk_auto_check)
             form.addRow('', self.chk_crash_upload)
@@ -428,6 +434,8 @@ class SettingsDialog(QDialog):
     def _load_values(self):
         layout = load_ui_layout().get('settings') or {}
         self.spin_osc.setValue(int(self.config.get('lyrics.osc_port', layout.get('osc_port', 9000))))
+        self.edit_server_base.setText(str(self.config.get('server.base_url', '')))
+        self.edit_nginx_prefix.setText(str(self.config.get('server.nginx_prefix', '')))
         self.edit_update_url.setText(str(self.config.get('update.check_url', layout.get('update_url', ''))))
         self.chk_auto_check.setChecked(bool(self.config.get('update.auto_check', True)))
         self.chk_crash_upload.setChecked(bool(self.config.get('logs.auto_upload_crash', True)))
@@ -613,6 +621,8 @@ class SettingsDialog(QDialog):
                         break
         payload = {
             'osc_port': self.spin_osc.value(),
+            'server_base_url': self.edit_server_base.text().strip(),
+            'server_nginx_prefix': self.edit_nginx_prefix.text().strip().strip('/'),
             'update_url': self.edit_update_url.text().strip(),
             'update_auto_check': self.chk_auto_check.isChecked(),
             'crash_auto_upload': self.chk_crash_upload.isChecked(),

@@ -2478,3 +2478,17 @@ ewrite；扩展 LyricWord 与字级 matcher
 - **关键决策与解决方案**: 不改启动接线顺序；仅将 `collect_environment_info` 的 GPU 探测移出 UI 线程，避免挡住 `main_entered`
 - **使用的技术栈**: PyQt6 信号、threading
 - **修改的文件列表**: app/ui/main_window.py、README.md
+
+---
+
+## 会话总结 - 2026-08-15 (2)
+
+- **会话主要目的**: 增加 nginx 路径前缀配置，统一推导登录/日志上报 URL
+- **完成的主要任务**:
+  1. 新增 `server.base_url` + `server.nginx_prefix`（client.json / ConfigStore 默认）
+  2. 新增 `app/ops/server_url.py`，登录与崩溃日志上报共用根地址推导
+  3. `auth.login_url` / `logs.upload_url` 留空时自动得到 `…/ai-sound/api/...`
+  4. 设置页「常规」增加服务器地址、Nginx 前缀；保存写入 config
+- **关键决策与解决方案**: 显式 URL 仍优先；否则 `base_url + nginx_prefix` 拼 API；也可从 `update.check_url` 回退推导并带前缀
+- **使用的技术栈**: Python urllib.parse、ConfigStore、PyQt6 设置页
+- **修改的文件列表**: app/ops/server_url.py、app/ops/auth_client.py、app/ops/crash_reporter.py、app/config_store.py、config/client.json、app/ui/settings_dialog.py、app/integration/controller.py、README.md

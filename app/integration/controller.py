@@ -2421,6 +2421,10 @@ class ClientController:
             off = int(self.config_store.get('lyrics.offset_ms', 0) or 0)
             lead = int(self.config_store.get('lyrics.lead_ms', 0) or 0)
             self.lyrics.matcher.set_offset_ms(off + lead)
+        if payload.get('server_base_url') is not None:
+            self.config_store.set('server.base_url', str(payload['server_base_url']).strip().rstrip('/'))
+        if payload.get('server_nginx_prefix') is not None:
+            self.config_store.set('server.nginx_prefix', str(payload['server_nginx_prefix']).strip().strip('/'))
         if payload.get('update_url') is not None:
             self.config_store.set('update.check_url', str(payload['update_url']).strip())
         if payload.get('update_auto_check') is not None:
