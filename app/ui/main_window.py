@@ -1,5 +1,6 @@
 """主窗口 Shell：登录 → 顶栏三 Tab + 页面栈 + 底状态栏/日志。"""
 
+import sys
 import threading
 from pathlib import Path
 
@@ -483,6 +484,49 @@ class MainWindow(QMainWindow):
             tray.hide()
         self.hide()
         QApplication.instance().quit()
+
+    def bring_to_front(self):
+        st = self.windowState()
+        if st & Qt.WindowState.WindowMinimized:
+            self.setWindowState(st & ~Qt.WindowState.WindowMinimized)
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+        if sys.platform == 'win32':
+            self._win32_focus(int(self.winId()))
+
+    @staticmethod
+    def _win32_focus(hwnd):
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            kernel32 = ctypes.windll.kernel32
+            user32.ShowWindow(hwnd, 9)
+            fg = user32.GetForegroundWindow()
+            if fg == hwnd:
+                return
+            fg_tid = user32.GetWindowThreadProcessId(fg, None)
+            cur_tid = kernel32.GetCurrentThreadId()
+            if fg_tid and fg_tid != cur_tid:
+                user32.AttachThreadInput(cur_tid, fg_tid, True)
+                user32.SetForegroundWindow(hwnd)
+                user32.AttachThreadInput(cur_tid, fg_tid, False)
+            else:
+                user32.SetForegroundWindow(hwnd)
+            user32.BringWindowToTop(hwnd)
+            if user32.GetForegroundWindow() != hwnd:
+                class FLASHWINFO(ctypes.Structure):
+                    _fields_ = [
+                        ('cbSize', ctypes.c_uint),
+                        ('hwnd', ctypes.c_void_p),
+                        ('dwFlags', ctypes.c_uint),
+                        ('uCount', ctypes.c_uint),
+                        ('dwTimeout', ctypes.c_uint),
+                    ]
+                info = FLASHWINFO(ctypes.sizeof(FLASHWINFO), hwnd, 3, 0, 0)
+                user32.FlashWindowEx(ctypes.byref(info))
+        except Exception:
+            pass
 
     def closeEvent(self, event):
         if self._quitting:

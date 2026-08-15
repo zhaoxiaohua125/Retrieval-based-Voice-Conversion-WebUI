@@ -142,12 +142,16 @@ def main():
         _install_crash_diagnostics()
         from app.config_store import ConfigStore
         from app.ops.crash_reporter import install_crash_hooks, mark_clean_exit, startup_crash_check
+        from app.ops.single_instance import SingleInstanceGuard, notify_existing_instance
 
         boot_config = ConfigStore().load()
         startup_crash_check(ROOT, boot_config)
         _setup_qt_runtime(ROOT)
         _startup_log('logging ready')
         app = QApplication(sys.argv)
+        if notify_existing_instance(str(ROOT.resolve())):
+            _startup_log('existing instance detected, raise and exit')
+            return 0
         app.setQuitOnLastWindowClosed(False)
         app.setApplicationName('来取文化')
         app.setApplicationVersion(CLIENT_VERSION)
@@ -161,10 +165,16 @@ def main():
 
         bridge = UiBridge()
         window = MainWindow(bridge, project_root=ROOT, config_store=boot_config)
+        try:
+            app._single_instance_guard = SingleInstanceGuard(str(ROOT.resolve()), window.bring_to_front)
+        except RuntimeError as exc:
+            if str(exc) == 'already_running':
+                _startup_log('single instance race, exit')
+                return 0
+            raise
         window.setWindowIcon(app_icon)
         window.show()
-        window.raise_()
-        window.activateWindow()
+        window.bring_to_front()
         app.processEvents()
         _startup_log('startup window shown login=%s' % boot_config.get('auth.show_login', True))
         if not boot_config.get('auth.show_login', True):

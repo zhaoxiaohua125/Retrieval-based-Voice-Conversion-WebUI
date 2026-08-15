@@ -2546,3 +2546,29 @@ ewrite；扩展 LyricWord 与字级 matcher
 - **关键决策与解决方案**: 单击只高亮选中行，不通知 controller；程序内切歌（自动下一首、按标题选中）仍走 `_apply_row_song`
 - **使用的技术栈**: PyQt6 QListWidget
 - **修改的文件列表**: app/ui/pages/playback_page.py、README.md
+
+---
+
+## 会话总结 - 2026-08-15 (8)
+
+- **会话主要目的**: 客户端单实例运行，重复启动时唤醒已有窗口
+- **完成的主要任务**:
+  1. 新增 `app/ops/single_instance.py`：`QSharedMemory` 判重 + `QLocalServer/Socket` 发 `raise` 唤醒
+  2. `run_ui_skeleton.main` 检测到已有进程则退出；主实例监听并调用 `MainWindow.bring_to_front`
+  3. `bring_to_front` 处理最小化恢复与 Windows 前台聚焦
+- **关键决策与解决方案**: 实例 key 按安装根目录 MD5，同目录多开互斥；二次启动静默退出 code 0
+- **使用的技术栈**: PyQt6 QSharedMemory、QLocalServer、ctypes SetForegroundWindow
+- **修改的文件列表**: app/ops/single_instance.py、app/ui/main_window.py、scripts/run_ui_skeleton.py、README.md
+
+---
+
+## 会话总结 - 2026-08-15 (9)
+
+- **会话主要目的**: 单实例重复启动时尽量把已有窗口提到最前
+- **完成的主要任务**:
+  1. 收到唤醒消息后 `QTimer.singleShot(0)` 延迟到 UI 事件循环再激活
+  2. Windows 下 `AttachThreadInput` + `SetForegroundWindow` + `BringWindowToTop`
+  3. 仍无法抢焦点时 `FlashWindowEx` 闪烁任务栏提示
+- **关键决策与解决方案**: Windows 前台策略限制下无法 100% 保证覆盖全屏应用；闪烁作为兜底
+- **使用的技术栈**: PyQt6 QTimer、ctypes user32
+- **修改的文件列表**: app/ops/single_instance.py、app/ui/main_window.py、README.md
