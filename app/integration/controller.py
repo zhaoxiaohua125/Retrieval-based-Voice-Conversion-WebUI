@@ -581,10 +581,15 @@ class ClientController:
     def _song_unified_ready(self, song: dict, mode: str) -> bool:
         if mode not in PLAYBACK_MODES:
             return False
+        inst = song.get('instrumental_path') or ''
+        has_inst = bool(inst and Path(inst).is_file())
         if mode in ('ai_sing', 'ai_follow'):
-            inst = song.get('instrumental_path') or ''
             vocal = song.get('vocal_path') or ''
-            return bool(inst and Path(inst).is_file() and vocal and Path(vocal).is_file())
+            if has_inst and vocal and Path(vocal).is_file():
+                return True
+            if mode == 'ai_sing' and str(song.get('library_type') or '') == 'accompaniment' and has_inst:
+                return True
+            return False
         return True
 
     def _timeline_inst_state(self):
@@ -608,16 +613,29 @@ class ClientController:
         if self.state.ai_follow_running or self.state.ai_follow_preparing:
             self._release_ai_follow(handoff=True)
         inst_path = song.get('instrumental_path') or ''
-        vocal_path = song.get('vocal_path') or ''
-        pos = self._current_song_position() if carry_pos is None else max(0.0, float(carry_pos))
+        vocal_raw = song.get('vocal_path') or ''
+        vocal_path = vocal_raw if vocal_raw and Path(vocal_raw).is_file() else None
         mgr_was = self._unified_stream_active()
+        mgr0 = self._unified_mgr() if mgr_was else None
+        same_inst = bool(
+            mgr0
+            and inst_path
+            and getattr(mgr0, '_inst_path', '') == str(Path(inst_path).resolve())
+            and mgr0.inst_duration > 0
+        )
+        pos = self._current_song_position() if carry_pos is None else max(0.0, float(carry_pos))
+        if same_inst:
+            pos = mgr0.inst_position
+            inst_seek = None
+        else:
+            inst_seek = pos
         tick_alive = self._playback_tick is not None and self._playback_tick.is_alive()
         try:
             self.audio.switch_playback_mode(
                 mode,
                 inst_path=inst_path or None,
-                vocal_path=vocal_path or None,
-                inst_seek=pos,
+                vocal_path=vocal_path,
+                inst_seek=inst_seek,
                 reverb=(mode == 'reverb_talk'),
             )
         except Exception as exc:
@@ -634,7 +652,9 @@ class ClientController:
         self.state.ai_follow_preparing = False
         self.state.playback_running = autoplay or (mgr.inst_duration > 0 and mgr.inst_paused)
         pos, dur, playing, paused = self._timeline_inst_state()
-        if pos <= 0.15:
+        if same_inst and mgr_was and tick_alive:
+            sync_lyrics = lambda _t: self._ensure_playback_lyrics(self._unified_mgr().inst_position if self._unified_mgr() else pos)
+        elif pos <= 0.15:
             sync_lyrics = self._reset_playback_lyrics
         else:
             sync_lyrics = self._ensure_playback_lyrics
@@ -1027,6 +1047,7 @@ class ClientController:
         if not song.get('play_path'):
             return
         prev = self.state.selected_song or {}
+        prev_song = dict(prev)
         prev_id = prev.get('id') or prev.get('play_path')
         new_id = song.get('id') or song.get('play_path')
         prev_lib = str(prev.get('library_type') or '')
@@ -1041,16 +1062,29 @@ class ClientController:
         if defer:
             threading.Thread(
                 target=self._select_song_apply,
-                args=(dict(song), dict(payload), switching, lib_changed, force_switch),
+                args=(dict(song), dict(payload), switching, lib_changed, force_switch, prev_song),
                 name='select-song',
                 daemon=True,
             ).start()
         else:
-            self._select_song_apply(song, payload, switching, lib_changed, force_switch)
+            self._select_song_apply(song, payload, switching, lib_changed, force_switch, prev_song)
 
-    def _select_song_apply(self, song: dict, payload: dict, switching: bool, lib_changed: bool, force_switch: bool):
+    def _select_song_apply(self, song: dict, payload: dict, switching: bool, lib_changed: bool, force_switch: bool, prev_song: dict | None = None):
         resume_if_playing = payload.get('resume_if_playing', True)
         user_autoplay = bool(payload.get('autoplay'))
+        prev_song = prev_song or {}
+        prev_id = prev_song.get('id') or prev_song.get('play_path')
+        new_id = song.get('id') or song.get('play_path')
+        song_changed = bool(prev_id and new_id and prev_id != new_id)
+
+        def _stop_prev_if_needed():
+            if not song_changed and not lib_changed:
+                return
+            if not (self._is_timeline_playing() or self._has_paused_session() or self.state.playback_running or self._player.is_active):
+                return
+            self._release_playback_source(handoff=False)
+            time.sleep(0.03)
+
         self._schedule_smart_peaks(song)
         lrc = song.get('lrc_path') or find_lrc_in_dir(
             song.get('dir') or Path(song.get('play_path', '')).parent,
@@ -1101,9 +1135,7 @@ class ClientController:
         if lib_changed:
             was_active = self._is_timeline_playing() or self._has_paused_session()
             if was_active or user_autoplay:
-                if was_active and self._unified_stream_active() and not self._song_unified_ready(song, 'ai_sing'):
-                    self._release_playback_source(handoff=False)
-                    time.sleep(0.03)
+                _stop_prev_if_needed()
                 mode = self._session_playback_mode()
                 if not mode:
                     mode = self.state.selected_mode if self.state.selected_mode in MODE_IDS else 'ai_sing'
@@ -1130,10 +1162,7 @@ class ClientController:
                 mode = self.state.selected_mode if self.state.selected_mode in MODE_IDS else 'ai_sing'
             was_active = self._is_timeline_playing() or self._has_paused_session()
             if was_active or user_autoplay:
-                song_now = dict(self.state.selected_song)
-                if was_active and self._unified_stream_active() and not self._song_unified_ready(song_now, mode):
-                    self._release_playback_source(handoff=False)
-                    time.sleep(0.03)
+                _stop_prev_if_needed()
                 title = song.get('title') or Path(song.get('play_path') or '').stem
                 self._inst_end_sent = False
                 autoplay = was_active or user_autoplay
@@ -1297,7 +1326,11 @@ class ClientController:
         carry_pos = float(payload.get('position', 0) or 0) if 'position' in payload else self._current_song_position()
         if self.state.realtime_running:
             self.stop_realtime()
-        self._select_song({'song': song})
+        cur = self.state.selected_song or {}
+        cur_id = cur.get('id') or cur.get('play_path')
+        new_id = song.get('id') or song.get('play_path')
+        if cur_id != new_id:
+            self._select_song({'song': song})
         if self._song_unified_ready(song, 'ai_sing'):
             if self._switch_unified_playback('ai_sing', song, carry_pos, autoplay):
                 title = song.get('title') or Path(song.get('instrumental_path') or '').stem

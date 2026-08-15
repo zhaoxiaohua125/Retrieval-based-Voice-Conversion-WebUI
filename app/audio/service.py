@@ -129,7 +129,7 @@ class AudioService:
         mode: str,
         inst_path: str | None = None,
         vocal_path: str | None = None,
-        inst_seek: float = 0.0,
+        inst_seek: float | None = 0.0,
         reverb: bool | None = None,
     ):
         if mode not in PLAYBACK_MODES:

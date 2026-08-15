@@ -271,10 +271,13 @@ class AudioStreamManager:
         if inst_path:
             resolved = str(Path(inst_path).resolve())
             if self._inst_path == resolved:
-                if abs(self.inst_position - float(seek_sec or 0)) > 0.12:
-                    self.seek_instrumental(seek_sec)
+                if seek_sec is not None:
+                    tgt = float(seek_sec)
+                    cur = self.inst_position
+                    if tgt > cur + 0.12:
+                        self.seek_instrumental(tgt)
             else:
-                self.load_instrumental(inst_path, seek_sec)
+                self.load_instrumental(inst_path, float(seek_sec or 0))
         if vocal_path and cfg.playback_mode in ('ai_sing', 'ai_follow'):
             resolved = str(Path(vocal_path).resolve())
             if self._ref_vocal_path != resolved:

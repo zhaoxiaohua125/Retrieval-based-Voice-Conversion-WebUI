@@ -2586,3 +2586,39 @@ ewrite；扩展 LyricWord 与字级 matcher
 - **关键决策与解决方案**: 切 Tab 不影响播放后端；卡住主因是设备热更新不重启流 + tick 线程停更 UI
 - **使用的技术栈**: PyQt6、AudioStreamManager、WavPlayer、Controller tick 线程
 - **修改的文件列表**: app/integration/controller.py、scripts/run_ui_skeleton.py、README.md
+
+---
+
+## 会话总结 - 2026-08-15 (11)
+
+- **会话主要目的**: 原唱 Tab 从普通说话切 AI 唱歌时不应停播、不应倒退进度
+- **完成的主要任务**: `_song_unified_ready` 允许原唱条目（仅伴奏 mp3）走统一流 ai_sing 热切换，避免 stop+WavPlayer 重载
+- **关键决策与解决方案**: 原唱 AI 唱歌 = 同一条伴奏 timeline 无缝切模式；唱歌 Tab 仍要求 inst+vocal
+- **使用的技术栈**: AudioStreamManager 四模式互切
+- **修改的文件列表**: app/integration/controller.py、README.md
+
+---
+
+## 会话总结 - 2026-08-15 (12)
+
+- **会话主要目的**: 修复原唱 Tab 切模式回退、唱歌/原唱 Tab 互切仍后台播放
+- **完成的主要任务**:
+  1. 切换唱歌/原唱 Tab 时 `playback_lib_tab` 停止当前播放并仅加载新歌单 metadata
+  2. 统一流同曲热切换禁止 backward seek（异步 dispatch 携带的旧 position 导致倒退）
+  3. 同 timeline 模式切换用 `sync_at` 而非 `reset_sync`；AI 唱歌不再重复 `_select_song` reload 歌词
+- **关键决策与解决方案**: Tab 切换=停播+换库；四模式互切保持 inst_pos 只前进不后退
+- **使用的技术栈**: PyQt6、AudioStreamManager、Controller
+- **修改的文件列表**: app/ui/pages/playback_page.py、app/integration/controller.py、app/audio/stream_manager.py、app/audio/service.py、README.md
+
+---
+
+## 会话总结 - 2026-08-15 (13)
+
+- **会话主要目的**: 纠正 Tab 切换逻辑——切 Tab 不停播；跨库双击新歌时须停掉旧歌
+- **完成的主要任务**:
+  1. 撤销切 Tab 自动停播与 `playback_lib_tab`；Tab 只换列表 UI
+  2. 切 Tab 不再向 controller 写入新歌 metadata（避免 lib_changed 误判）
+  3. 双击切歌时 `_stop_prev_if_needed`：跨歌曲/跨库必先 `_release_playback_source` 再播新歌
+- **关键决策与解决方案**: 播放会话跟 controller.selected_song 绑定，仅双击切歌才切换
+- **使用的技术栈**: PyQt6、Controller 切歌链路
+- **修改的文件列表**: app/ui/pages/playback_page.py、app/integration/controller.py、README.md
