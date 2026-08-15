@@ -2492,3 +2492,24 @@ ewrite；扩展 LyricWord 与字级 matcher
 - **关键决策与解决方案**: 显式 URL 仍优先；否则 `base_url + nginx_prefix` 拼 API；也可从 `update.check_url` 回退推导并带前缀
 - **使用的技术栈**: Python urllib.parse、ConfigStore、PyQt6 设置页
 - **修改的文件列表**: app/ops/server_url.py、app/ops/auth_client.py、app/ops/crash_reporter.py、app/config_store.py、config/client.json、app/ui/settings_dialog.py、app/integration/controller.py、README.md
+
+---
+
+## 会话总结 - 2026-08-15 (3)
+
+- **诉求**: 制作歌曲完成后不要自动切到播放页，留在当前 Tab，仅日志提示完成
+- **实现**: 移除 `offline_finished` 中的 `switch_to_playback`；`bridge.log_message` 输出制作完成
+- **修改的文件列表**: scripts/run_ui_skeleton.py、README.md
+
+---
+
+## 会话总结 - 2026-08-15 (4)
+
+- **会话主要目的**: 修复制作页多文件批量做歌只处理第一首的问题
+- **完成的主要任务**:
+  1. 制作页提交任务时收集 file_list 全部路径为 `inputs` 列表
+  2. `_offline_worker` 按队列顺序逐首调用 `OfflineSongPipeline.run`，进度按「第 N/M 首」缩放
+  3. 完成后 `offline_finished` 携带 `results` 列表；UI 输出结果区展示每首成品路径
+- **关键决策与解决方案**: 单 pipeline 实例复用、worker 内循环；任一首失败或取消则终止整批；歌词仍按每首 stem 复制同一 lrc 源（若提供）
+- **使用的技术栈**: PyQt6、OfflineSongPipeline、Controller 线程 worker
+- **修改的文件列表**: app/ui/pages/song_make_page.py、app/integration/controller.py、scripts/run_ui_skeleton.py、README.md

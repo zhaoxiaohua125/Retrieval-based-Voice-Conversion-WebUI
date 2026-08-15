@@ -499,8 +499,10 @@ class SongMakePage(QWidget):
             QMessageBox.information(self, '提示', '请先在「高级参数设置」中导入 RVC 模型，或放入 assets/weights 后点刷新')
             return
         preset = 'powerful' if self.btn_preset_powerful.isChecked() else 'normal'
+        inputs = [self.file_list.item(i).text() for i in range(self.file_list.count())]
         payload = {
-            'input': self.file_list.item(0).text(),
+            'input': inputs[0],
+            'inputs': inputs,
             'preset': preset,
             'model': model,
             'output_dir': self.offline_output.text().strip(),
@@ -511,7 +513,7 @@ class SongMakePage(QWidget):
         }
         if self._lrc_path:
             payload['lrc_path'] = self._lrc_path
-        self.bridge.emit_action('offline_cover', **payload, log='已提交离线制作任务')
+        self.bridge.emit_action('offline_cover', **payload, log='已提交离线制作任务（%d 首）' % len(inputs))
 
     def _cancel_offline(self):
         self.bridge.emit_action('offline_cancel', log='已请求取消制作')
@@ -567,9 +569,10 @@ class SongMakePage(QWidget):
                 style = 'padding:4px 8px;border-radius:6px;color:#64748b;background:#f1f5f9;'
             lb.setStyleSheet(style)
 
-    def show_offline_result(self, result: dict):
+    def show_offline_result(self, result):
+        results = result if isinstance(result, list) else [result or {}]
         self.offline_progress.setValue(100)
-        self.offline_status.setText('制作完成')
+        self.offline_status.setText('制作完成（共 %d 首）' % len(results) if len(results) > 1 else '制作完成')
         self._set_phase('done')
         self.result_list.clear()
         labels = (
@@ -579,12 +582,19 @@ class SongMakePage(QWidget):
             ('instrumental_path', '伴奏'),
             ('lrc_path', '歌词'),
         )
-        for key, label in labels:
-            path = (result or {}).get(key)
-            if path:
-                item = QListWidgetItem('%s：%s' % (label, path))
-                item.setData(Qt.ItemDataRole.UserRole, path)
-                self.result_list.addItem(item)
+        for res in results:
+            res = res or {}
+            stem = Path((res.get('cover_path') or res.get('converted_vocal_path') or '')).stem
+            if stem and len(results) > 1:
+                head = QListWidgetItem('【%s】' % stem)
+                head.setFlags(Qt.ItemFlag.NoItemFlags)
+                self.result_list.addItem(head)
+            for key, label in labels:
+                path = res.get(key)
+                if path:
+                    item = QListWidgetItem('%s：%s' % (label, path))
+                    item.setData(Qt.ItemDataRole.UserRole, path)
+                    self.result_list.addItem(item)
         self.set_offline_running(False)
 
     def show_offline_failed(self, message: str):

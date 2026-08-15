@@ -260,13 +260,10 @@ def main():
                 if action == 'offline_started':
                     make.set_offline_running(True)
                 elif action == 'offline_finished':
-                    make.show_offline_result(payload.get('result') or {})
+                    make.show_offline_result(payload.get('results') or payload.get('result') or {})
                     page.apply_library(controller.library, inst_songs=controller.library_inst)
-                    title = payload.get('title') or ''
-                    if title:
-                        window.switch_to_playback(title)
-                    else:
-                        window.switch_to_playback()
+                    log = payload.get('log') or ('制作完成：%s' % (payload.get('title') or ''))
+                    bridge.log_message.emit(log)
                 elif action == 'offline_failed':
                     make.show_offline_failed(payload.get('message', ''))
                 elif action == 'offline_cancelled':

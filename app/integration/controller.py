@@ -2171,11 +2171,18 @@ class ClientController:
             return
         if self.state.realtime_running:
             self.stop_realtime()
-        input_path = (payload or {}).get('input', '')
+        inputs = [str(p).strip() for p in (payload or {}).get('inputs') or [] if str(p).strip()]
+        if not inputs:
+            one = (payload or {}).get('input', '')
+            if one:
+                inputs = [str(one).strip()]
         model = (payload or {}).get('model', '')
-        if not input_path or not model:
+        if not inputs or not model:
             self._publish_error('离线做歌缺少 input 或 model')
             return
+        payload = dict(payload or {})
+        payload['inputs'] = inputs
+        payload['input'] = inputs[0]
         thread = threading.Thread(
             target=self._offline_worker,
             args=(dict(payload),),
@@ -2186,7 +2193,7 @@ class ClientController:
         self.state.offline_running = True
         self.state.mode = 'offline'
         self.scheduler.register_thread('offline-cover', thread)
-        self._publish_status('offline_started', log='离线做歌已开始…')
+        self._publish_status('offline_started', log='离线做歌已开始（%d 首）…' % len(inputs))
         thread.start()
 
     def _cancel_offline_user(self, payload=None):
@@ -2201,6 +2208,11 @@ class ClientController:
 
         preset = payload.get('preset', 'normal')
         output_dir = payload.get('output_dir', 'opt/task4_offline')
+        inputs = [str(p).strip() for p in payload.get('inputs') or [] if str(p).strip()]
+        if not inputs:
+            one = str(payload.get('input') or '').strip()
+            if one:
+                inputs = [one]
         params = RvcInferParams(
             f0_up_key=int(payload.get('f0_up_key', 0)),
             f0_method=str(payload.get('f0_method', 'rmvpe')),
@@ -2210,32 +2222,68 @@ class ClientController:
         )
         pipeline = OfflineSongPipeline(work_root=str(Path(output_dir) / 'msst_work'), msst_keep_work=False)
         self._offline_pipeline = pipeline
-        terminal = None
+        batch_total = len(inputs)
+        all_results = []
+        lrc_src = (payload.get('lrc_path') or '').strip()
         try:
-            for event in pipeline.run(
-                payload.get('model'),
-                payload.get('input'),
-                vc=None,
-                preset_id=preset,
-                output_dir=output_dir,
-                rvc_params=params,
-                mix_cover=True,
-                output_format='wav',
-                event_callback=lambda e: self._publish_progress(**e),
-            ):
-                if event.get('event') in {'result', 'failed', 'cancelled'}:
-                    terminal = event
-            if terminal and terminal.get('event') == 'result':
+            for batch_idx, input_path in enumerate(inputs):
+                title = Path(input_path).name
+                self._publish_progress(
+                    percent=int(batch_idx / batch_total * 100),
+                    message='正在处理 %d/%d：%s' % (batch_idx + 1, batch_total, title),
+                    phase='msst',
+                )
+
+                def _event_cb(event, bi=batch_idx, bt=batch_total):
+                    e = dict(event)
+                    inner = float(e.get('percent', 0) or 0)
+                    e['percent'] = int((bi + inner / 100.0) / bt * 100)
+                    if bt > 1 and not e.get('message'):
+                        e['message'] = '第 %d/%d 首' % (bi + 1, bt)
+                    self._publish_progress(**e)
+
+                terminal = None
+                for event in pipeline.run(
+                    payload.get('model'),
+                    input_path,
+                    vc=None,
+                    preset_id=preset,
+                    output_dir=output_dir,
+                    rvc_params=params,
+                    mix_cover=True,
+                    output_format='wav',
+                    event_callback=_event_cb,
+                ):
+                    if event.get('event') in {'result', 'failed', 'cancelled'}:
+                        terminal = event
+                if not terminal:
+                    self._publish_status('offline_failed', message='离线做歌无结果：%s' % title)
+                    self._publish_error('离线做歌无结果：%s' % title)
+                    return
+                if terminal.get('event') == 'cancelled':
+                    self._publish_status(
+                        'offline_cancelled',
+                        message=terminal.get('message') or '制作已取消',
+                        log='制作已取消',
+                    )
+                    return
+                if terminal.get('event') != 'result':
+                    msg = terminal.get('message') or terminal.get('event') or 'offline failed'
+                    detail = (terminal.get('detail') or '').strip()
+                    if detail and detail not in msg:
+                        msg = '%s\n%s' % (msg, detail[:2000])
+                    self._publish_status('offline_failed', message='%s（%s）' % (msg, title))
+                    self._publish_error(msg)
+                    return
                 result = terminal.get('result')
                 cover = getattr(result, 'cover_path', None) or terminal.get('cover_path')
                 used_model = payload.get('model', '')
-                if used_model:
+                if used_model and batch_idx == 0:
                     self.state.current_model = used_model
                     self.config_store.set('realtime.model_sid', used_model)
                     self.config_store.save()
                 result_dict = result.as_dict() if hasattr(result, 'as_dict') else {}
-                stem = Path(payload.get('input', '')).stem
-                lrc_src = (payload.get('lrc_path') or '').strip()
+                stem = Path(input_path).stem
                 if lrc_src and Path(lrc_src).is_file() and stem:
                     out_lrc = Path(output_dir) / ('%s.lrc' % stem)
                     try:
@@ -2247,27 +2295,19 @@ class ClientController:
                         result_dict['lrc_path'] = str(out_lrc.resolve())
                     except Exception as exc:
                         logger.warning('copy/enhance lrc failed: %s', exc)
-                self._publish_status(
-                    'offline_finished',
-                    log='离线做歌完成：%s' % (cover or output_dir),
-                    title=stem,
-                    cover_path=cover,
-                    result=result_dict,
-                )
-                self._refresh_library()
-            elif terminal and terminal.get('event') == 'cancelled':
-                self._publish_status(
-                    'offline_cancelled',
-                    message=terminal.get('message') or '制作已取消',
-                    log='制作已取消',
-                )
-            elif terminal:
-                msg = terminal.get('message') or terminal.get('event') or 'offline failed'
-                detail = (terminal.get('detail') or '').strip()
-                if detail and detail not in msg:
-                    msg = '%s\n%s' % (msg, detail[:2000])
-                self._publish_status('offline_failed', message=msg)
-                self._publish_error(msg)
+                all_results.append(result_dict)
+            last = all_results[-1] if all_results else {}
+            cover = last.get('cover_path')
+            log = '离线做歌完成：共 %d 首' % len(all_results) if batch_total > 1 else '离线做歌完成：%s' % (cover or output_dir)
+            self._publish_status(
+                'offline_finished',
+                log=log,
+                title=Path(inputs[-1]).stem if inputs else '',
+                cover_path=cover,
+                result=last,
+                results=all_results,
+            )
+            self._refresh_library()
         except ModuleNotFoundError as exc:
             msg = '未检测到 PyTorch，无法做歌。请使用 build_demo_package.bat 重新打包（含 CondaPack），或安装 conda 环境 rvc312 后重启。' if exc.name == 'torch' else str(exc)
             logger.error('offline worker failed:\n%s', traceback.format_exc())
