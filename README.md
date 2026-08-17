@@ -2665,3 +2665,61 @@ ewrite；扩展 LyricWord 与字级 matcher
   3. 崩溃打包/检测适配新文件名；主日志 Formatter 含完整日期时间
 - **使用的技术栈**: logging.FileHandler、app/ops/rotating_log.py
 - **修改的文件列表**: app/ops/rotating_log.py、app/ops/crash_reporter.py、app/ops/log_bundle.py、scripts/run_ui_skeleton.py、README.md
+
+---
+
+## 会话总结 - 2026-08-17 (3)
+
+- **会话主要目的**: 桌面悬浮歌词增加横屏/竖屏切换，原有歌词展示逻辑保持不变
+- **完成的主要任务**:
+  1. `LyricsWindow` 支持横/竖方向切换；竖屏按字换行并保留逐字高亮颜色
+  2. 右键菜单可选「横屏展示 / 竖屏展示」；托盘增加「歌词横/竖切换」
+  3. 方向与窗口 geometry 写入 `ui.lyrics_window` 持久化；有存档时启动不再强制挪位
+- **关键决策与解决方案**: 播放页歌词不动；桌面窗默认仍为横屏；仅切换方向时改尺寸与排版，`set_line` / `set_lyric_tick` API 不变
+- **使用的技术栈**: PyQt6（Frameless 置顶窗、QMenu、RichText）
+- **修改的文件列表**: app/ui/lyrics_window.py、app/ui/tray.py、scripts/run_ui_skeleton.py、README.md
+
+---
+
+## 会话总结 - 2026-08-17 (4)
+
+- **会话主要目的**: 修复客户端启动失败：`TimestampedLogWriter` 无 `fileno` 导致 `faulthandler.enable` 报错
+- **完成的主要任务**:
+  1. `TimestampedLogWriter` 增加 `fileno()`，委托底层文件描述符
+  2. `_install_crash_diagnostics` 用模块级 `_crash_log_file` 持有 writer，避免被 GC 关闭
+- **关键决策与解决方案**: `faulthandler` 走 C 层 `fileno`，必须暴露真实 FD；Python `write` 仍可前缀时间戳
+- **使用的技术栈**: Python faulthandler
+- **修改的文件列表**: app/ops/rotating_log.py、scripts/run_ui_skeleton.py、README.md
+
+---
+
+## 会话总结 - 2026-08-17 (5)
+
+- **会话主要目的**: 用户在主界面找不到「桌面歌词」入口
+- **完成的主要任务**:
+  1. 说明桌面歌词是独立悬浮窗，原先仅托盘菜单可开关且默认不 show
+  2. 启动时默认 `lyrics.show()`；播放页右侧增加「桌面歌词」按钮
+  3. 托盘文案改为「显示/隐藏桌面歌词」「桌面歌词横/竖切换」
+- **关键决策与解决方案**: 主界面补发现入口；横/竖仍在悬浮窗右键或托盘切换
+- **使用的技术栈**: PyQt6
+- **修改的文件列表**: app/ui/pages/playback_page.py、scripts/run_ui_skeleton.py、app/ui/tray.py、README.md
+
+---
+
+## 会话总结 - 2026-08-17 (6)
+
+- **会话主要目的**: 桌面歌词悬浮窗无法拖动位置
+- **完成的主要任务**: `QLabel` 设置 `WA_TransparentForMouseEvents`，鼠标事件落到窗口以便拖拽
+- **关键决策与解决方案**: 拖拽逻辑已在 `LyricsWindow`，被子控件吞事件导致失效
+- **使用的技术栈**: PyQt6
+- **修改的文件列表**: app/ui/lyrics_window.py、README.md
+
+---
+
+## 会话总结 - 2026-08-17 (7)
+
+- **会话主要目的**: 桌面歌词默认不展示，由用户主动点「桌面歌词」打开
+- **完成的主要任务**: 去掉启动时 `lyrics.show()`
+- **关键决策与解决方案**: 悬浮窗仍创建并接托盘/按钮，仅默认隐藏
+- **使用的技术栈**: PyQt6
+- **修改的文件列表**: scripts/run_ui_skeleton.py、README.md

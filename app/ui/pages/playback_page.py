@@ -214,8 +214,12 @@ class PlaybackPage(QWidget):
             '进歌只会快速补齐或沿用文件缓存；改引擎后需再点此按钮才会重算。'
         )
         self.btn_enhance_lrc.clicked.connect(clicked(lambda: self.bridge.emit_action('lyrics_enhance')))
+        self.btn_desktop_lyrics = QPushButton('桌面歌词')
+        self.btn_desktop_lyrics.setToolTip('显示/隐藏桌面悬浮歌词窗；右键该窗可切换横/竖屏')
+        self.btn_desktop_lyrics.clicked.connect(clicked(lambda: self.bridge.emit_action('toggle_desktop_lyrics')))
         right_head.addStretch()
         right_head.addWidget(self.btn_enhance_lrc)
+        right_head.addWidget(self.btn_desktop_lyrics)
         right_layout.addLayout(right_head)
         self.lyrics_list = QListWidget()
         self.lyrics_list.setStyleSheet('font-size:13px;color:#64748b;')

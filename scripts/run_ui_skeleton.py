@@ -60,15 +60,20 @@ from app.ui import MainWindow, LyricsWindow, UiBridge, build_tray
 from app.ui.tray import fallback_app_icon
 
 
+_crash_log_file = None
+
+
 def _install_crash_diagnostics():
     import faulthandler
 
     from app.ops.rotating_log import TimestampedLogWriter, dated_log_path
 
+    global _crash_log_file
     log_dir = ROOT / 'logs' / 'client'
     log_dir.mkdir(parents=True, exist_ok=True)
     try:
-        faulthandler.enable(file=TimestampedLogWriter(dated_log_path(log_dir, 'crash')), all_threads=True)
+        _crash_log_file = TimestampedLogWriter(dated_log_path(log_dir, 'crash'))
+        faulthandler.enable(file=_crash_log_file, all_threads=True)
     except OSError:
         faulthandler.enable()
 
@@ -227,6 +232,14 @@ def main():
             _startup_log('controller ready')
 
             def on_user_action(action: str, payload: dict):
+                if action == 'toggle_desktop_lyrics':
+                    lyrics = ctx.get('lyrics') or getattr(window, '_quit_lyrics', None)
+                    if lyrics is not None:
+                        show = not lyrics.isVisible()
+                        lyrics.setVisible(show)
+                        if show:
+                            lyrics.raise_()
+                    return
                 scheduler.publish(BusMessage(SignalType.STATUS, ModuleId.UI, {'action': action, **(payload or {})}))
                 if payload.get('log'):
                     bridge.log_message.emit(str(payload['log']))
@@ -445,7 +458,8 @@ def main():
 
             def _init_lyrics_tray():
                 lyrics = LyricsWindow()
-                lyrics.move(window.x() + 40, window.y() + 80)
+                if not getattr(lyrics, '_restored_geo', False):
+                    lyrics.move(window.x() + 40, window.y() + 80)
                 controller.set_lyrics_window(lyrics)
                 ctx['lyrics'] = lyrics
                 window._quit_lyrics = lyrics

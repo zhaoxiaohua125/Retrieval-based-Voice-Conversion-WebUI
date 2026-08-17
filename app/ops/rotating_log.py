@@ -73,7 +73,7 @@ def iter_all_log_files(base_log_dir) -> list[Path]:
 
 
 class TimestampedLogWriter:
-    """faulthandler 等直写文件的包装：每条记录前加时间戳。"""
+    """faulthandler 等直写文件的包装：Python write 时前缀时间戳；fileno 供 C 层直写。"""
 
     def __init__(self, path: Path):
         self._f = open(path, 'a', encoding='utf-8', buffering=1)
@@ -88,6 +88,9 @@ class TimestampedLogWriter:
 
     def flush(self):
         self._f.flush()
+
+    def fileno(self):
+        return self._f.fileno()
 
     def close(self):
         self._f.close()

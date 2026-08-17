@@ -118,12 +118,21 @@
   },
   "ui": {
     "geometry": [
-      415,
-      268,
+      215,
+      207,
       1280,
       912
     ],
     "active_tab": 3,
-    "active_nav_tab": 0
+    "active_nav_tab": 0,
+    "lyrics_window": {
+      "orientation": "horizontal",
+      "geometry": [
+        606,
+        857,
+        560,
+        304
+      ]
+    }
   }
 }

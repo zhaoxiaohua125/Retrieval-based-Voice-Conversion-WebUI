@@ -38,13 +38,18 @@ def build_tray(bridge, main_window, lyrics_window=None, controller=None):
     menu.addAction(act_show)
 
     if lyrics_window is not None:
-        act_lyrics = QAction('显示/隐藏歌词窗', main_window)
+        act_lyrics = QAction('显示/隐藏桌面歌词', main_window)
 
         def toggle_lyrics():
             lyrics_window.setVisible(not lyrics_window.isVisible())
+            if lyrics_window.isVisible():
+                lyrics_window.raise_()
 
         act_lyrics.triggered.connect(toggle_lyrics)
         menu.addAction(act_lyrics)
+        act_orient = QAction('桌面歌词横/竖切换', main_window)
+        act_orient.triggered.connect(lyrics_window.toggle_orientation)
+        menu.addAction(act_orient)
 
     act_ai = QAction('启停 AI 跟唱', main_window)
     act_ai.triggered.connect(lambda: bridge.emit_action('ai_toggle'))
