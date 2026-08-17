@@ -11,6 +11,7 @@ from app.ops.hardware import collect_environment_info
 from app.ops.log_bundle import bundle_log_files
 from app.ops.log_reporter import upload_log_bundle
 from app.ops.server_url import cfg_get, join_server_api
+from app.ops.rotating_log import iter_client_logs, iter_named_logs
 from app.ops.version import CLIENT_VERSION
 
 logger = logging.getLogger('rvc_client.crash')
@@ -30,15 +31,20 @@ def _log_dir(project_root, config) -> Path:
 
 
 def _extra_log_files(log_dir: Path) -> list:
-    return [str(log_dir / n) for n in ('crash.log', 'stderr.log', 'stdout.log', 'startup.log') if (log_dir / n).is_file()]
+    out = []
+    for stem in ('crash', 'stderr', 'stdout', 'startup'):
+        for p in iter_named_logs(log_dir, stem):
+            s = str(p)
+            if s not in out:
+                out.append(s)
+    return out
 
 
 def _has_log_content(log_dir: Path) -> bool:
-    for name in ('crash.log', 'stderr.log', 'startup.log'):
-        p = log_dir / name
+    for p in iter_client_logs(log_dir) + iter_named_logs(log_dir, 'crash') + iter_named_logs(log_dir, 'startup'):
         if p.is_file() and p.stat().st_size > 0:
             return True
-    for p in log_dir.glob('client.log*'):
+    for p in iter_named_logs(log_dir, 'stderr'):
         if p.is_file() and p.stat().st_size > 0:
             return True
     return False

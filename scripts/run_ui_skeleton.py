@@ -11,12 +11,14 @@ os.chdir(ROOT)
 
 
 def _ensure_stdio(root: Path):
+    from app.ops.rotating_log import dated_log_path
+
     log_dir = root / 'logs' / 'client'
     log_dir.mkdir(parents=True, exist_ok=True)
     if sys.stdout is None:
-        sys.stdout = open(log_dir / 'stdout.log', 'a', encoding='utf-8', buffering=1)
+        sys.stdout = open(dated_log_path(log_dir, 'stdout'), 'a', encoding='utf-8', buffering=1)
     if sys.stderr is None:
-        sys.stderr = open(log_dir / 'stderr.log', 'a', encoding='utf-8', buffering=1)
+        sys.stderr = open(dated_log_path(log_dir, 'stderr'), 'a', encoding='utf-8', buffering=1)
 
 
 _ensure_stdio(ROOT)
@@ -61,25 +63,26 @@ from app.ui.tray import fallback_app_icon
 def _install_crash_diagnostics():
     import faulthandler
 
+    from app.ops.rotating_log import TimestampedLogWriter, dated_log_path
+
     log_dir = ROOT / 'logs' / 'client'
     log_dir.mkdir(parents=True, exist_ok=True)
     try:
-        faulthandler.enable(file=open(log_dir / 'crash.log', 'a', encoding='utf-8'), all_threads=True)
+        faulthandler.enable(file=TimestampedLogWriter(dated_log_path(log_dir, 'crash')), all_threads=True)
     except OSError:
         faulthandler.enable()
 
 
 def _startup_log(msg: str):
     import logging
+
+    from app.ops.rotating_log import append_dated_line
+
     logging.getLogger('rvc_client').info('startup: %s', msg)
     if not (ROOT / 'VERSION').is_file():
         return
     try:
-        log = ROOT / 'logs' / 'client' / 'startup.log'
-        log.parent.mkdir(parents=True, exist_ok=True)
-        with open(log, 'a', encoding='utf-8') as f:
-            f.write(msg + '\n')
-            f.flush()
+        append_dated_line(ROOT / 'logs' / 'client', 'startup', msg)
     except OSError:
         pass
 
@@ -102,7 +105,7 @@ def _fatal_startup(app, title: str, detail: str, exc: BaseException | None = Non
         pass
     try:
         if app is not None:
-            QMessageBox.critical(None, title, detail if exc is None else '%s\n\n详见 logs/client/startup.log' % detail)
+            QMessageBox.critical(None, title, detail if exc is None else '%s\n\n详见 logs/client/日期/startup.log' % detail)
     except Exception:
         pass
 

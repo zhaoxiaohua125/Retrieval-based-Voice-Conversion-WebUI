@@ -2625,7 +2625,26 @@ ewrite；扩展 LyricWord 与字级 matcher
 
 ---
 
-## 会话总结 - 2026-08-15 (3)
+## 会话总结 - 2026-08-17
+
+- **会话主要目的**: 客户端日志按天切分，startup/crash 日志补时间戳
+- **完成的主要任务**:
+  1. 主日志改为 `client-YYYY-MM-DD.log`（按自然日追加，不再按 5MB 滚动）
+  2. `startup-YYYY-MM-DD.log`、`crash-YYYY-MM-DD.log` 等同样按天；每行前缀 `YYYY-MM-DD HH:MM:SS |`
+  3. 崩溃上报/打包适配新文件名（兼容旧 `*.log`）
+- **关键决策与解决方案**: 统一工具在 `app/ops/rotating_log.py`；faulthandler 用 `TimestampedLogWriter` 包装
+- **使用的技术栈**: Python logging、FileHandler
+- **修改的文件列表**: app/ops/rotating_log.py、scripts/run_ui_skeleton.py、app/ops/crash_reporter.py、app/ops/log_bundle.py、README.md
+
+---
+
+## 会话总结 - 2026-08-17 (2)
+
+- **会话主要目的**: 日志按天分子目录，避免 logs/client 下文件过多混乱
+- **完成的主要任务**: 目录结构改为 `logs/client/YYYY-MM-DD/{client,startup,crash,...}.log`；打包上报保留相对路径；兼容旧扁平 `*-日期.log`
+- **关键决策与解决方案**: `daily_log_dir` + 简单文件名；zip 内路径含日期子目录
+- **使用的技术栈**: Python logging、Path
+- **修改的文件列表**: app/ops/rotating_log.py、app/ops/log_bundle.py、scripts/run_ui_skeleton.py、README.md
 
 - **会话主要目的**: 修复编译为 .pyd 后切换普通/混响说话报 `must be real number, not NoneType`
 - **完成的主要任务**:
@@ -2634,3 +2653,15 @@ ewrite；扩展 LyricWord 与字级 matcher
 - **关键决策与解决方案**: 保留 `seek_sec is None` 表示同曲不 seek 的语义；避免 Cython 注解 typing 破坏该约定
 - **使用的技术栈**: Cython .pyd、AudioStreamManager
 - **修改的文件列表**: app/audio/stream_manager.py、app/audio/service.py、README.md
+
+---
+
+## 会话总结 - 2026-08-17
+
+- **会话主要目的**: 客户端日志按天切分，startup/crash 日志带时间戳
+- **完成的主要任务**:
+  1. `client/startup/crash/stdout/stderr` 改为 `{name}-YYYY-MM-DD.log` 按天追加
+  2. `startup` 行格式 `YYYY-MM-DD HH:MM:SS | 消息`；`crash` 用 `TimestampedLogWriter` 前缀时间
+  3. 崩溃打包/检测适配新文件名；主日志 Formatter 含完整日期时间
+- **使用的技术栈**: logging.FileHandler、app/ops/rotating_log.py
+- **修改的文件列表**: app/ops/rotating_log.py、app/ops/crash_reporter.py、app/ops/log_bundle.py、scripts/run_ui_skeleton.py、README.md
