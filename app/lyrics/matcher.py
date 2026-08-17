@@ -1,6 +1,7 @@
 """播放时间 T 匹配歌词行/字。"""
 
 from dataclasses import dataclass
+from html import escape
 
 from app.lyrics.types import LyricDocument, LyricLine
 
@@ -11,6 +12,13 @@ class LyricMatch:
     line: LyricLine | None
     time_sec: float
     word_index: int = -1
+    next_text: str = ''
+    page_base: int = 0
+    page_top_text: str = ''
+    page_bot_text: str = ''
+    page_top_html: str = ''
+    page_bot_html: str = ''
+    page_has_words: bool = False
 
     def to_dict(self):
         line = self.line
@@ -19,11 +27,18 @@ class LyricMatch:
             'word_index': self.word_index,
             'time_sec': self.time_sec,
             'text': line.text if line else '',
+            'next_text': self.next_text or '',
             'html': line.highlight_html(self.word_index, 'dark') if line else '',
             'html_light': line.highlight_html(self.word_index, 'light') if line else '',
             'has_words': bool(line and line.words),
             'start_sec': line.start_sec if line else 0.0,
             'end_sec': line.end_sec if line else 0.0,
+            'page_base': self.page_base,
+            'page_top_text': self.page_top_text or '',
+            'page_bot_text': self.page_bot_text or '',
+            'page_top_html': self.page_top_html or '',
+            'page_bot_html': self.page_bot_html or '',
+            'page_has_words': bool(self.page_has_words),
         }
 
 
@@ -72,7 +87,61 @@ class LyricMatcher:
                         word_index = w.index
                     else:
                         break
-        return LyricMatch(index=chosen_index, line=chosen, time_sec=t, word_index=word_index)
+        next_text = ''
+        if chosen_index >= 0 and chosen_index + 1 < len(self.document.lines):
+            next_text = self.document.lines[chosen_index + 1].text or ''
+        elif chosen_index < 0 and self.document.lines:
+            next_text = self.document.lines[0].text or ''
+        page = self._page_pair(chosen_index, word_index)
+        return LyricMatch(
+            index=chosen_index,
+            line=chosen,
+            time_sec=t,
+            word_index=word_index,
+            next_text=next_text,
+            **page,
+        )
+
+    def _page_pair(self, chosen_index: int, word_index: int) -> dict:
+        """酷狗双行页：0/1 一页，2/3 一页；页内两行都唱完才翻页。"""
+        lines = self.document.lines
+        if not lines:
+            return {}
+        page_base = 0 if chosen_index < 0 else (chosen_index // 2) * 2
+        top = lines[page_base] if page_base < len(lines) else None
+        bot = lines[page_base + 1] if page_base + 1 < len(lines) else None
+        top_text = (top.text if top else '') or ''
+        bot_text = (bot.text if bot else '') or ''
+        has_words = bool((top and top.words) or (bot and bot.words))
+
+        def _html(line: LyricLine | None, wi: int) -> str:
+            if not line:
+                return ''
+            if line.words:
+                return line.highlight_html(wi, 'dark')
+            if wi < 0:
+                return '<span style="color:#e2e8f0;">%s</span>' % escape(line.text or '')
+            if wi >= 10**9:
+                return '<span style="color:#93c5fd;">%s</span>' % escape(line.text or '')
+            return '<span style="color:#fbbf24;">%s</span>' % escape(line.text or '')
+
+        if chosen_index < 0:
+            top_html, bot_html = _html(top, -1), _html(bot, -1)
+        elif chosen_index == page_base:
+            top_html = _html(top, word_index if (top and top.words) else 0)
+            bot_html = _html(bot, -1)
+        else:
+            top_done = len(top.words) if (top and top.words) else 10**9
+            top_html = _html(top, top_done)
+            bot_html = _html(bot, word_index if (bot and bot.words) else 0)
+        return {
+            'page_base': page_base,
+            'page_top_text': top_text,
+            'page_bot_text': bot_text,
+            'page_top_html': top_html,
+            'page_bot_html': bot_html,
+            'page_has_words': has_words,
+        }
 
 
 def _line_sing_end(line: LyricLine, next_line: LyricLine | None) -> float:

@@ -2723,3 +2723,116 @@ ewrite；扩展 LyricWord 与字级 matcher
 - **关键决策与解决方案**: 悬浮窗仍创建并接托盘/按钮，仅默认隐藏
 - **使用的技术栈**: PyQt6
 - **修改的文件列表**: scripts/run_ui_skeleton.py、README.md
+
+---
+
+## 会话总结 - 2026-08-17 (8)
+
+- **会话主要目的**: 桌面歌词改为酷狗式双行，并支持拖拽调整窗口大小
+- **完成的主要任务**:
+  1. `LyricMatch` 增加 `next_text`（当前行+下一行）
+  2. `LyricsWindow` 双行展示：上行当前（可逐字高亮）、下行下一句（右对齐淡色）
+  3. 无边框窗口边缘/四角可拖拽缩放，字号随高度变化，尺寸持久化
+- **关键决策与解决方案**: 横屏仿酷狗上下错位；竖屏仍两行竖排；默认不自动弹出
+- **使用的技术栈**: PyQt6、LyricMatcher
+- **修改的文件列表**: app/lyrics/matcher.py、app/ui/lyrics_window.py、README.md
+
+---
+
+## 会话总结 - 2026-08-17 (9)
+
+- **会话主要目的**: 修复点「桌面歌词」后跨线程更新 QLabel 报错
+- **完成的主要任务**: `set_lyric_tick` 经 `pyqtSignal` 队列切回 UI 线程再改控件
+- **关键决策与解决方案**: 歌词同步线程不可直接 `setText`；信号默认 QueuedConnection
+- **使用的技术栈**: PyQt6 pyqtSignal
+- **修改的文件列表**: app/ui/lyrics_window.py、README.md
+
+---
+
+## 会话总结 - 2026-08-17 (10)
+
+- **会话主要目的**: 消除桌面歌词缩放时 `QWindowsWindow::setGeometry` 警告
+- **完成的主要任务**: Label 使用 Ignored 尺寸策略；layout SetNoConstraint；覆盖 `minimumSizeHint`；缩放拖动中不改字号、松手再同步
+- **关键决策与解决方案**: 大字号 QLabel 的 sizeHint 抬高了实际最小高度，导致系统钳制几何并刷警告
+- **使用的技术栈**: PyQt6 QSizePolicy / QLayout
+- **修改的文件列表**: app/ui/lyrics_window.py、README.md
+
+---
+
+## 会话总结 - 2026-08-17 (11)
+
+- **会话主要目的**: 修复竖屏时双行歌词变成一列
+- **完成的主要任务**: 竖屏用 `QBoxLayout.LeftToRight` 左右两列；横屏仍上下两行；最小尺寸按方向区分
+- **关键决策与解决方案**: 竖排字再用上下堆叠会视觉合并成一行，改为左右分列
+- **使用的技术栈**: PyQt6 QBoxLayout
+- **修改的文件列表**: app/ui/lyrics_window.py、README.md
+
+---
+
+## 会话总结 - 2026-08-17 (12)
+
+- **会话主要目的**: 修复竖屏切横屏窗口异常变大、横屏切竖屏尺寸不变
+- **完成的主要任务**: 横/竖分别持久化 `geometry_h` / `geometry_v`；切换前先保存当前模式尺寸，再恢复目标模式尺寸；宽高比例不符时回退默认
+- **关键决策与解决方案**: 不再共用一份 geometry，避免竖屏高度被带到横屏
+- **使用的技术栈**: PyQt6、layout_store
+- **修改的文件列表**: app/ui/lyrics_window.py、README.md
+
+---
+
+## 会话总结 - 2026-08-17 (13)
+
+- **会话主要目的**: 修复运行中横竖屏切换尺寸被竖排 `<br>` 内容撑高，并消除 setGeometry 警告
+- **完成的主要任务**: 切换时先清空标签；用 `setMaximumSize` 强制目标宽高后再填歌词；最后放开 max
+- **关键决策与解决方案**: 日志里目标 640x180 却变成 640x1570，根因是切换瞬间仍保留逐字竖排富文本
+- **使用的技术栈**: PyQt6
+- **修改的文件列表**: app/ui/lyrics_window.py、README.md
+
+---
+
+## 会话总结 - 2026-08-17 (14)
+
+- **会话主要目的**: 竖屏歌词改为酷狗式左右上下错落，不再两列并排
+- **完成的主要任务**: 竖屏改回上下分区；当前句左上对齐、下一句右下对齐；字仍竖排
+- **关键决策与解决方案**: 与横屏同为 TopToBottom，仅对齐与竖排文字不同
+- **使用的技术栈**: PyQt6 QBoxLayout
+- **修改的文件列表**: app/ui/lyrics_window.py、README.md
+
+---
+
+## 会话总结 - 2026-08-17 (15)
+
+- **会话主要目的**: 桌面歌词改为酷狗双行翻页：两行都唱完才换下两行
+- **完成的主要任务**: `LyricMatcher` 增加 page_top/page_bot；`LyricsWindow` 按页渲染；播放页仍用原逐行 next
+- **关键决策与解决方案**: `page_base = index // 2 * 2`；唱上行高亮上、下行待唱；唱下行上行已唱色、下行高亮
+- **使用的技术栈**: LyricMatcher、PyQt6
+- **修改的文件列表**: app/lyrics/matcher.py、app/ui/lyrics_window.py、README.md
+
+---
+
+## 会话总结 - 2026-08-17 (16)
+
+- **会话主要目的**: 横/竖屏切换时分别恢复各自上次的窗口位置
+- **完成的主要任务**: `_pick_mode_geometry` 恢复 `geometry_h` / `geometry_v` 的 x,y,w,h；切换前先保存当前方向
+- **关键决策与解决方案**: 不再切换时沿用当前坐标，只换尺寸
+- **使用的技术栈**: layout_store
+- **修改的文件列表**: app/ui/lyrics_window.py、README.md
+
+---
+
+## 会话总结 - 2026-08-17 (17)
+
+- **会话主要目的**: 修复竖屏歌词展示不全/被遮挡
+- **完成的主要任务**: 竖屏字号按半窗高度与最长句字数自适应；略减内边距；换词后重算字号
+- **关键决策与解决方案**: 原先只按宽度定字号，长句竖排超出半区被裁切
+- **使用的技术栈**: PyQt6 QFont
+- **修改的文件列表**: app/ui/lyrics_window.py、README.md
+
+---
+
+## 会话总结 - 2026-08-17 (18)
+
+- **会话主要目的**: 竖屏长句仍被裁切
+- **完成的主要任务**: 竖屏改回左右整高两列（左上/右下错落）；字号改 `setPixelSize` 并按整窗高度/字数缩放
+- **关键决策与解决方案**: 上下对半导致每句只有半高；且 QFont 点数比像素更大导致低估
+- **使用的技术栈**: PyQt6 QFont/QBoxLayout
+- **修改的文件列表**: app/ui/lyrics_window.py、README.md

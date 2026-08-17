@@ -128,10 +128,22 @@
     "lyrics_window": {
       "orientation": "horizontal",
       "geometry": [
-        606,
-        857,
-        560,
-        304
+        210,
+        1211,
+        1937,
+        166
+      ],
+      "geometry_h": [
+        210,
+        1211,
+        1937,
+        166
+      ],
+      "geometry_v": [
+        2335,
+        139,
+        148,
+        1189
       ]
     }
   }

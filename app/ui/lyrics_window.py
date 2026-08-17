@@ -1,30 +1,67 @@
-"""悬浮歌词窗口（无边框、置顶、可拖拽；支持逐字高亮；横/竖屏切换）。"""
+"""悬浮歌词窗口（无边框、置顶、可拖拽/缩放；双行展示；横/竖屏切换）。"""
 
 import re
+from html import escape
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QAction, QFont
-from PyQt6.QtWidgets import QLabel, QMenu, QVBoxLayout, QWidget
+from PyQt6.QtCore import QSize, Qt, pyqtSignal
+from PyQt6.QtGui import QAction, QCursor, QFont
+from PyQt6.QtWidgets import QBoxLayout, QLabel, QLayout, QMenu, QSizePolicy, QWidget
 
 from app.ui.layout_store import load_ui_layout, save_ui_layout
 
 _ORIENT_H = 'horizontal'
 _ORIENT_V = 'vertical'
-_SIZE_H = (560, 140)
-_SIZE_V = (160, 560)
+_SIZE_H = (640, 180)
+_SIZE_V = (260, 620)
+_MIN_H = (280, 100)
+_MIN_V = (140, 280)
+_EDGE = 8
+_QWIDGETSIZE_MAX = 16777215
 _SPAN_RE = re.compile(r'<span\s+style="([^"]*)">(.*?)</span>', re.I | re.S)
+_EDGE_CURSORS = {
+    'left': Qt.CursorShape.SizeHorCursor,
+    'right': Qt.CursorShape.SizeHorCursor,
+    'top': Qt.CursorShape.SizeVerCursor,
+    'bottom': Qt.CursorShape.SizeVerCursor,
+    'top-left': Qt.CursorShape.SizeFDiagCursor,
+    'bottom-right': Qt.CursorShape.SizeFDiagCursor,
+    'top-right': Qt.CursorShape.SizeBDiagCursor,
+    'bottom-left': Qt.CursorShape.SizeBDiagCursor,
+}
+_STYLE_CUR_H = (
+    'color:#ffffff;background:rgba(0,0,0,170);padding:10px 14px 4px 14px;'
+    'border-top-left-radius:8px;border-top-right-radius:8px;'
+)
+_STYLE_NEXT_H = (
+    'color:#93c5fd;background:rgba(0,0,0,170);padding:4px 14px 10px 14px;'
+    'border-bottom-left-radius:8px;border-bottom-right-radius:8px;'
+)
+_STYLE_CUR_V = (
+    'color:#ffffff;background:rgba(0,0,0,170);padding:10px 6px 10px 10px;'
+    'border-top-left-radius:8px;border-bottom-left-radius:8px;'
+)
+_STYLE_NEXT_V = (
+    'color:#93c5fd;background:rgba(0,0,0,170);padding:10px 10px 10px 6px;'
+    'border-top-right-radius:8px;border-bottom-right-radius:8px;'
+)
 
 
 class LyricsWindow(QWidget):
-    """独立悬浮歌词层，供 OBS 采集。"""
+    """独立悬浮歌词层，供 OBS 采集；酷狗式当前行+下一行。"""
+
+    _tick = pyqtSignal(dict)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._drag_pos = None
+        self._resize_edge = None
+        self._resize_origin = None
         self._orientation = _ORIENT_H
         self._restored_geo = False
         self._last_html = ''
+        self._last_bot_html = ''
         self._last_text = ''
+        self._last_next = ''
         self._last_highlight = False
         self._use_html = False
         self.setWindowFlags(
@@ -34,29 +71,53 @@ class LyricsWindow(QWidget):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setWindowOpacity(0.9)
-        self.label = QLabel('歌词悬浮窗', self)
-        self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.label.setTextFormat(Qt.TextFormat.RichText)
-        self.label.setWordWrap(True)
-        self.label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        self.label.setStyleSheet(
-            'color: #ffffff; background: rgba(0,0,0,170); padding: 16px; border-radius: 8px;'
-        )
-        font = QFont('Microsoft YaHei UI', 20)
-        self.label.setFont(font)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self.label)
+        self.setMouseTracking(True)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
+        self.line_cur = QLabel('歌词悬浮窗', self)
+        self.line_next = QLabel('', self)
+        for lab in (self.line_cur, self.line_next):
+            lab.setTextFormat(Qt.TextFormat.RichText)
+            lab.setWordWrap(True)
+            lab.setMinimumSize(0, 0)
+            lab.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
+            lab.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self._layout = QBoxLayout(QBoxLayout.Direction.TopToBottom, self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._layout.setSpacing(0)
+        self._layout.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
+        self._layout.addWidget(self.line_cur, stretch=1)
+        self._layout.addWidget(self.line_next, stretch=1)
+        self._tick.connect(self._apply_lyric_tick)
         self._restore_layout()
         self._apply_orientation(force_size=not self._restored_geo)
+        self._sync_font()
+
+    def minimumSizeHint(self):
+        return QSize(*(_MIN_V if self._orientation == _ORIENT_V else _MIN_H))
+
+    def sizeHint(self):
+        return QSize(*(_SIZE_V if self._orientation == _ORIENT_V else _SIZE_H))
 
     def set_orientation(self, orientation: str):
         o = _ORIENT_V if orientation == _ORIENT_V else _ORIENT_H
         if o == self._orientation:
             return
+        self._save_layout()
         self._orientation = o
-        self._apply_orientation(force_size=True)
+        # 先清空竖排 <br> 富文本，否则 Windows 会按内容把高度撑到上千
+        self.line_cur.setText('')
+        self.line_next.setText('')
+        self._apply_orientation(force_size=False)
+        x, y, w, h = self._pick_mode_geometry()
+        self._set_geometry_forced(x, y, w, h)
         self._refresh_text()
+        self._sync_font()
+        self._set_geometry_forced(x, y, w, h)
+        self.setMaximumSize(_QWIDGETSIZE_MAX, _QWIDGETSIZE_MAX)
+        if self.width() != w or self.height() != h or self.x() != x or self.y() != y:
+            self.setMaximumSize(w, h)
+            self.setGeometry(x, y, w, h)
+            self.setMaximumSize(_QWIDGETSIZE_MAX, _QWIDGETSIZE_MAX)
         self._save_layout()
 
     def toggle_orientation(self):
@@ -65,28 +126,61 @@ class LyricsWindow(QWidget):
     def orientation(self) -> str:
         return self._orientation
 
-    def set_line(self, text, highlight=False):
+    def set_line(self, text, highlight=False, next_text=''):
+        self._apply_line(text, highlight=highlight, next_text=next_text)
+
+    def set_lyric_tick(self, payload: dict):
+        self._tick.emit(dict(payload or {}))
+
+    def _apply_lyric_tick(self, payload: dict):
+        # 酷狗双行页：page_top/page_bot，两行唱完才翻页
+        top_html = (payload or {}).get('page_top_html') or ''
+        bot_html = (payload or {}).get('page_bot_html') or ''
+        top_text = (payload or {}).get('page_top_text')
+        bot_text = (payload or {}).get('page_bot_text')
+        if top_text is None and bot_text is None:
+            top_text = (payload or {}).get('text') or ''
+            bot_text = (payload or {}).get('next_text') or ''
+            top_html = (payload or {}).get('html') or ''
+            bot_html = ''
+        top_text = top_text or ''
+        bot_text = bot_text or ''
+        self._use_html = bool(top_html or bot_html)
+        self._last_html = top_html
+        self._last_bot_html = bot_html
+        self._last_text = top_text
+        self._last_next = bot_text
+        self._last_highlight = True
+        self._paint_pair(top_html, bot_html, top_text, bot_text)
+
+    def _apply_line(self, text, highlight=False, next_text=''):
         self._use_html = False
         self._last_text = text or ''
         self._last_html = ''
+        self._last_bot_html = ''
+        self._last_next = next_text or ''
         self._last_highlight = bool(highlight)
         color = '#fbbf24' if highlight else '#ffffff'
-        if self._orientation == _ORIENT_V:
-            parts = ['<span style="color:%s;">%s</span>' % (color, c) for c in self._last_text if c not in '\n\r']
-            self.label.setText('<br>'.join(parts) if parts else '')
-        else:
-            self.label.setText('<span style="color:%s;">%s</span>' % (color, self._last_text))
+        top_html = '<span style="color:%s;">%s</span>' % (color, escape(self._last_text)) if self._last_text else ''
+        bot_html = (
+            '<span style="color:#93c5fd;">%s</span>' % escape(self._last_next) if self._last_next else ''
+        )
+        self._paint_pair(top_html, bot_html, self._last_text, self._last_next)
 
-    def set_lyric_tick(self, payload: dict):
-        html = (payload or {}).get('html') or ''
-        text = (payload or {}).get('text') or ''
-        if html and (payload or {}).get('has_words'):
-            self._use_html = True
-            self._last_html = html
-            self._last_text = text
-            self.label.setText(self._html_to_vertical(html) if self._orientation == _ORIENT_V else html)
+    def _paint_pair(self, top_html: str, bot_html: str, top_text: str, bot_text: str):
+        if self._orientation == _ORIENT_V:
+            self.line_cur.setText(
+                self._html_to_vertical(top_html) if top_html else self._plain_vertical(top_text, '#ffffff')
+            )
+            self.line_next.setText(
+                self._html_to_vertical(bot_html) if bot_html else self._plain_vertical(bot_text, '#93c5fd')
+            )
         else:
-            self.set_line(text, highlight=True)
+            self.line_cur.setText(top_html or ('<span style="color:#ffffff;">%s</span>' % escape(top_text) if top_text else ''))
+            self.line_next.setText(
+                bot_html or ('<span style="color:#93c5fd;">%s</span>' % escape(bot_text) if bot_text else '')
+            )
+        self._sync_font()
 
     def contextMenuEvent(self, event):
         menu = QMenu(self)
@@ -103,41 +197,201 @@ class LyricsWindow(QWidget):
         menu.exec(event.globalPos())
 
     def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        edge = self._hit_edge(event.position().toPoint())
+        if edge:
+            self._resize_edge = edge
+            self._resize_origin = (event.globalPosition().toPoint(), self.geometry())
+            self._drag_pos = None
+        else:
+            self._resize_edge = None
             self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
-            event.accept()
+        event.accept()
 
     def mouseMoveEvent(self, event):
+        if self._resize_edge and event.buttons() & Qt.MouseButton.LeftButton and self._resize_origin:
+            self._do_resize(event.globalPosition().toPoint())
+            event.accept()
+            return
         if self._drag_pos is not None and event.buttons() & Qt.MouseButton.LeftButton:
             self.move(event.globalPosition().toPoint() - self._drag_pos)
             event.accept()
+            return
+        edge = self._hit_edge(event.position().toPoint())
+        self.setCursor(QCursor(_EDGE_CURSORS.get(edge, Qt.CursorShape.ArrowCursor)))
+        event.accept()
 
     def mouseReleaseEvent(self, event):
         self._drag_pos = None
+        was_resize = self._resize_edge is not None
+        self._resize_edge = None
+        self._resize_origin = None
+        if was_resize:
+            self._sync_font()
         self._save_layout()
         event.accept()
+
+    def leaveEvent(self, event):
+        self.unsetCursor()
+        super().leaveEvent(event)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self._resize_edge is None:
+            self._sync_font()
 
     def closeEvent(self, event):
         self._save_layout()
         super().closeEvent(event)
 
+    def _hit_edge(self, pos):
+        x, y, w, h = pos.x(), pos.y(), self.width(), self.height()
+        left, right = x <= _EDGE, x >= w - _EDGE
+        top, bottom = y <= _EDGE, y >= h - _EDGE
+        if top and left:
+            return 'top-left'
+        if top and right:
+            return 'top-right'
+        if bottom and left:
+            return 'bottom-left'
+        if bottom and right:
+            return 'bottom-right'
+        if left:
+            return 'left'
+        if right:
+            return 'right'
+        if top:
+            return 'top'
+        if bottom:
+            return 'bottom'
+        return None
+
+    def _do_resize(self, global_pos):
+        origin_pos, geo = self._resize_origin
+        dx = global_pos.x() - origin_pos.x()
+        dy = global_pos.y() - origin_pos.y()
+        x, y, w, h = geo.x(), geo.y(), geo.width(), geo.height()
+        edge = self._resize_edge
+        if 'left' in edge:
+            x, w = x + dx, w - dx
+        if 'right' in edge:
+            w = w + dx
+        if 'top' in edge:
+            y, h = y + dy, h - dy
+        if 'bottom' in edge:
+            h = h + dy
+        if w < self.minimumWidth():
+            if 'left' in edge:
+                x = x - (self.minimumWidth() - w)
+            w = self.minimumWidth()
+        if h < self.minimumHeight():
+            if 'top' in edge:
+                y = y - (self.minimumHeight() - h)
+            h = self.minimumHeight()
+        self.setGeometry(x, y, w, h)
+
+    def _sync_font(self):
+        if self._orientation == _ORIENT_V:
+            n_top = len([c for c in (self._last_text or '') if c not in '\n\r'])
+            n_bot = len([c for c in (self._last_next or '') if c not in '\n\r'])
+            n = max(n_top, n_bot, 1)
+            # 左右列共用整窗高度；用像素字号，并按字数压到能排下
+            avail = max(60, self.height() - 28)
+            by_chars = int(avail / (n * 1.25))
+            by_width = int(self.width() * 0.22)
+            px = max(8, min(28, by_chars, by_width))
+            font = QFont('Microsoft YaHei UI')
+            font.setPixelSize(px)
+            self.line_cur.setFont(font)
+            self.line_next.setFont(font)
+        else:
+            px = max(12, min(42, int(self.height() * 0.26)))
+            font = QFont('Microsoft YaHei UI')
+            font.setPixelSize(px)
+            self.line_cur.setFont(font)
+            font2 = QFont('Microsoft YaHei UI')
+            font2.setPixelSize(max(10, px - 2))
+            self.line_next.setFont(font2)
+
     def _apply_orientation(self, force_size=False):
         if self._orientation == _ORIENT_V:
-            self.label.setWordWrap(False)
-            if force_size:
-                self.resize(*_SIZE_V)
+            # 酷狗竖屏：左右两列整高；左列靠上、右列靠下形成错落，避免上下对半裁切
+            self.setMinimumSize(*_MIN_V)
+            self._layout.setDirection(QBoxLayout.Direction.LeftToRight)
+            self.line_cur.setWordWrap(False)
+            self.line_next.setWordWrap(False)
+            self.line_cur.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
+            self.line_next.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom)
+            self.line_cur.setStyleSheet(_STYLE_CUR_V)
+            self.line_next.setStyleSheet(_STYLE_NEXT_V)
         else:
-            self.label.setWordWrap(True)
-            if force_size:
-                self.resize(*_SIZE_H)
+            self.setMinimumSize(*_MIN_H)
+            self._layout.setDirection(QBoxLayout.Direction.TopToBottom)
+            self.line_cur.setWordWrap(True)
+            self.line_next.setWordWrap(True)
+            self.line_cur.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            self.line_next.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.line_cur.setStyleSheet(_STYLE_CUR_H)
+            self.line_next.setStyleSheet(_STYLE_NEXT_H)
+        if force_size:
+            x, y, w, h = self._pick_mode_geometry()
+            self._set_geometry_forced(x, y, w, h)
+            self.setMaximumSize(_QWIDGETSIZE_MAX, _QWIDGETSIZE_MAX)
+        self._sync_font()
+
+    def _mode_geo_key(self):
+        return 'geometry_v' if self._orientation == _ORIENT_V else 'geometry_h'
+
+    def _default_size(self):
+        return _SIZE_V if self._orientation == _ORIENT_V else _SIZE_H
+
+    def _min_size(self):
+        return _MIN_V if self._orientation == _ORIENT_V else _MIN_H
+
+    def _normalize_mode_size(self, w: int, h: int):
+        mw, mh = self._min_size()
+        dw, dh = self._default_size()
+        w, h = max(mw, int(w)), max(mh, int(h))
+        if self._orientation == _ORIENT_H:
+            if h >= w or h > max(dh * 2, 360):
+                return dw, dh
+        else:
+            if w >= h or w > max(dw * 2, 400) or h > max(dh * 2, 900):
+                return dw, dh
+        return w, h
+
+    def _pick_mode_geometry(self):
+        """恢复该方向上次的位置+尺寸；没有记录则保留当前位置、用默认尺寸。"""
+        cfg = (load_ui_layout().get('lyrics_window') or {})
+        geo = cfg.get(self._mode_geo_key())
+        dw, dh = self._default_size()
+        if isinstance(geo, (list, tuple)) and len(geo) == 4:
+            w, h = self._normalize_mode_size(geo[2], geo[3])
+            return int(geo[0]), int(geo[1]), w, h
+        return self.x(), self.y(), dw, dh
+
+    def _set_geometry_forced(self, x: int, y: int, w: int, h: int):
+        mw, mh = self._min_size()
+        w, h = max(mw, int(w)), max(mh, int(h))
+        self.setMinimumSize(mw, mh)
+        self.setMaximumSize(w, h)
+        self.setGeometry(int(x), int(y), w, h)
+
+    def _apply_mode_geometry(self):
+        x, y, w, h = self._pick_mode_geometry()
+        self._set_geometry_forced(x, y, w, h)
+        self.setMaximumSize(_QWIDGETSIZE_MAX, _QWIDGETSIZE_MAX)
 
     def _refresh_text(self):
-        if self._use_html and self._last_html:
-            self.label.setText(
-                self._html_to_vertical(self._last_html) if self._orientation == _ORIENT_V else self._last_html
-            )
+        if self._use_html and (self._last_html or self._last_bot_html):
+            self._paint_pair(self._last_html, self._last_bot_html, self._last_text, self._last_next)
         else:
-            self.set_line(self._last_text, highlight=self._last_highlight)
+            self._apply_line(self._last_text, highlight=self._last_highlight, next_text=self._last_next)
+
+    def _plain_vertical(self, text: str, color: str) -> str:
+        parts = ['<span style="color:%s;">%s</span>' % (color, escape(c)) for c in (text or '') if c not in '\n\r']
+        return '<br>'.join(parts) if parts else ''
 
     def _html_to_vertical(self, html: str) -> str:
         parts, pos = [], 0
@@ -162,9 +416,10 @@ class LyricsWindow(QWidget):
         cfg = (load_ui_layout().get('lyrics_window') or {})
         o = cfg.get('orientation') or _ORIENT_H
         self._orientation = _ORIENT_V if o == _ORIENT_V else _ORIENT_H
-        geo = cfg.get('geometry')
+        geo = cfg.get(self._mode_geo_key()) or cfg.get('geometry')
         if isinstance(geo, (list, tuple)) and len(geo) == 4:
-            self.setGeometry(int(geo[0]), int(geo[1]), int(geo[2]), int(geo[3]))
+            w, h = self._normalize_mode_size(geo[2], geo[3])
+            self.setGeometry(int(geo[0]), int(geo[1]), w, h)
             self._restored_geo = True
         else:
             self._restored_geo = False
@@ -172,8 +427,15 @@ class LyricsWindow(QWidget):
     def _save_layout(self):
         layout = load_ui_layout()
         g = self.geometry()
-        layout['lyrics_window'] = {
-            'orientation': self._orientation,
-            'geometry': [g.x(), g.y(), g.width(), g.height()],
-        }
+        w, h = self._normalize_mode_size(g.width(), g.height())
+        if w != g.width() or h != g.height():
+            self._set_geometry_forced(g.x(), g.y(), w, h)
+            self.setMaximumSize(_QWIDGETSIZE_MAX, _QWIDGETSIZE_MAX)
+            g = self.geometry()
+        geo = [g.x(), g.y(), g.width(), g.height()]
+        cfg = dict(layout.get('lyrics_window') or {})
+        cfg['orientation'] = self._orientation
+        cfg['geometry'] = geo
+        cfg[self._mode_geo_key()] = geo
+        layout['lyrics_window'] = cfg
         save_ui_layout(layout)
