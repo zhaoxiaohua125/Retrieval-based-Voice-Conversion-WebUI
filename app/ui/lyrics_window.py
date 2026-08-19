@@ -4,8 +4,10 @@ import ctypes
 import re
 from html import escape
 
-from PyQt6.QtCore import QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QAction, QCursor, QFont
+from PyQt6.QtCore import QSize, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import (
+    QAction, QColor, QCursor, QFont, QFontMetrics, QGuiApplication, QPainter, QPalette,
+)
 from PyQt6.QtWidgets import QBoxLayout, QLabel, QLayout, QMenu, QSizePolicy, QWidget
 
 from app.ui.layout_store import load_ui_layout, save_ui_layout
@@ -18,6 +20,7 @@ _MIN_H = (280, 100)
 _MIN_V = (140, 280)
 _EDGE = 8
 _QWIDGETSIZE_MAX = 16777215
+_CHROMA_DEFAULT = '#00FF00'
 _SPAN_RE = re.compile(r'<span\s+style="([^"]*)">(.*?)</span>', re.I | re.S)
 _EDGE_CURSORS = {
     'left': Qt.CursorShape.SizeHorCursor,
@@ -41,6 +44,10 @@ class LyricsWindow(QWidget):
         self._config = config
         self._bg_alpha = 170
         self._win_opacity = 0.9
+        self._capture_mode = 'normal'
+        self._chroma_color = _CHROMA_DEFAULT
+        self._click_through = True
+        self._stay_on_top = False
         self._drag_pos = None
         self._resize_edge = None
         self._resize_origin = None
@@ -52,12 +59,10 @@ class LyricsWindow(QWidget):
         self._last_next = ''
         self._last_highlight = False
         self._use_html = False
+        self._anchor_window = None
+        self._chroma_font = QFont('Microsoft YaHei UI', 10)
         self.setWindowTitle('桌面歌词')
-        self.setWindowFlags(
-            Qt.WindowType.Window
-            | Qt.WindowType.FramelessWindowHint
-            | Qt.WindowType.WindowStaysOnTopHint
-        )
+        self._apply_window_flags()
         self.setMouseTracking(True)
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         self.line_cur = QLabel('歌词悬浮窗', self)
@@ -80,38 +85,192 @@ class LyricsWindow(QWidget):
         self._apply_orientation(force_size=not self._restored_geo)
         self._sync_font()
 
-    def apply_desktop_style(self, bg_alpha=None, opacity=None):
+    def apply_desktop_style(
+        self, bg_alpha=None, opacity=None, capture_mode=None, chroma_color=None,
+        click_through=None, stay_on_top=None,
+    ):
         cfg = self._config
+        if capture_mode is None:
+            capture_mode = cfg.get('lyrics.desktop_capture_mode', 'normal') if cfg else 'normal'
+        if chroma_color is None:
+            chroma_color = cfg.get('lyrics.desktop_chroma_color', _CHROMA_DEFAULT) if cfg else _CHROMA_DEFAULT
         if bg_alpha is None:
             bg_alpha = cfg.get('lyrics.desktop_bg_alpha', 170) if cfg else 170
         if opacity is None:
             opacity = cfg.get('lyrics.desktop_opacity', 0.9) if cfg else 0.9
+        mode = str(capture_mode or 'normal').strip().lower()
+        chroma = mode in ('chroma', 'chroma_key', 'live', 'green')
+        self._capture_mode = 'chroma' if chroma else 'normal'
+        if click_through is None:
+            click_through = cfg.get('lyrics.desktop_click_through') if cfg else None
+        if click_through is None:
+            click_through = chroma
+        if stay_on_top is None:
+            stay_on_top = cfg.get('lyrics.desktop_stay_on_top') if cfg else None
+        if stay_on_top is None:
+            stay_on_top = not chroma
+        self._click_through = bool(click_through)
+        self._stay_on_top = bool(stay_on_top)
+        color = str(chroma_color or _CHROMA_DEFAULT).strip() or _CHROMA_DEFAULT
+        if not color.startswith('#'):
+            color = '#' + color
+        self._chroma_color = color if len(color) in (4, 7) else _CHROMA_DEFAULT
         self._bg_alpha = max(0, min(255, int(bg_alpha if bg_alpha is not None else 170)))
         self._win_opacity = max(0.2, min(1.0, float(opacity if opacity is not None else 0.9)))
+        if self._capture_mode == 'chroma':
+            self._win_opacity = 1.0
+            want_trans = False
+            self.setAutoFillBackground(False)
+            self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
+            pal = self.palette()
+            pal.setColor(QPalette.ColorRole.Window, QColor(self._chroma_color))
+            self.setPalette(pal)
+            self.setStyleSheet('background-color:%s;' % self._chroma_color)
+        else:
+            want_trans = self._bg_alpha < 255
+            self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, False)
+            self.setStyleSheet('')
+            self.setAutoFillBackground(not want_trans)
         self.setWindowOpacity(self._win_opacity)
-        want = self._bg_alpha < 255
         old = self.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        if old != want:
+        if old != want_trans:
             vis = self.isVisible()
             if vis:
                 self.hide()
-            self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, want)
+            self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, want_trans)
             if vis:
                 self.show()
         else:
-            self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, want)
+            self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, want_trans)
+        self._apply_window_flags()
         self._apply_orientation(force_size=False)
+        self._refresh_text()
+        self.sync_desktop_stack()
+
+    def set_anchor_window(self, window):
+        self._anchor_window = window
+
+    def sync_desktop_stack(self):
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, self._click_through)
         self._expose_for_capture()
+        if not self.isVisible():
+            return
+        if self._stay_on_top:
+            self.raise_()
+            return
+        self._nudge_if_overlaps()
+        self.lower()
+        anchor = self._anchor_window
+        if anchor is not None and anchor.isVisible():
+            anchor.raise_()
+        QTimer.singleShot(0, self._expose_for_capture)
+        QTimer.singleShot(120, self._expose_for_capture)
+
+    def click_through(self) -> bool:
+        return self._click_through
+
+    def stay_on_top(self) -> bool:
+        return self._stay_on_top
+
+    def set_click_through(self, enabled: bool, persist=True):
+        self._click_through = bool(enabled)
+        if persist and self._config:
+            self._config.set('lyrics.desktop_click_through', self._click_through)
+            try:
+                self._config.save()
+            except Exception:
+                pass
+        self._expose_for_capture()
+        self.sync_desktop_stack()
+
+    def set_stay_on_top(self, enabled: bool, persist=True):
+        self._stay_on_top = bool(enabled)
+        if persist and self._config:
+            self._config.set('lyrics.desktop_stay_on_top', self._stay_on_top)
+            try:
+                self._config.save()
+            except Exception:
+                pass
+        self._apply_window_flags()
+        self.sync_desktop_stack()
+
+    def _nudge_if_overlaps(self):
+        anchor = self._anchor_window
+        if anchor is None or not anchor.isVisible():
+            return
+        mine = self.frameGeometry()
+        other = anchor.frameGeometry()
+        if not mine.intersects(other):
+            return
+        screen = QGuiApplication.primaryScreen()
+        if screen is None:
+            return
+        avail = screen.availableGeometry()
+        x = other.right() + 8
+        y = other.top()
+        if x + mine.width() > avail.right():
+            x = other.left() - mine.width() - 8
+        if x < avail.left():
+            x = avail.left() + 8
+        if y + mine.height() > avail.bottom():
+            y = max(avail.top(), avail.bottom() - mine.height())
+        self.move(int(x), int(y))
+        self._save_layout()
+
+    def move_beside_anchor(self):
+        anchor = self._anchor_window
+        if anchor is None or not anchor.isVisible():
+            return False
+        screen = QGuiApplication.primaryScreen()
+        if screen is None:
+            return False
+        other = anchor.frameGeometry()
+        avail = screen.availableGeometry()
+        x = other.right() + 8
+        y = other.top()
+        if x + self.width() > avail.right():
+            x = other.left() - self.width() - 8
+        if x < avail.left():
+            x = avail.left() + 8
+        if y + self.height() > avail.bottom():
+            y = max(avail.top(), avail.bottom() - self.height())
+        self.move(int(x), int(y))
+        self._save_layout()
+        self.sync_desktop_stack()
+        return True
+
+    def _apply_window_flags(self):
+        flags = Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint
+        if self._stay_on_top:
+            flags |= Qt.WindowType.WindowStaysOnTopHint
+        vis = self.isVisible()
+        if vis:
+            self.hide()
+        self.setWindowFlags(flags)
+        if vis:
+            self.show()
+
+    def paintEvent(self, event):
+        if self._capture_mode == 'chroma':
+            p = QPainter(self)
+            p.fillRect(self.rect(), QColor(self._chroma_color))
+            self._paint_chroma_lyrics(p)
+            return
+        if self._bg_alpha >= 255:
+            p = QPainter(self)
+            p.fillRect(self.rect(), QColor(0, 0, 0))
+            return
+        super().paintEvent(event)
 
     def showEvent(self, event):
         super().showEvent(event)
-        self._expose_for_capture()
+        self.sync_desktop_stack()
 
     def _expose_for_capture(self):
         try:
             user32 = ctypes.windll.user32
             hwnd = int(self.winId())
-            gwl, app, tool = -20, 0x00040000, 0x00000080
+            gwl, app, tool, layered, transparent = -20, 0x00040000, 0x00000080, 0x00080000, 0x00000020
             if ctypes.sizeof(ctypes.c_void_p) == 8:
                 get_long, set_long = user32.GetWindowLongPtrW, user32.SetWindowLongPtrW
                 get_long.argtypes = [ctypes.c_void_p, ctypes.c_int]
@@ -120,8 +279,19 @@ class LyricsWindow(QWidget):
                 set_long.restype = ctypes.c_int64
             else:
                 get_long, set_long = user32.GetWindowLongW, user32.SetWindowLongW
-            set_long(hwnd, gwl, (get_long(hwnd, gwl) | app) & ~tool)
-            user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, 0x0027)
+            style = (get_long(hwnd, gwl) | app) & ~tool
+            if self._capture_mode == 'chroma':
+                style &= ~layered
+            if self._click_through:
+                style |= transparent
+            else:
+                style &= ~transparent
+            set_long(hwnd, gwl, style)
+            pos_flags = 0x0013
+            if self.isVisible() and not self._stay_on_top:
+                user32.SetWindowPos(hwnd, 1, 0, 0, 0, 0, pos_flags)
+            else:
+                user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, 0x0027)
         except Exception:
             pass
 
@@ -193,25 +363,108 @@ class LyricsWindow(QWidget):
         self._last_bot_html = ''
         self._last_next = next_text or ''
         self._last_highlight = bool(highlight)
-        color = '#fbbf24' if highlight else '#ffffff'
-        top_html = '<span style="color:%s;">%s</span>' % (color, escape(self._last_text)) if self._last_text else ''
-        bot_html = (
-            '<span style="color:#93c5fd;">%s</span>' % escape(self._last_next) if self._last_next else ''
-        )
-        self._paint_pair(top_html, bot_html, self._last_text, self._last_next)
+        self._paint_pair('', '', self._last_text, self._last_next)
+
+    def _parse_chroma_chars(self, text: str, html: str):
+        chars = []
+        if html:
+            for m in _SPAN_RE.finditer(html or ''):
+                bold = 'font-weight' in m.group(1) and ('700' in m.group(1) or 'bold' in m.group(1).lower())
+                for c in m.group(2):
+                    if c not in '\n\r':
+                        chars.append((c, bold))
+        if not chars:
+            chars = [(c, False) for c in (text or '') if c not in '\n\r']
+        return chars
+
+    def _make_chroma_font(self, px: int, bold=False) -> QFont:
+        f = QFont('Microsoft YaHei UI')
+        f.setPixelSize(max(10, int(px)))
+        f.setBold(bool(bold))
+        f.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
+        return f
+
+    def _draw_chroma_char(self, p: QPainter, x: int, y: int, ch: str, font: QFont, bold=False):
+        p.setFont(font)
+        fill = QColor(0xfb, 0xbf, 0x24) if bold else QColor(0x25, 0x63, 0xeb)
+        for dx, dy in ((-2, 0), (2, 0), (0, -2), (0, 2), (-1, -1), (1, 1), (-1, 1), (1, -1)):
+            p.setPen(QColor(0, 0, 0))
+            p.drawText(x + dx, y + dy, ch)
+        p.setPen(fill)
+        p.drawText(x, y, ch)
+
+    def _draw_chroma_run(self, p: QPainter, x: int, y: int, chars, base_px: int):
+        if not chars:
+            return x
+        cx = x
+        for ch, bold in chars:
+            f = self._make_chroma_font(base_px, bold=bold)
+            fm = QFontMetrics(f)
+            self._draw_chroma_char(p, cx, y, ch, f, bold=bold)
+            cx += fm.horizontalAdvance(ch)
+        return cx
+
+    def _paint_chroma_lyrics(self, p: QPainter):
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        p.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
+        top = self._parse_chroma_chars(self._last_text, self._last_html if self._use_html else '')
+        bot = self._parse_chroma_chars(self._last_next, self._last_bot_html if self._use_html else '')
+        w, h = self.width(), self.height()
+        if self._orientation == _ORIENT_V:
+            n = max(len(top), len(bot), 1)
+            px = max(8, min(28, int((h - 28) / (n * 1.25)), int(w * 0.22)))
+            f = self._make_chroma_font(px)
+            fm = QFontMetrics(f)
+            step = max(fm.height() + 2, int(px * 1.15))
+            col_w = w // 2
+            x_top = col_w // 2
+            x_bot = col_w + col_w // 2
+            y0 = 10 + fm.ascent()
+            for i, (ch, bold) in enumerate(top):
+                cf = self._make_chroma_font(px, bold)
+                self._draw_chroma_char(p, x_top - fm.horizontalAdvance(ch) // 2, y0 + i * step, ch, cf, bold)
+            for i, (ch, bold) in enumerate(bot):
+                yy = h - 10 - (len(bot) - i) * step
+                cf = self._make_chroma_font(px, bold)
+                self._draw_chroma_char(p, x_bot - fm.horizontalAdvance(ch) // 2, yy, ch, cf, bold)
+        else:
+            px = max(12, min(42, int(h * 0.26)))
+            f = self._make_chroma_font(px)
+            fm = QFontMetrics(f)
+            self._draw_chroma_run(p, 14, 10 + fm.ascent(), top, px)
+            bot_w = sum(QFontMetrics(self._make_chroma_font(px, b)).horizontalAdvance(c) for c, b in bot)
+            self._draw_chroma_run(p, max(14, w - bot_w - 14), h - 10 - fm.descent(), bot, max(10, px - 2))
 
     def _paint_pair(self, top_html: str, bot_html: str, top_text: str, bot_text: str):
+        if top_text:
+            self._last_text = top_text
+        if bot_text is not None:
+            self._last_next = bot_text or ''
+        if top_html or bot_html:
+            self._last_html = top_html or ''
+            self._last_bot_html = bot_html or ''
+            self._use_html = bool(top_html or bot_html)
+        if self._capture_mode == 'chroma':
+            self.line_cur.hide()
+            self.line_next.hide()
+            self.line_cur.setText('')
+            self.line_next.setText('')
+            self._sync_font()
+            self.update()
+            return
+        self.line_cur.show()
+        self.line_next.show()
         if self._orientation == _ORIENT_V:
             self.line_cur.setText(
                 self._html_to_vertical(top_html) if top_html else self._plain_vertical(top_text, '#ffffff')
             )
             self.line_next.setText(
-                self._html_to_vertical(bot_html) if bot_html else self._plain_vertical(bot_text, '#93c5fd')
+                self._html_to_vertical(bot_html) if bot_html else self._plain_vertical(bot_text, self._next_color())
             )
         else:
             self.line_cur.setText(top_html or ('<span style="color:#ffffff;">%s</span>' % escape(top_text) if top_text else ''))
             self.line_next.setText(
-                bot_html or ('<span style="color:#93c5fd;">%s</span>' % escape(bot_text) if bot_text else '')
+                bot_html or ('<span style="color:%s;">%s</span>' % (self._next_color(), escape(bot_text)) if bot_text else '')
             )
         self._sync_font()
 
@@ -227,6 +480,17 @@ class LyricsWindow(QWidget):
         act_v.triggered.connect(lambda: self.set_orientation(_ORIENT_V))
         menu.addAction(act_h)
         menu.addAction(act_v)
+        menu.addSeparator()
+        act_passthrough = QAction('鼠标穿透', self)
+        act_passthrough.setCheckable(True)
+        act_passthrough.setChecked(self._click_through)
+        act_passthrough.triggered.connect(lambda on: self.set_click_through(bool(on)))
+        act_top = QAction('窗口置顶', self)
+        act_top.setCheckable(True)
+        act_top.setChecked(self._stay_on_top)
+        act_top.triggered.connect(lambda on: self.set_stay_on_top(bool(on)))
+        menu.addAction(act_passthrough)
+        menu.addAction(act_top)
         menu.exec(event.globalPos())
 
     def mousePressEvent(self, event):
@@ -346,10 +610,23 @@ class LyricsWindow(QWidget):
             font2 = QFont('Microsoft YaHei UI')
             font2.setPixelSize(max(10, px - 2))
             self.line_next.setFont(font2)
+        if self._capture_mode == 'chroma':
+            self._chroma_font = self._make_chroma_font(px if self._orientation == _ORIENT_H else max(8, min(28, int((self.height() - 28) / 12))))
+            self.update()
+
+    def _label_bg(self):
+        if self._capture_mode == 'chroma':
+            return 'transparent'
+        return 'rgba(0,0,0,%d)' % self._bg_alpha
+
+    def _next_color(self):
+        return '#ffffff' if self._capture_mode == 'chroma' else '#93c5fd'
 
     def _apply_orientation(self, force_size=False):
+        bg = self._label_bg()
+        next_c = self._next_color()
+        radius = '0' if self._capture_mode == 'chroma' else '8px'
         if self._orientation == _ORIENT_V:
-            # 酷狗竖屏：左右两列整高；左列靠上、右列靠下形成错落，避免上下对半裁切
             self.setMinimumSize(*_MIN_V)
             self._layout.setDirection(QBoxLayout.Direction.LeftToRight)
             self.line_cur.setWordWrap(False)
@@ -357,12 +634,12 @@ class LyricsWindow(QWidget):
             self.line_cur.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
             self.line_next.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom)
             self.line_cur.setStyleSheet(
-                'color:#ffffff;background:rgba(0,0,0,%d);padding:10px 6px 10px 10px;'
-                'border-top-left-radius:8px;border-bottom-left-radius:8px;' % self._bg_alpha
+                'color:#ffffff;background:%s;padding:10px 6px 10px 10px;'
+                'border-top-left-radius:%s;border-bottom-left-radius:%s;' % (bg, radius, radius)
             )
             self.line_next.setStyleSheet(
-                'color:#93c5fd;background:rgba(0,0,0,%d);padding:10px 10px 10px 6px;'
-                'border-top-right-radius:8px;border-bottom-right-radius:8px;' % self._bg_alpha
+                'color:%s;background:%s;padding:10px 10px 10px 6px;'
+                'border-top-right-radius:%s;border-bottom-right-radius:%s;' % (next_c, bg, radius, radius)
             )
         else:
             self.setMinimumSize(*_MIN_H)
@@ -372,12 +649,12 @@ class LyricsWindow(QWidget):
             self.line_cur.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             self.line_next.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.line_cur.setStyleSheet(
-                'color:#ffffff;background:rgba(0,0,0,%d);padding:10px 14px 4px 14px;'
-                'border-top-left-radius:8px;border-top-right-radius:8px;' % self._bg_alpha
+                'color:#ffffff;background:%s;padding:10px 14px 4px 14px;'
+                'border-top-left-radius:%s;border-top-right-radius:%s;' % (bg, radius, radius)
             )
             self.line_next.setStyleSheet(
-                'color:#93c5fd;background:rgba(0,0,0,%d);padding:4px 14px 10px 14px;'
-                'border-bottom-left-radius:8px;border-bottom-right-radius:8px;' % self._bg_alpha
+                'color:%s;background:%s;padding:4px 14px 10px 14px;'
+                'border-bottom-left-radius:%s;border-bottom-right-radius:%s;' % (next_c, bg, radius, radius)
             )
         if force_size:
             x, y, w, h = self._pick_mode_geometry()

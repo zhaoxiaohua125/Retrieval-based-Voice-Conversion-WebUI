@@ -43,7 +43,7 @@ def build_tray(bridge, main_window, lyrics_window=None, controller=None):
         def toggle_lyrics():
             lyrics_window.setVisible(not lyrics_window.isVisible())
             if lyrics_window.isVisible():
-                lyrics_window.raise_()
+                lyrics_window.sync_desktop_stack()
 
         act_lyrics.triggered.connect(toggle_lyrics)
         menu.addAction(act_lyrics)

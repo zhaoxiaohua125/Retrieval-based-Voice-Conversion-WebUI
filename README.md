@@ -2848,3 +2848,131 @@ ewrite；扩展 LyricWord 与字级 matcher
 - **关键决策与解决方案**: 歌词助手只认酷狗等播放器，本窗走窗口采集；背景 100% 关闭分层透明以便采到；亮度因显示器而异故做成可调
 - **使用的技术栈**: PyQt6、Win32 SetWindowLongPtr
 - **修改的文件列表**: app/ui/lyrics_window.py、app/ui/settings_dialog.py、app/config_store.py、config/client.json、app/integration/controller.py、scripts/run_ui_skeleton.py、app/ui/pages/playback_page.py、README.md
+
+---
+
+## 会话总结 - 2026-08-19
+
+- **会话主要目的**: 抖音窗口采集桌面歌词仍出现黑底，需要可靠透底方案
+- **完成的主要任务**:
+  1. 新增「直播抠像（绿幕）」模式：整窗不透明色键底、关闭 WA_Translucent / WS_EX_LAYERED，强制 opacity=1
+  2. 设置页增加抠像开关与底色（纯绿/品红/直播绿），普通透明滑条在抠像模式下禁用
+  3. 默认配置改为 chroma，本机 client.json 已写入
+- **关键决策与解决方案**: 伴侣采不到 Alpha，透明区必变黑；可靠路径是窗口采集 + 绿幕抠色键，而非调背景透明度
+- **使用的技术栈**: PyQt6 paintEvent、Win32 SetWindowLongPtr、config/client.json
+- **修改的文件列表**: app/ui/lyrics_window.py、app/ui/settings_dialog.py、app/config_store.py、app/integration/controller.py、config/client.json、README.md
+
+---
+
+## 会话总结 - 2026-08-19（桌面歌词遮挡修复）
+
+- **会话主要目的**: 修复桌面歌词绿幕竖条在抖音伴侣/主程序上遮挡后面内容、无法点击的问题
+- **完成的主要任务**:
+  1. 绿幕模式默认关闭「窗口置顶」，打开桌面歌词时不再强制 raise 到最前
+  2. 新增「鼠标穿透」（WS_EX_TRANSPARENT），绿条可见但鼠标可点穿到后面界面
+  3. 设置 → 歌词 增加「鼠标穿透」「窗口置顶」开关；歌词窗右键菜单也可切换
+- **关键决策与解决方案**: 伴侣按窗口名采集，不依赖置顶；物理遮挡用穿透解决，需拖动时临时关穿透
+- **使用的技术栈**: PyQt6、Win32 WS_EX_TRANSPARENT / SetWindowLongPtr
+- **修改的文件列表**: app/ui/lyrics_window.py、app/ui/settings_dialog.py、app/config_store.py、scripts/run_ui_skeleton.py、app/ui/pages/playback_page.py、README.md
+
+---
+
+## 会话总结 - 2026-08-19（桌面歌词遮挡加强修复）
+
+- **会话主要目的**: 用户反馈 config 已正确但穿透/置底仍无效，需加强桌面歌词不挡主程序与伴侣
+- **完成的主要任务**:
+  1. 叠加 Qt WA_TransparentForMouseEvents + Win32 WS_EX_TRANSPARENT，延迟重刷样式
+  2. 非置顶时 HWND_BOTTOM + lower()，并修复托盘/切歌仍 raise_() 的问题
+  3. 检测与主窗重叠时自动挪到主窗旁；设置页新增「歌词窗移到主窗旁」
+  4. 设置说明强调：伴侣应采集「桌面歌词」而非 python.exe，抠像色需与 #00B140 一致
+- **关键决策与解决方案**: 上次仅改 config 不够，Qt/托盘会把窗拉回最前；需多层穿透 + Z 序置底 + 物理位置错开
+- **使用的技术栈**: PyQt6、Win32 SetWindowPos(HWND_BOTTOM)
+- **修改的文件列表**: app/ui/lyrics_window.py、app/ui/settings_dialog.py、app/ui/tray.py、scripts/run_ui_skeleton.py、app/integration/controller.py、README.md
+
+---
+
+## 会话总结 - 2026-08-19（绿幕抠像文字被吃掉）
+
+- **会话主要目的**: 抖音绿幕抠图后文字透明/发绿，相似度调低才看见但看不清
+- **完成的主要任务**:
+  1. 根因：逐字高亮色（蓝 #93c5fd、金 #fbbf24）绿色分量大，被当成绿幕抠掉
+  2. 抠像模式改为白字 + 黑描边、关抗锯齿；当前字仅加粗区分
+  3. 默认/本机抠像底色改纯绿 #00FF00；设置页补充伴侣相似度 300~420 建议
+- **关键决策与解决方案**: 绿幕场景禁用含 G 通道的高亮色；broadcast 标准白字黑边
+- **使用的技术栈**: PyQt6 RichText text-shadow、QFont.NoAntialias
+- **修改的文件列表**: app/ui/lyrics_window.py、app/ui/settings_dialog.py、config/client.json、README.md
+
+---
+
+## 会话总结 - 2026-08-19（QPainter 纯色字抠像）
+
+- **会话主要目的**: 伴侣键色与程序一致时字仍被抠没/发绿，白字 QLabel 方案无效
+- **完成的主要任务**:
+  1. 根因：Windows ClearType 白字叠绿底，采集像素含绿分量，被色度键当背景吃掉
+  2. 绿幕模式改 QPainter 直绘：隐藏 QLabel，关抗锯齿，绿幕用纯红字(G=0)，品红幕用纯绿字
+  3. 黑边描字仅作本机预览辅助，抠绿后保留红/绿正文
+- **关键决策与解决方案**: 抠像场景禁止 QLabel 渲染；文字颜色必须与键色在 RGB 上正交
+- **使用的技术栈**: PyQt6 QPainter、QFont.NoAntialias、PreferBitmap
+- **修改的文件列表**: app/ui/lyrics_window.py、app/ui/settings_dialog.py、README.md
+
+---
+
+## 会话总结 - 2026-08-19（撤销自动缩小 + 酷狗蓝白字）
+
+- **会话主要目的**: 自动缩小窗口导致长短歌词显示不全；用户要酷狗式蓝白渐变字
+- **完成的主要任务**:
+  1. 移除 _fit_chroma_bounds 自动缩小，窗口恢复手动拖拽定尺寸
+  2. 绿幕 QPainter 改蓝→白渐变、深灰描边 + 白边，当前字加亮加粗
+  3. 设置页说明窗口需自行调大小、蓝字抠像相似度建议
+- **关键决策与解决方案**: 歌词长短不一不宜自动 resize；渐变蓝白近似酷狗，直播相似度可能需微调
+- **使用的技术栈**: PyQt6 QLinearGradient、QPainter
+- **修改的文件列表**: app/ui/lyrics_window.py、app/ui/settings_dialog.py、README.md
+
+---
+
+## 会话总结 - 2026-08-19（绿幕遮挡与直播说明）
+
+- **会话主要目的**: 红字已正常但绿条仍挡桌面；用户担心直播是否挡脸
+- **完成的主要任务**:
+  1. 说明：伴侣抠绿后直播画面只剩红字，摄像头为独立素材不会被绿条挡
+  2. 关闭 autoFillBackground 防白底；窗口随歌词自动缩小到文字范围
+  3. 设置页补充本机遮挡 vs 直播画面的区别
+- **修改的文件列表**: app/ui/lyrics_window.py、app/ui/settings_dialog.py、README.md
+
+---
+
+## 会话总结 - 2026-08-19（歌词清晰度优化）
+
+- **会话主要目的**: 酷狗蓝白字边缘锯齿、发虚，整体不清晰
+- **完成的主要任务**:
+  1. 去掉 NoAntialias/多层 offset 描边，改 QPainterPath 一次描边+渐变填充
+  2. 开启 TextAntialiasing、PreferFullHinting，最小字号提到 10px
+  3. 渐变色调微调更接近酷狗实心填充感
+- **关键决策与解决方案**: 多层 drawText 叠描边是发虚主因；清晰度优先于极致抠像
+- **使用的技术栈**: PyQt6 QPainterPath、TextAntialiasing
+- **修改的文件列表**: app/ui/lyrics_window.py、README.md
+
+---
+
+## 会话总结 - 2026-08-19（白底对比度）
+
+- **会话主要目的**: 桌面歌词在白底上几乎看不见，黑底尚可
+- **完成的主要任务**:
+  1. 渐变去掉近白浅色，改为深蓝→中蓝实心渐变
+  2. 描边改纯黑加粗，加轻微阴影；当前字改橙黄渐变（与主界面一致）
+- **关键决策与解决方案**: 抠像后常叠在浅色画面上，字色不能含大量浅蓝/白
+- **使用的技术栈**: PyQt6 QPainterPath、QLinearGradient
+- **修改的文件列表**: app/ui/lyrics_window.py、README.md
+
+---
+
+## 会话总结 - 2026-08-19（修复纯绿无字）
+
+- **会话主要目的**: QPainterPath 改色后窗口只剩纯绿、歌词完全不显示
+- **完成的主要任务**:
+  1. 根因：Windows 上 QPainterPath.fillPath 对中文轮廓填充无效
+  2. 改回 drawText + 黑描边 + 实心蓝/橙字，恢复可见
+  3. _paint_pair 同步写入 _last_text/html，避免状态丢失
+- **关键决策与解决方案**: 中文歌词必须用 drawText，不能用 Path 填充
+- **使用的技术栈**: PyQt6 QPainter.drawText
+- **修改的文件列表**: app/ui/lyrics_window.py、README.md

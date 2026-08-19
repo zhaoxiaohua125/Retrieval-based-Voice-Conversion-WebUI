@@ -215,7 +215,10 @@ class PlaybackPage(QWidget):
         )
         self.btn_enhance_lrc.clicked.connect(clicked(lambda: self.bridge.emit_action('lyrics_enhance')))
         self.btn_desktop_lyrics = QPushButton('桌面歌词')
-        self.btn_desktop_lyrics.setToolTip('显示/隐藏桌面歌词窗（标题「桌面歌词」，可供直播伴侣窗口采集）；右键可切换横/竖屏')
+        self.btn_desktop_lyrics.setToolTip(
+            '显示/隐藏桌面歌词窗（标题「桌面歌词」，可供直播伴侣窗口采集）；'
+            '绿幕模式建议开「鼠标穿透」关「置顶」，避免挡住主界面；右键可切换横/竖屏'
+        )
         self.btn_desktop_lyrics.clicked.connect(clicked(lambda: self.bridge.emit_action('toggle_desktop_lyrics')))
         right_head.addStretch()
         right_head.addWidget(self.btn_enhance_lrc)

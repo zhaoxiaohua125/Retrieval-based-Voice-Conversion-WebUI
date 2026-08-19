@@ -347,9 +347,21 @@ class SettingsDialog(QDialog):
             root.addWidget(box)
             desk = QGroupBox('桌面歌词（直播采集）')
             desk_form = QFormLayout(desk)
+            self.chk_lyric_chroma = QCheckBox('直播抠像（绿幕，推荐）')
+            self.chk_lyric_chroma.setToolTip(
+                '抖音窗口采集吃不掉透明通道，会变成黑底。开启后歌词窗用纯绿不透明底，伴侣里对「桌面歌词」开绿幕抠掉即可。'
+            )
+            self.cmb_lyric_chroma = QComboBox()
+            self.cmb_lyric_chroma.addItem('纯绿 #00FF00（直播推荐）', '#00FF00')
+            self.cmb_lyric_chroma.addItem('纯品红 #FF00FF', '#FF00FF')
+            self.cmb_lyric_chroma.addItem('直播绿 #00B140（易糊字）', '#00B140')
+            self.chk_lyric_click_through = QCheckBox('鼠标穿透（不挡后面点击，直播推荐）')
+            self.chk_lyric_click_through.setToolTip('绿幕模式下歌词窗仍可被伴侣窗口采集，但鼠标会穿透到后面的主程序/伴侣界面。')
+            self.chk_lyric_stay_on_top = QCheckBox('窗口置顶')
+            self.chk_lyric_stay_on_top.setToolTip('关闭后置顶时，歌词窗不会一直盖住主程序；伴侣仍可按窗口名采集「桌面歌词」。')
             self.slider_lyric_bg = QSlider(Qt.Orientation.Horizontal)
             self.slider_lyric_bg.setRange(0, 100)
-            self.slider_lyric_bg.setToolTip('歌词背后黑底的实度。各显示器亮度不同，请自行拖到看清为止；拉到 100% 最容易被直播伴侣采到。')
+            self.slider_lyric_bg.setToolTip('仅普通模式：歌词背后黑底实度。直播请用上方「直播抠像」。')
             self.lbl_lyric_bg = QLabel('')
             self.lbl_lyric_bg.setMinimumWidth(44)
             self.lbl_lyric_bg.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
@@ -358,24 +370,36 @@ class SettingsDialog(QDialog):
             bg_row.addWidget(self.lbl_lyric_bg)
             self.slider_lyric_opacity = QSlider(Qt.Orientation.Horizontal)
             self.slider_lyric_opacity.setRange(20, 100)
-            self.slider_lyric_opacity.setToolTip('整窗（含文字）变淡。背景不够时先调上一档，不要只靠这一档。')
+            self.slider_lyric_opacity.setToolTip('仅普通模式：整窗变淡。抠像模式下固定不透明。')
             self.lbl_lyric_opacity = QLabel('')
             self.lbl_lyric_opacity.setMinimumWidth(44)
             self.lbl_lyric_opacity.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             op_row = QHBoxLayout()
             op_row.addWidget(self.slider_lyric_opacity, stretch=1)
             op_row.addWidget(self.lbl_lyric_opacity)
+            desk_form.addRow(self.chk_lyric_chroma)
+            desk_form.addRow('抠像底色', self.cmb_lyric_chroma)
+            desk_form.addRow(self.chk_lyric_click_through)
+            desk_form.addRow(self.chk_lyric_stay_on_top)
             desk_form.addRow('背景不透明度', bg_row)
             desk_form.addRow('窗口不透明度', op_row)
+            self.btn_lyric_reposition = QPushButton('歌词窗移到主窗旁')
+            self.btn_lyric_reposition.setToolTip('绿条叠在主程序上时点一下，自动挪到主窗右侧并置底')
+            self.btn_lyric_reposition.clicked.connect(clicked(self._move_lyrics_beside_main))
+            desk_form.addRow(self.btn_lyric_reposition)
             hint = QLabel(
-                '抖音直播伴侣请用「窗口采集」选择窗口「桌面歌词」，不要用歌词助手（只认酷狗等播放器）。'
-                '拖动滑条会立刻作用到已打开的桌面歌词窗，保存后写入配置。'
+                '绿幕模式：酷狗式蓝白渐变字 + 深色描边；窗口大小请自行拖拽，不会自动缩小。'
+                '伴侣抠绿后保留蓝字；若字发虚被抠，相似度略降到 280~340。'
             )
             hint.setWordWrap(True)
             hint.setStyleSheet('color:#64748b;font-size:12px;')
             desk_form.addRow(hint)
-            self.slider_lyric_bg.valueChanged.connect(self._on_desktop_lyric_slider)
-            self.slider_lyric_opacity.valueChanged.connect(self._on_desktop_lyric_slider)
+            self.chk_lyric_chroma.toggled.connect(self._on_desktop_lyric_style)
+            self.cmb_lyric_chroma.currentIndexChanged.connect(self._on_desktop_lyric_style)
+            self.chk_lyric_click_through.toggled.connect(self._on_desktop_lyric_style)
+            self.chk_lyric_stay_on_top.toggled.connect(self._on_desktop_lyric_style)
+            self.slider_lyric_bg.valueChanged.connect(self._on_desktop_lyric_style)
+            self.slider_lyric_opacity.valueChanged.connect(self._on_desktop_lyric_style)
             root.addWidget(desk)
             osc_box = QGroupBox('OSC 歌词同步')
             osc_form = QFormLayout(osc_box)
@@ -437,14 +461,36 @@ class SettingsDialog(QDialog):
         self.cmb_whisper_model.setEnabled(use_whisper)
         self.cmb_whisper_device.setEnabled(use_whisper)
 
-    def _on_desktop_lyric_slider(self, *_args):
+    def _on_desktop_lyric_style(self, *_args):
+        chroma = bool(self.chk_lyric_chroma.isChecked())
+        self.cmb_lyric_chroma.setEnabled(chroma)
+        self.slider_lyric_bg.setEnabled(not chroma)
+        self.slider_lyric_opacity.setEnabled(not chroma)
         bg = int(self.slider_lyric_bg.value())
         op = int(self.slider_lyric_opacity.value())
         self.lbl_lyric_bg.setText('%s%%' % bg)
         self.lbl_lyric_opacity.setText('%s%%' % op)
         win = getattr(self.parent(), '_quit_lyrics', None)
         if win is not None:
-            win.apply_desktop_style(bg_alpha=int(round(bg * 2.55)), opacity=op / 100.0)
+            win.apply_desktop_style(
+                bg_alpha=int(round(bg * 2.55)),
+                opacity=op / 100.0,
+                capture_mode='chroma' if chroma else 'normal',
+                chroma_color=str(self.cmb_lyric_chroma.currentData() or '#00FF00'),
+                click_through=self.chk_lyric_click_through.isChecked(),
+                stay_on_top=self.chk_lyric_stay_on_top.isChecked(),
+            )
+
+    def _move_lyrics_beside_main(self):
+        main = self.parent()
+        win = getattr(main, '_quit_lyrics', None) if main is not None else None
+        if win is None:
+            return
+        win.set_anchor_window(main)
+        if not win.isVisible():
+            win.show()
+        if not win.move_beside_anchor():
+            win.sync_desktop_stack()
 
     def _load_pitchfix_sliders(self):
         pf = self.config.get('pitchfix', {}) or {}
@@ -510,18 +556,44 @@ class SettingsDialog(QDialog):
         self.spin_offset_ms.setValue(int(self.config.get('lyrics.offset_ms', 0) or 0))
         bg_alpha = max(0, min(255, int(self.config.get('lyrics.desktop_bg_alpha', 170) or 0)))
         op = max(0.2, min(1.0, float(self.config.get('lyrics.desktop_opacity', 0.9) or 0.9)))
+        mode = str(self.config.get('lyrics.desktop_capture_mode', 'normal') or 'normal').strip().lower()
+        chroma_on = mode in ('chroma', 'chroma_key', 'live', 'green')
+        chroma_color = str(self.config.get('lyrics.desktop_chroma_color', '#00FF00') or '#00FF00').strip().upper()
+        if not chroma_color.startswith('#'):
+            chroma_color = '#' + chroma_color
         self._orig_lyric_bg = bg_alpha
         self._orig_lyric_opacity = op
+        self._orig_lyric_capture_mode = 'chroma' if chroma_on else 'normal'
+        self._orig_lyric_chroma_color = chroma_color
+        click_through = bool(self.config.get('lyrics.desktop_click_through', chroma_on))
+        stay_on_top = bool(self.config.get('lyrics.desktop_stay_on_top', not chroma_on))
+        self._orig_lyric_click_through = click_through
+        self._orig_lyric_stay_on_top = stay_on_top
         bg_pct = int(round(bg_alpha / 2.55))
         op_pct = int(round(op * 100))
+        self.chk_lyric_chroma.blockSignals(True)
+        self.cmb_lyric_chroma.blockSignals(True)
+        self.chk_lyric_click_through.blockSignals(True)
+        self.chk_lyric_stay_on_top.blockSignals(True)
         self.slider_lyric_bg.blockSignals(True)
         self.slider_lyric_opacity.blockSignals(True)
+        self.chk_lyric_chroma.setChecked(chroma_on)
+        self._set_combo_data(self.cmb_lyric_chroma, chroma_color, '#00FF00')
+        self.chk_lyric_click_through.setChecked(click_through)
+        self.chk_lyric_stay_on_top.setChecked(stay_on_top)
         self.slider_lyric_bg.setValue(bg_pct)
         self.slider_lyric_opacity.setValue(op_pct)
+        self.chk_lyric_chroma.blockSignals(False)
+        self.cmb_lyric_chroma.blockSignals(False)
+        self.chk_lyric_click_through.blockSignals(False)
+        self.chk_lyric_stay_on_top.blockSignals(False)
         self.slider_lyric_bg.blockSignals(False)
         self.slider_lyric_opacity.blockSignals(False)
         self.lbl_lyric_bg.setText('%s%%' % bg_pct)
         self.lbl_lyric_opacity.setText('%s%%' % op_pct)
+        self.cmb_lyric_chroma.setEnabled(chroma_on)
+        self.slider_lyric_bg.setEnabled(not chroma_on)
+        self.slider_lyric_opacity.setEnabled(not chroma_on)
         self._sync_lyrics_controls()
         for key in SHORTCUT_KEYS:
             val = str((self.config.get('shortcuts', {}) or {}).get(key) or DEFAULT_SHORTCUTS.get(key) or '')
@@ -658,7 +730,14 @@ class SettingsDialog(QDialog):
             self._mic_testing = False
         win = getattr(self.parent(), '_quit_lyrics', None)
         if win is not None:
-            win.apply_desktop_style(getattr(self, '_orig_lyric_bg', 170), getattr(self, '_orig_lyric_opacity', 0.9))
+            win.apply_desktop_style(
+                getattr(self, '_orig_lyric_bg', 170),
+                getattr(self, '_orig_lyric_opacity', 0.9),
+                capture_mode=getattr(self, '_orig_lyric_capture_mode', 'normal'),
+                chroma_color=getattr(self, '_orig_lyric_chroma_color', '#00FF00'),
+                click_through=getattr(self, '_orig_lyric_click_through', True),
+                stay_on_top=getattr(self, '_orig_lyric_stay_on_top', False),
+            )
         super().reject()
 
     def collect_payload(self) -> dict:
@@ -695,6 +774,10 @@ class SettingsDialog(QDialog):
                 'offset_ms': int(self.spin_offset_ms.value()),
                 'desktop_bg_alpha': int(round(self.slider_lyric_bg.value() * 2.55)),
                 'desktop_opacity': round(self.slider_lyric_opacity.value() / 100.0, 2),
+                'desktop_capture_mode': 'chroma' if self.chk_lyric_chroma.isChecked() else 'normal',
+                'desktop_chroma_color': str(self.cmb_lyric_chroma.currentData() or '#00FF00'),
+                'desktop_click_through': self.chk_lyric_click_through.isChecked(),
+                'desktop_stay_on_top': self.chk_lyric_stay_on_top.isChecked(),
             },
             'audio': {
                 'hostapi': hostapi,

@@ -79,8 +79,12 @@
     "align_engine": "energy",
     "whisper_model": "small",
     "whisper_device": "cpu",
-    "desktop_bg_alpha": 0,
-    "desktop_opacity": 1.0,
+    "desktop_bg_alpha": 255,
+    "desktop_opacity": 0.58,
+    "desktop_capture_mode": "chroma",
+    "desktop_chroma_color": "#00FF00",
+    "desktop_click_through": false,
+    "desktop_stay_on_top": false,
     "mtc_port": "",
     "sim_speed": 1.0
   },
@@ -120,20 +124,20 @@
   },
   "ui": {
     "geometry": [
-      215,
-      207,
+      337,
+      446,
       1280,
-      912
+      928
     ],
     "active_tab": 3,
     "active_nav_tab": 0,
     "lyrics_window": {
       "orientation": "vertical",
       "geometry": [
-        1623,
-        131,
-        148,
-        1189
+        1935,
+        400,
+        140,
+        645
       ],
       "geometry_h": [
         179,
@@ -142,10 +146,10 @@
         166
       ],
       "geometry_v": [
-        1623,
-        131,
-        148,
-        1189
+        1935,
+        400,
+        140,
+        645
       ]
     }
   }

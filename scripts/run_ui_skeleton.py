@@ -238,7 +238,7 @@ def main():
                         show = not lyrics.isVisible()
                         lyrics.setVisible(show)
                         if show:
-                            lyrics.raise_()
+                            lyrics.sync_desktop_stack()
                     return
                 scheduler.publish(BusMessage(SignalType.STATUS, ModuleId.UI, {'action': action, **(payload or {})}))
                 if payload.get('log'):
@@ -458,6 +458,7 @@ def main():
 
             def _init_lyrics_tray():
                 lyrics = LyricsWindow(config=controller.config_store)
+                lyrics.set_anchor_window(window)
                 if not getattr(lyrics, '_restored_geo', False):
                     lyrics.move(window.x() + 40, window.y() + 80)
                 controller.set_lyrics_window(lyrics)

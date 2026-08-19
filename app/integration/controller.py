@@ -2191,6 +2191,7 @@ class ClientController:
         self.state.loaded_lyrics = True
         if self._lyrics_window:
             self._lyrics_window.show()
+            self._lyrics_window.sync_desktop_stack()
         doc = self.lyrics.document
         lines = [ln.text for ln in doc.lines]
         from app.lyrics.aligner import word_timing_label
@@ -2619,6 +2620,14 @@ class ClientController:
             self.config_store.set('lyrics.desktop_bg_alpha', max(0, min(255, int(lyrics['desktop_bg_alpha']))))
         if 'desktop_opacity' in lyrics:
             self.config_store.set('lyrics.desktop_opacity', max(0.2, min(1.0, float(lyrics['desktop_opacity']))))
+        if 'desktop_capture_mode' in lyrics:
+            mode = str(lyrics['desktop_capture_mode'] or 'normal').strip().lower()
+            self.config_store.set('lyrics.desktop_capture_mode', 'chroma' if mode in ('chroma', 'chroma_key', 'live', 'green') else 'normal')
+        if 'desktop_chroma_color' in lyrics:
+            color = str(lyrics['desktop_chroma_color'] or '#00FF00').strip() or '#00FF00'
+            if not color.startswith('#'):
+                color = '#' + color
+            self.config_store.set('lyrics.desktop_chroma_color', color.upper())
         if self._lyrics_window is not None:
             self._lyrics_window.apply_desktop_style()
         if lyrics:
