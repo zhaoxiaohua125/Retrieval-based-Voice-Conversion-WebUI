@@ -355,6 +355,17 @@ class SettingsDialog(QDialog):
             self.cmb_lyric_chroma.addItem('纯绿 #00FF00（直播推荐）', '#00FF00')
             self.cmb_lyric_chroma.addItem('纯品红 #FF00FF', '#FF00FF')
             self.cmb_lyric_chroma.addItem('直播绿 #00B140（易糊字）', '#00B140')
+            self.cmb_lyric_text_color = QComboBox()
+            self.cmb_lyric_text_color.addItem('纯白 #FFFFFF（直播常用）', '#FFFFFF')
+            self.cmb_lyric_text_color.addItem('蓝色 #2563EB', '#2563EB')
+            self.cmb_lyric_text_color.addItem('橙黄 #FB923C', '#FB923C')
+            self.cmb_lyric_text_color.addItem('纯红 #FF0000（抠绿稳）', '#FF0000')
+            self.cmb_lyric_text_color.addItem('纯黄 #FFFF00', '#FFFF00')
+            self.cmb_lyric_highlight_color = QComboBox()
+            self.cmb_lyric_highlight_color.addItem('橙黄 #FB923C（当前字）', '#FB923C')
+            self.cmb_lyric_highlight_color.addItem('同歌词色（仅加粗）', 'same')
+            self.cmb_lyric_highlight_color.addItem('纯白 #FFFFFF', '#FFFFFF')
+            self.cmb_lyric_highlight_color.addItem('纯红 #FF0000', '#FF0000')
             self.chk_lyric_click_through = QCheckBox('鼠标穿透（不挡后面点击，直播推荐）')
             self.chk_lyric_click_through.setToolTip('绿幕模式下歌词窗仍可被伴侣窗口采集，但鼠标会穿透到后面的主程序/伴侣界面。')
             self.chk_lyric_stay_on_top = QCheckBox('窗口置顶')
@@ -379,6 +390,8 @@ class SettingsDialog(QDialog):
             op_row.addWidget(self.lbl_lyric_opacity)
             desk_form.addRow(self.chk_lyric_chroma)
             desk_form.addRow('抠像底色', self.cmb_lyric_chroma)
+            desk_form.addRow('歌词颜色', self.cmb_lyric_text_color)
+            desk_form.addRow('当前字颜色', self.cmb_lyric_highlight_color)
             desk_form.addRow(self.chk_lyric_click_through)
             desk_form.addRow(self.chk_lyric_stay_on_top)
             desk_form.addRow('背景不透明度', bg_row)
@@ -388,14 +401,16 @@ class SettingsDialog(QDialog):
             self.btn_lyric_reposition.clicked.connect(clicked(self._move_lyrics_beside_main))
             desk_form.addRow(self.btn_lyric_reposition)
             hint = QLabel(
-                '绿幕模式：酷狗式蓝白渐变字 + 深色描边；窗口大小请自行拖拽，不会自动缩小。'
-                '伴侣抠绿后保留蓝字；若字发虚被抠，相似度略降到 280~340。'
+                '绿幕模式：窗口大小请自行拖拽。「歌词颜色」建议直播用纯白；「当前字」可设橙黄高亮。'
+                '伴侣键色与抠像底色一致，相似度 280~380。'
             )
             hint.setWordWrap(True)
             hint.setStyleSheet('color:#64748b;font-size:12px;')
             desk_form.addRow(hint)
             self.chk_lyric_chroma.toggled.connect(self._on_desktop_lyric_style)
             self.cmb_lyric_chroma.currentIndexChanged.connect(self._on_desktop_lyric_style)
+            self.cmb_lyric_text_color.currentIndexChanged.connect(self._on_desktop_lyric_style)
+            self.cmb_lyric_highlight_color.currentIndexChanged.connect(self._on_desktop_lyric_style)
             self.chk_lyric_click_through.toggled.connect(self._on_desktop_lyric_style)
             self.chk_lyric_stay_on_top.toggled.connect(self._on_desktop_lyric_style)
             self.slider_lyric_bg.valueChanged.connect(self._on_desktop_lyric_style)
@@ -464,6 +479,8 @@ class SettingsDialog(QDialog):
     def _on_desktop_lyric_style(self, *_args):
         chroma = bool(self.chk_lyric_chroma.isChecked())
         self.cmb_lyric_chroma.setEnabled(chroma)
+        self.cmb_lyric_text_color.setEnabled(chroma)
+        self.cmb_lyric_highlight_color.setEnabled(chroma)
         self.slider_lyric_bg.setEnabled(not chroma)
         self.slider_lyric_opacity.setEnabled(not chroma)
         bg = int(self.slider_lyric_bg.value())
@@ -479,6 +496,8 @@ class SettingsDialog(QDialog):
                 chroma_color=str(self.cmb_lyric_chroma.currentData() or '#00FF00'),
                 click_through=self.chk_lyric_click_through.isChecked(),
                 stay_on_top=self.chk_lyric_stay_on_top.isChecked(),
+                text_color=str(self.cmb_lyric_text_color.currentData() or '#FFFFFF'),
+                highlight_color=str(self.cmb_lyric_highlight_color.currentData() or '#FB923C'),
             )
 
     def _move_lyrics_beside_main(self):
@@ -565,6 +584,14 @@ class SettingsDialog(QDialog):
         self._orig_lyric_opacity = op
         self._orig_lyric_capture_mode = 'chroma' if chroma_on else 'normal'
         self._orig_lyric_chroma_color = chroma_color
+        text_color = str(self.config.get('lyrics.desktop_chroma_text_color', '#FFFFFF') or '#FFFFFF').strip().upper()
+        if not text_color.startswith('#'):
+            text_color = '#' + text_color
+        highlight_color = str(self.config.get('lyrics.desktop_chroma_highlight_color', '#FB923C') or '#FB923C').strip()
+        if highlight_color.lower() != 'same' and not highlight_color.startswith('#'):
+            highlight_color = '#' + highlight_color
+        self._orig_lyric_text_color = text_color
+        self._orig_lyric_highlight_color = highlight_color
         click_through = bool(self.config.get('lyrics.desktop_click_through', chroma_on))
         stay_on_top = bool(self.config.get('lyrics.desktop_stay_on_top', not chroma_on))
         self._orig_lyric_click_through = click_through
@@ -573,18 +600,24 @@ class SettingsDialog(QDialog):
         op_pct = int(round(op * 100))
         self.chk_lyric_chroma.blockSignals(True)
         self.cmb_lyric_chroma.blockSignals(True)
+        self.cmb_lyric_text_color.blockSignals(True)
+        self.cmb_lyric_highlight_color.blockSignals(True)
         self.chk_lyric_click_through.blockSignals(True)
         self.chk_lyric_stay_on_top.blockSignals(True)
         self.slider_lyric_bg.blockSignals(True)
         self.slider_lyric_opacity.blockSignals(True)
         self.chk_lyric_chroma.setChecked(chroma_on)
         self._set_combo_data(self.cmb_lyric_chroma, chroma_color, '#00FF00')
+        self._set_combo_data(self.cmb_lyric_text_color, text_color, '#FFFFFF')
+        self._set_combo_data(self.cmb_lyric_highlight_color, highlight_color, '#FB923C')
         self.chk_lyric_click_through.setChecked(click_through)
         self.chk_lyric_stay_on_top.setChecked(stay_on_top)
         self.slider_lyric_bg.setValue(bg_pct)
         self.slider_lyric_opacity.setValue(op_pct)
         self.chk_lyric_chroma.blockSignals(False)
         self.cmb_lyric_chroma.blockSignals(False)
+        self.cmb_lyric_text_color.blockSignals(False)
+        self.cmb_lyric_highlight_color.blockSignals(False)
         self.chk_lyric_click_through.blockSignals(False)
         self.chk_lyric_stay_on_top.blockSignals(False)
         self.slider_lyric_bg.blockSignals(False)
@@ -592,6 +625,8 @@ class SettingsDialog(QDialog):
         self.lbl_lyric_bg.setText('%s%%' % bg_pct)
         self.lbl_lyric_opacity.setText('%s%%' % op_pct)
         self.cmb_lyric_chroma.setEnabled(chroma_on)
+        self.cmb_lyric_text_color.setEnabled(chroma_on)
+        self.cmb_lyric_highlight_color.setEnabled(chroma_on)
         self.slider_lyric_bg.setEnabled(not chroma_on)
         self.slider_lyric_opacity.setEnabled(not chroma_on)
         self._sync_lyrics_controls()
@@ -737,6 +772,8 @@ class SettingsDialog(QDialog):
                 chroma_color=getattr(self, '_orig_lyric_chroma_color', '#00FF00'),
                 click_through=getattr(self, '_orig_lyric_click_through', True),
                 stay_on_top=getattr(self, '_orig_lyric_stay_on_top', False),
+                text_color=getattr(self, '_orig_lyric_text_color', '#FFFFFF'),
+                highlight_color=getattr(self, '_orig_lyric_highlight_color', '#FB923C'),
             )
         super().reject()
 
@@ -778,6 +815,8 @@ class SettingsDialog(QDialog):
                 'desktop_chroma_color': str(self.cmb_lyric_chroma.currentData() or '#00FF00'),
                 'desktop_click_through': self.chk_lyric_click_through.isChecked(),
                 'desktop_stay_on_top': self.chk_lyric_stay_on_top.isChecked(),
+                'desktop_chroma_text_color': str(self.cmb_lyric_text_color.currentData() or '#FFFFFF'),
+                'desktop_chroma_highlight_color': str(self.cmb_lyric_highlight_color.currentData() or '#FB923C'),
             },
             'audio': {
                 'hostapi': hostapi,

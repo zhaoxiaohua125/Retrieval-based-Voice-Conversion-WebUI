@@ -2976,3 +2976,16 @@ ewrite；扩展 LyricWord 与字级 matcher
 - **关键决策与解决方案**: 中文歌词必须用 drawText，不能用 Path 填充
 - **使用的技术栈**: PyQt6 QPainter.drawText
 - **修改的文件列表**: app/ui/lyrics_window.py、README.md
+
+---
+
+## 会话总结 - 2026-08-19（歌词颜色可配置）
+
+- **会话主要目的**: 用户希望桌面歌词文字颜色可在设置中选择（如直播常用白字）
+- **完成的主要任务**:
+  1. 新增 lyrics.desktop_chroma_text_color / desktop_chroma_highlight_color 配置
+  2. 设置 → 歌词 → 桌面歌词 增加「歌词颜色」「当前字颜色」下拉，切换即时预览
+  3. 默认改为纯白字 + 橙黄当前字；保留黑描边
+- **关键决策与解决方案**: 颜色写入 config，apply_desktop_style 驱动 QPainter 填色
+- **使用的技术栈**: PyQt6 QComboBox、config_store
+- **修改的文件列表**: app/ui/lyrics_window.py、app/ui/settings_dialog.py、app/config_store.py、README.md

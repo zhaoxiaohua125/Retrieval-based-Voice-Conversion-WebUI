@@ -21,6 +21,8 @@ _MIN_V = (140, 280)
 _EDGE = 8
 _QWIDGETSIZE_MAX = 16777215
 _CHROMA_DEFAULT = '#00FF00'
+_TEXT_DEFAULT = '#FFFFFF'
+_HIGHLIGHT_DEFAULT = '#FB923C'
 _SPAN_RE = re.compile(r'<span\s+style="([^"]*)">(.*?)</span>', re.I | re.S)
 _EDGE_CURSORS = {
     'left': Qt.CursorShape.SizeHorCursor,
@@ -46,6 +48,8 @@ class LyricsWindow(QWidget):
         self._win_opacity = 0.9
         self._capture_mode = 'normal'
         self._chroma_color = _CHROMA_DEFAULT
+        self._chroma_text_color = _TEXT_DEFAULT
+        self._chroma_highlight_color = _HIGHLIGHT_DEFAULT
         self._click_through = True
         self._stay_on_top = False
         self._drag_pos = None
@@ -87,7 +91,7 @@ class LyricsWindow(QWidget):
 
     def apply_desktop_style(
         self, bg_alpha=None, opacity=None, capture_mode=None, chroma_color=None,
-        click_through=None, stay_on_top=None,
+        click_through=None, stay_on_top=None, text_color=None, highlight_color=None,
     ):
         cfg = self._config
         if capture_mode is None:
@@ -114,7 +118,14 @@ class LyricsWindow(QWidget):
         color = str(chroma_color or _CHROMA_DEFAULT).strip() or _CHROMA_DEFAULT
         if not color.startswith('#'):
             color = '#' + color
-        self._chroma_color = color if len(color) in (4, 7) else _CHROMA_DEFAULT
+        self._chroma_color = self._norm_hex(color, _CHROMA_DEFAULT)
+        if text_color is None:
+            text_color = cfg.get('lyrics.desktop_chroma_text_color', _TEXT_DEFAULT) if cfg else _TEXT_DEFAULT
+        if highlight_color is None:
+            highlight_color = cfg.get('lyrics.desktop_chroma_highlight_color', _HIGHLIGHT_DEFAULT) if cfg else _HIGHLIGHT_DEFAULT
+        self._chroma_text_color = self._norm_hex(text_color, _TEXT_DEFAULT)
+        hl = str(highlight_color or _HIGHLIGHT_DEFAULT).strip()
+        self._chroma_highlight_color = '' if hl.lower() == 'same' else self._norm_hex(hl, self._chroma_text_color)
         self._bg_alpha = max(0, min(255, int(bg_alpha if bg_alpha is not None else 170)))
         self._win_opacity = max(0.2, min(1.0, float(opacity if opacity is not None else 0.9)))
         if self._capture_mode == 'chroma':
@@ -146,6 +157,17 @@ class LyricsWindow(QWidget):
         self._apply_orientation(force_size=False)
         self._refresh_text()
         self.sync_desktop_stack()
+
+    def _norm_hex(self, color, default=_TEXT_DEFAULT):
+        s = str(color or default).strip()
+        if not s.startswith('#'):
+            s = '#' + s
+        return s.upper() if len(s) in (4, 7) else str(default).upper()
+
+    def _chroma_fill_color(self, bold=False) -> QColor:
+        if bold and self._chroma_highlight_color:
+            return QColor(self._chroma_highlight_color)
+        return QColor(self._chroma_text_color)
 
     def set_anchor_window(self, window):
         self._anchor_window = window
@@ -386,7 +408,7 @@ class LyricsWindow(QWidget):
 
     def _draw_chroma_char(self, p: QPainter, x: int, y: int, ch: str, font: QFont, bold=False):
         p.setFont(font)
-        fill = QColor(0xfb, 0xbf, 0x24) if bold else QColor(0x25, 0x63, 0xeb)
+        fill = self._chroma_fill_color(bold)
         for dx, dy in ((-2, 0), (2, 0), (0, -2), (0, 2), (-1, -1), (1, 1), (-1, 1), (1, -1)):
             p.setPen(QColor(0, 0, 0))
             p.drawText(x + dx, y + dy, ch)

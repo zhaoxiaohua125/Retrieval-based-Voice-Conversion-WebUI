@@ -95,6 +95,8 @@ DEFAULT_CONFIG = {
         'desktop_chroma_color': '#00FF00',
         'desktop_click_through': True,
         'desktop_stay_on_top': False,
+        'desktop_chroma_text_color': '#FFFFFF',
+        'desktop_chroma_highlight_color': '#FB923C',
         'mtc_port': '',
         'sim_speed': 1.0,
     },
