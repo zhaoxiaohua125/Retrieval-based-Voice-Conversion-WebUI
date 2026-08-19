@@ -89,6 +89,8 @@ DEFAULT_CONFIG = {
         'align_engine': 'energy',
         'whisper_model': 'small',
         'whisper_device': 'cpu',
+        'desktop_bg_alpha': 170,
+        'desktop_opacity': 0.9,
         'mtc_port': '',
         'sim_speed': 1.0,
     },

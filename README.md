@@ -2836,3 +2836,15 @@ ewrite；扩展 LyricWord 与字级 matcher
 - **关键决策与解决方案**: 上下对半导致每句只有半高；且 QFont 点数比像素更大导致低估
 - **使用的技术栈**: PyQt6 QFont/QBoxLayout
 - **修改的文件列表**: app/ui/lyrics_window.py、README.md
+
+---
+
+## 会话总结 - 2026-08-18
+
+- **会话主要目的**: 让自有桌面歌词能被抖音直播伴侣采集，并在设置中可调透明度
+- **完成的主要任务**:
+  1. 歌词窗改为独立顶层窗口（标题「桌面歌词」），去掉 Tool，Win32 设 WS_EX_APPWINDOW，便于窗口采集
+  2. 设置 → 歌词 增加背景/窗口不透明度滑条，拖动即时预览，取消则还原，保存写入配置
+- **关键决策与解决方案**: 歌词助手只认酷狗等播放器，本窗走窗口采集；背景 100% 关闭分层透明以便采到；亮度因显示器而异故做成可调
+- **使用的技术栈**: PyQt6、Win32 SetWindowLongPtr
+- **修改的文件列表**: app/ui/lyrics_window.py、app/ui/settings_dialog.py、app/config_store.py、config/client.json、app/integration/controller.py、scripts/run_ui_skeleton.py、app/ui/pages/playback_page.py、README.md

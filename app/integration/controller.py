@@ -2615,6 +2615,12 @@ class ClientController:
             self.config_store.set('lyrics.lead_ms', int(lyrics['lead_ms']))
         if 'offset_ms' in lyrics:
             self.config_store.set('lyrics.offset_ms', int(lyrics['offset_ms']))
+        if 'desktop_bg_alpha' in lyrics:
+            self.config_store.set('lyrics.desktop_bg_alpha', max(0, min(255, int(lyrics['desktop_bg_alpha']))))
+        if 'desktop_opacity' in lyrics:
+            self.config_store.set('lyrics.desktop_opacity', max(0.2, min(1.0, float(lyrics['desktop_opacity']))))
+        if self._lyrics_window is not None:
+            self._lyrics_window.apply_desktop_style()
         if lyrics:
             off = int(self.config_store.get('lyrics.offset_ms', 0) or 0)
             lead = int(self.config_store.get('lyrics.lead_ms', 0) or 0)

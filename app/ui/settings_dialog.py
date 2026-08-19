@@ -126,7 +126,7 @@ class SettingsDialog(QDialog):
         subs = {
             'audio': '选择输入/输出设备、采样率与试麦（本机通道输出）。',
             'playback': '歌库播放模式、说话/混响、AI 跟唱默认混音；智能切依据 converted_vocal 能量（无需歌词）。',
-            'lyrics': '逐字歌词生成与高亮同步参数。',
+            'lyrics': '逐字歌词生成、高亮同步；桌面歌词窗可供直播伴侣窗口采集。',
             'general': '更新检查、日志目录等全局项。',
             'shortcuts': '仅在「播放」Tab 生效的快捷键。',
         }
@@ -345,6 +345,38 @@ class SettingsDialog(QDialog):
             self.lbl_lyrics_hint.setStyleSheet('color:#64748b;font-size:12px;')
             form.addRow(self.lbl_lyrics_hint)
             root.addWidget(box)
+            desk = QGroupBox('桌面歌词（直播采集）')
+            desk_form = QFormLayout(desk)
+            self.slider_lyric_bg = QSlider(Qt.Orientation.Horizontal)
+            self.slider_lyric_bg.setRange(0, 100)
+            self.slider_lyric_bg.setToolTip('歌词背后黑底的实度。各显示器亮度不同，请自行拖到看清为止；拉到 100% 最容易被直播伴侣采到。')
+            self.lbl_lyric_bg = QLabel('')
+            self.lbl_lyric_bg.setMinimumWidth(44)
+            self.lbl_lyric_bg.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            bg_row = QHBoxLayout()
+            bg_row.addWidget(self.slider_lyric_bg, stretch=1)
+            bg_row.addWidget(self.lbl_lyric_bg)
+            self.slider_lyric_opacity = QSlider(Qt.Orientation.Horizontal)
+            self.slider_lyric_opacity.setRange(20, 100)
+            self.slider_lyric_opacity.setToolTip('整窗（含文字）变淡。背景不够时先调上一档，不要只靠这一档。')
+            self.lbl_lyric_opacity = QLabel('')
+            self.lbl_lyric_opacity.setMinimumWidth(44)
+            self.lbl_lyric_opacity.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            op_row = QHBoxLayout()
+            op_row.addWidget(self.slider_lyric_opacity, stretch=1)
+            op_row.addWidget(self.lbl_lyric_opacity)
+            desk_form.addRow('背景不透明度', bg_row)
+            desk_form.addRow('窗口不透明度', op_row)
+            hint = QLabel(
+                '抖音直播伴侣请用「窗口采集」选择窗口「桌面歌词」，不要用歌词助手（只认酷狗等播放器）。'
+                '拖动滑条会立刻作用到已打开的桌面歌词窗，保存后写入配置。'
+            )
+            hint.setWordWrap(True)
+            hint.setStyleSheet('color:#64748b;font-size:12px;')
+            desk_form.addRow(hint)
+            self.slider_lyric_bg.valueChanged.connect(self._on_desktop_lyric_slider)
+            self.slider_lyric_opacity.valueChanged.connect(self._on_desktop_lyric_slider)
+            root.addWidget(desk)
             osc_box = QGroupBox('OSC 歌词同步')
             osc_form = QFormLayout(osc_box)
             self.spin_osc = QSpinBox()
@@ -404,6 +436,15 @@ class SettingsDialog(QDialog):
         use_whisper = str(self.cmb_align_engine.currentData() or '') == 'whisper'
         self.cmb_whisper_model.setEnabled(use_whisper)
         self.cmb_whisper_device.setEnabled(use_whisper)
+
+    def _on_desktop_lyric_slider(self, *_args):
+        bg = int(self.slider_lyric_bg.value())
+        op = int(self.slider_lyric_opacity.value())
+        self.lbl_lyric_bg.setText('%s%%' % bg)
+        self.lbl_lyric_opacity.setText('%s%%' % op)
+        win = getattr(self.parent(), '_quit_lyrics', None)
+        if win is not None:
+            win.apply_desktop_style(bg_alpha=int(round(bg * 2.55)), opacity=op / 100.0)
 
     def _load_pitchfix_sliders(self):
         pf = self.config.get('pitchfix', {}) or {}
@@ -467,6 +508,20 @@ class SettingsDialog(QDialog):
         self._set_combo_data(self.cmb_whisper_device, device, 'cpu')
         self.spin_lead_ms.setValue(int(self.config.get('lyrics.lead_ms', -80) or 0))
         self.spin_offset_ms.setValue(int(self.config.get('lyrics.offset_ms', 0) or 0))
+        bg_alpha = max(0, min(255, int(self.config.get('lyrics.desktop_bg_alpha', 170) or 0)))
+        op = max(0.2, min(1.0, float(self.config.get('lyrics.desktop_opacity', 0.9) or 0.9)))
+        self._orig_lyric_bg = bg_alpha
+        self._orig_lyric_opacity = op
+        bg_pct = int(round(bg_alpha / 2.55))
+        op_pct = int(round(op * 100))
+        self.slider_lyric_bg.blockSignals(True)
+        self.slider_lyric_opacity.blockSignals(True)
+        self.slider_lyric_bg.setValue(bg_pct)
+        self.slider_lyric_opacity.setValue(op_pct)
+        self.slider_lyric_bg.blockSignals(False)
+        self.slider_lyric_opacity.blockSignals(False)
+        self.lbl_lyric_bg.setText('%s%%' % bg_pct)
+        self.lbl_lyric_opacity.setText('%s%%' % op_pct)
         self._sync_lyrics_controls()
         for key in SHORTCUT_KEYS:
             val = str((self.config.get('shortcuts', {}) or {}).get(key) or DEFAULT_SHORTCUTS.get(key) or '')
@@ -601,6 +656,9 @@ class SettingsDialog(QDialog):
         if self._mic_testing:
             self.bridge.emit_action('audio_test_mic', stop=True)
             self._mic_testing = False
+        win = getattr(self.parent(), '_quit_lyrics', None)
+        if win is not None:
+            win.apply_desktop_style(getattr(self, '_orig_lyric_bg', 170), getattr(self, '_orig_lyric_opacity', 0.9))
         super().reject()
 
     def collect_payload(self) -> dict:
@@ -635,6 +693,8 @@ class SettingsDialog(QDialog):
                 'whisper_device': str(self.cmb_whisper_device.currentData() or 'cpu'),
                 'lead_ms': int(self.spin_lead_ms.value()),
                 'offset_ms': int(self.spin_offset_ms.value()),
+                'desktop_bg_alpha': int(round(self.slider_lyric_bg.value() * 2.55)),
+                'desktop_opacity': round(self.slider_lyric_opacity.value() / 100.0, 2),
             },
             'audio': {
                 'hostapi': hostapi,

@@ -457,7 +457,7 @@ def main():
             window.mark_backend_ready()
 
             def _init_lyrics_tray():
-                lyrics = LyricsWindow()
+                lyrics = LyricsWindow(config=controller.config_store)
                 if not getattr(lyrics, '_restored_geo', False):
                     lyrics.move(window.x() + 40, window.y() + 80)
                 controller.set_lyrics_window(lyrics)

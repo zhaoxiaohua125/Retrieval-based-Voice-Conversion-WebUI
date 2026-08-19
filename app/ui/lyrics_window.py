@@ -1,5 +1,6 @@
 """悬浮歌词窗口（无边框、置顶、可拖拽/缩放；双行展示；横/竖屏切换）。"""
 
+import ctypes
 import re
 from html import escape
 
@@ -28,31 +29,18 @@ _EDGE_CURSORS = {
     'top-right': Qt.CursorShape.SizeBDiagCursor,
     'bottom-left': Qt.CursorShape.SizeBDiagCursor,
 }
-_STYLE_CUR_H = (
-    'color:#ffffff;background:rgba(0,0,0,170);padding:10px 14px 4px 14px;'
-    'border-top-left-radius:8px;border-top-right-radius:8px;'
-)
-_STYLE_NEXT_H = (
-    'color:#93c5fd;background:rgba(0,0,0,170);padding:4px 14px 10px 14px;'
-    'border-bottom-left-radius:8px;border-bottom-right-radius:8px;'
-)
-_STYLE_CUR_V = (
-    'color:#ffffff;background:rgba(0,0,0,170);padding:10px 6px 10px 10px;'
-    'border-top-left-radius:8px;border-bottom-left-radius:8px;'
-)
-_STYLE_NEXT_V = (
-    'color:#93c5fd;background:rgba(0,0,0,170);padding:10px 10px 10px 6px;'
-    'border-top-right-radius:8px;border-bottom-right-radius:8px;'
-)
 
 
 class LyricsWindow(QWidget):
-    """独立悬浮歌词层，供 OBS 采集；酷狗式当前行+下一行。"""
+    """独立桌面歌词层：可被直播伴侣窗口采集；酷狗式当前行+下一行。"""
 
     _tick = pyqtSignal(dict)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, config=None):
         super().__init__(parent)
+        self._config = config
+        self._bg_alpha = 170
+        self._win_opacity = 0.9
         self._drag_pos = None
         self._resize_edge = None
         self._resize_origin = None
@@ -64,13 +52,12 @@ class LyricsWindow(QWidget):
         self._last_next = ''
         self._last_highlight = False
         self._use_html = False
+        self.setWindowTitle('桌面歌词')
         self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint
+            Qt.WindowType.Window
+            | Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
-            | Qt.WindowType.Tool
         )
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.setWindowOpacity(0.9)
         self.setMouseTracking(True)
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         self.line_cur = QLabel('歌词悬浮窗', self)
@@ -89,8 +76,54 @@ class LyricsWindow(QWidget):
         self._layout.addWidget(self.line_next, stretch=1)
         self._tick.connect(self._apply_lyric_tick)
         self._restore_layout()
+        self.apply_desktop_style()
         self._apply_orientation(force_size=not self._restored_geo)
         self._sync_font()
+
+    def apply_desktop_style(self, bg_alpha=None, opacity=None):
+        cfg = self._config
+        if bg_alpha is None:
+            bg_alpha = cfg.get('lyrics.desktop_bg_alpha', 170) if cfg else 170
+        if opacity is None:
+            opacity = cfg.get('lyrics.desktop_opacity', 0.9) if cfg else 0.9
+        self._bg_alpha = max(0, min(255, int(bg_alpha if bg_alpha is not None else 170)))
+        self._win_opacity = max(0.2, min(1.0, float(opacity if opacity is not None else 0.9)))
+        self.setWindowOpacity(self._win_opacity)
+        want = self._bg_alpha < 255
+        old = self.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        if old != want:
+            vis = self.isVisible()
+            if vis:
+                self.hide()
+            self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, want)
+            if vis:
+                self.show()
+        else:
+            self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, want)
+        self._apply_orientation(force_size=False)
+        self._expose_for_capture()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._expose_for_capture()
+
+    def _expose_for_capture(self):
+        try:
+            user32 = ctypes.windll.user32
+            hwnd = int(self.winId())
+            gwl, app, tool = -20, 0x00040000, 0x00000080
+            if ctypes.sizeof(ctypes.c_void_p) == 8:
+                get_long, set_long = user32.GetWindowLongPtrW, user32.SetWindowLongPtrW
+                get_long.argtypes = [ctypes.c_void_p, ctypes.c_int]
+                get_long.restype = ctypes.c_int64
+                set_long.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int64]
+                set_long.restype = ctypes.c_int64
+            else:
+                get_long, set_long = user32.GetWindowLongW, user32.SetWindowLongW
+            set_long(hwnd, gwl, (get_long(hwnd, gwl) | app) & ~tool)
+            user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, 0x0027)
+        except Exception:
+            pass
 
     def minimumSizeHint(self):
         return QSize(*(_MIN_V if self._orientation == _ORIENT_V else _MIN_H))
@@ -323,8 +356,14 @@ class LyricsWindow(QWidget):
             self.line_next.setWordWrap(False)
             self.line_cur.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
             self.line_next.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom)
-            self.line_cur.setStyleSheet(_STYLE_CUR_V)
-            self.line_next.setStyleSheet(_STYLE_NEXT_V)
+            self.line_cur.setStyleSheet(
+                'color:#ffffff;background:rgba(0,0,0,%d);padding:10px 6px 10px 10px;'
+                'border-top-left-radius:8px;border-bottom-left-radius:8px;' % self._bg_alpha
+            )
+            self.line_next.setStyleSheet(
+                'color:#93c5fd;background:rgba(0,0,0,%d);padding:10px 10px 10px 6px;'
+                'border-top-right-radius:8px;border-bottom-right-radius:8px;' % self._bg_alpha
+            )
         else:
             self.setMinimumSize(*_MIN_H)
             self._layout.setDirection(QBoxLayout.Direction.TopToBottom)
@@ -332,8 +371,14 @@ class LyricsWindow(QWidget):
             self.line_next.setWordWrap(True)
             self.line_cur.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             self.line_next.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self.line_cur.setStyleSheet(_STYLE_CUR_H)
-            self.line_next.setStyleSheet(_STYLE_NEXT_H)
+            self.line_cur.setStyleSheet(
+                'color:#ffffff;background:rgba(0,0,0,%d);padding:10px 14px 4px 14px;'
+                'border-top-left-radius:8px;border-top-right-radius:8px;' % self._bg_alpha
+            )
+            self.line_next.setStyleSheet(
+                'color:#93c5fd;background:rgba(0,0,0,%d);padding:4px 14px 10px 14px;'
+                'border-bottom-left-radius:8px;border-bottom-right-radius:8px;' % self._bg_alpha
+            )
         if force_size:
             x, y, w, h = self._pick_mode_geometry()
             self._set_geometry_forced(x, y, w, h)

@@ -79,6 +79,8 @@
     "align_engine": "energy",
     "whisper_model": "small",
     "whisper_device": "cpu",
+    "desktop_bg_alpha": 0,
+    "desktop_opacity": 1.0,
     "mtc_port": "",
     "sim_speed": 1.0
   },
@@ -126,22 +128,22 @@
     "active_tab": 3,
     "active_nav_tab": 0,
     "lyrics_window": {
-      "orientation": "horizontal",
+      "orientation": "vertical",
       "geometry": [
-        210,
-        1211,
-        1937,
-        166
+        1623,
+        131,
+        148,
+        1189
       ],
       "geometry_h": [
-        210,
-        1211,
+        179,
+        1190,
         1937,
         166
       ],
       "geometry_v": [
-        2335,
-        139,
+        1623,
+        131,
         148,
         1189
       ]
