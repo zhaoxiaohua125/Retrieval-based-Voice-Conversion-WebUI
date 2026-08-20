@@ -29,8 +29,10 @@ def resolve_lyrics_launcher(root: Path, config=None) -> str:
 
 
 class LyricsIpcServer(QObject):
-    def __init__(self, root: str):
+    def __init__(self, root: str, config=None):
         super().__init__()
+        self._root = Path(root)
+        self._config = config
         self._key = ipc_key(root)
         self._proc = None
         QLocalServer.removeServer(self._key)
@@ -48,13 +50,18 @@ class LyricsIpcServer(QObject):
     def process(self):
         return self._proc
 
-    def start_process(self, root: Path, config=None) -> bool:
-        if self._proc is not None and self._proc.poll() is None:
+    def _proc_dead(self) -> bool:
+        return self._proc is None or self._proc.poll() is not None
+
+    def start_process(self, root: Path = None, config=None) -> bool:
+        if not self._proc_dead():
             return True
+        root = Path(root or self._root)
+        cfg = config if config is not None else self._config
         script = root / 'scripts' / 'run_desktop_lyrics.py'
         if not script.is_file():
             return False
-        launcher = resolve_lyrics_launcher(root, config)
+        launcher = resolve_lyrics_launcher(root, cfg)
         cmd = [launcher, str(script), '--ipc', self._key, '--root', str(root.resolve())]
         flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0) if launcher.lower().endswith('python.exe') else 0
         try:
@@ -64,8 +71,15 @@ class LyricsIpcServer(QObject):
             self._proc = None
             return False
 
+    def ensure_alive(self) -> bool:
+        if not self._proc_dead():
+            return True
+        self._sock = None
+        return self.start_process()
+
     def stop_process(self):
-        self.send({'op': 'quit'})
+        if self._connected():
+            self._write({'op': 'quit'})
         if self._proc is not None and self._proc.poll() is None:
             try:
                 self._proc.terminate()
@@ -76,6 +90,8 @@ class LyricsIpcServer(QObject):
                 except Exception:
                     pass
         self._proc = None
+        self._sock = None
+        self._pending.clear()
 
     def _accept(self):
         sock = self._server.nextPendingConnection()
@@ -83,22 +99,35 @@ class LyricsIpcServer(QObject):
             return
         if self._sock is not None:
             try:
+                self._sock.disconnected.disconnect(self._on_disconnect)
+            except Exception:
+                pass
+            try:
                 self._sock.disconnectFromServer()
             except Exception:
                 pass
         self._sock = sock
+        self._sock.disconnected.connect(self._on_disconnect)
         self._flush_pending()
+
+    def _on_disconnect(self):
+        self._sock = None
 
     def _connected(self) -> bool:
         return self._sock is not None and self._sock.state() == QLocalSocket.LocalSocketState.ConnectedState
 
-    def _write(self, msg: dict):
+    def _write(self, msg: dict) -> bool:
+        if not self._connected():
+            return False
         try:
             line = json.dumps(msg, ensure_ascii=False) + '\n'
-            self._sock.write(line.encode('utf-8'))
-            self._sock.waitForBytesWritten(500)
+            if self._sock.write(line.encode('utf-8')) < 0:
+                return False
+            if not self._sock.waitForBytesWritten(500):
+                return False
+            return True
         except Exception:
-            pass
+            return False
 
     def _flush_pending(self):
         if not self._connected():
@@ -106,16 +135,33 @@ class LyricsIpcServer(QObject):
         pending = self._pending
         self._pending = []
         for msg in pending:
-            self._write(msg)
+            if not self._write(msg):
+                self._pending.append(msg)
+                break
+
+    def _queue(self, msg: dict):
+        op = str((msg or {}).get('op') or '')
+        if op == 'tick':
+            self._pending = [m for m in self._pending if m.get('op') != 'tick']
+        self._pending.append(dict(msg or {}))
 
     def send(self, msg: dict):
-        if not self._connected():
-            op = str((msg or {}).get('op') or '')
-            if op == 'tick':
-                self._pending = [m for m in self._pending if m.get('op') != 'tick']
-            self._pending.append(dict(msg or {}))
+        op = str((msg or {}).get('op') or '')
+        if op == 'quit':
+            if self._connected():
+                self._write({'op': 'quit'})
             return
-        self._write(msg)
+        if self._proc_dead() and not self.ensure_alive():
+            self._queue(msg)
+            return
+        if not self._connected():
+            self._queue(msg)
+            return
+        if not self._write(msg):
+            self._sock = None
+            if self._proc_dead():
+                self.ensure_alive()
+            self._queue(msg)
 
 
 class LyricsWindowProxy:
@@ -143,14 +189,21 @@ class LyricsWindowProxy:
 
     def apply_desktop_style(self, bg_alpha=None, opacity=None, capture_mode=None, chroma_color=None,
                             click_through=None, stay_on_top=None, text_color=None, highlight_color=None):
+        was_visible = self._visible
+        self._server.ensure_alive()
         self._server.send({'op': 'style', 'kwargs': {
             'bg_alpha': bg_alpha, 'opacity': opacity, 'capture_mode': capture_mode,
             'chroma_color': chroma_color, 'click_through': click_through, 'stay_on_top': stay_on_top,
             'text_color': text_color, 'highlight_color': highlight_color,
         }})
+        if was_visible:
+            self._visible = True
+            self._server.send({'op': 'show'})
+            self.sync_desktop_stack()
 
     def show(self):
         self._visible = True
+        self._server.ensure_alive()
         self._server.send({'op': 'show'})
 
     def hide(self):
@@ -159,6 +212,7 @@ class LyricsWindowProxy:
 
     def setVisible(self, visible: bool):
         self._visible = bool(visible)
+        self._server.ensure_alive()
         self._server.send({'op': 'visible', 'visible': self._visible})
 
     def isVisible(self) -> bool:
@@ -184,4 +238,4 @@ class LyricsWindowProxy:
         return True
 
     def close(self):
-        self._server.send({'op': 'quit'})
+        self._server.stop_process()

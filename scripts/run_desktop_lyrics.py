@@ -61,8 +61,12 @@ def main():
         if op == 'tick':
             win.set_lyric_tick(msg.get('payload') or {})
         elif op == 'style':
+            was_visible = win.isVisible()
             kw = msg.get('kwargs') or {}
             win.apply_desktop_style(**{k: v for k, v in kw.items() if v is not None})
+            if was_visible:
+                win.showNormal()
+                win.sync_desktop_stack()
         elif op == 'show':
             win.show()
             win.sync_desktop_stack()

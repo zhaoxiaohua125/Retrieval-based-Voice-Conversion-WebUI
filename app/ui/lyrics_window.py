@@ -155,7 +155,8 @@ class LyricsWindow(QWidget):
                 self.hide()
             self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, want_trans)
             if vis:
-                self.show()
+                self.showNormal()
+                self.raise_()
         else:
             self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, want_trans)
         self._apply_window_flags()
@@ -270,12 +271,16 @@ class LyricsWindow(QWidget):
         flags = Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint
         if self._stay_on_top:
             flags |= Qt.WindowType.WindowStaysOnTopHint
-        vis = self.isVisible()
-        if vis:
+        if self.windowFlags() == flags:
+            return
+        was_visible = self.isVisible()
+        if was_visible:
             self.hide()
         self.setWindowFlags(flags)
-        if vis:
-            self.show()
+        if was_visible:
+            self.showNormal()
+            self.raise_()
+            QTimer.singleShot(0, self.sync_desktop_stack)
 
     def paintEvent(self, event):
         if self._capture_mode == 'chroma':

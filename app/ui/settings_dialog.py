@@ -66,6 +66,7 @@ class SettingsDialog(QDialog):
         self.project_root = project_root
         self.song_make_page = song_make_page
         self._mic_testing = False
+        self._lyric_style_preview = False
         self._realtime_payload = None
         self._pf_sliders = {}
         self.setWindowTitle('系统设置')
@@ -479,6 +480,7 @@ class SettingsDialog(QDialog):
         self.cmb_whisper_device.setEnabled(use_whisper)
 
     def _on_desktop_lyric_style(self, *_args):
+        self._lyric_style_preview = True
         chroma = bool(self.chk_lyric_chroma.isChecked())
         self.cmb_lyric_chroma.setEnabled(chroma)
         self.cmb_lyric_text_color.setEnabled(chroma)
@@ -766,10 +768,10 @@ class SettingsDialog(QDialog):
             self.bridge.emit_action('audio_test_mic', stop=True)
             self._mic_testing = False
         win = getattr(self.parent(), '_quit_lyrics', None)
-        if win is not None:
+        if getattr(self, '_lyric_style_preview', False) and win is not None:
             win.apply_desktop_style(
-                getattr(self, '_orig_lyric_bg', 170),
-                getattr(self, '_orig_lyric_opacity', 0.9),
+                bg_alpha=getattr(self, '_orig_lyric_bg', 170),
+                opacity=getattr(self, '_orig_lyric_opacity', 0.9),
                 capture_mode=getattr(self, '_orig_lyric_capture_mode', 'normal'),
                 chroma_color=getattr(self, '_orig_lyric_chroma_color', '#00FF00'),
                 click_through=getattr(self, '_orig_lyric_click_through', True),
@@ -777,6 +779,13 @@ class SettingsDialog(QDialog):
                 text_color=getattr(self, '_orig_lyric_text_color', '#FFFFFF'),
                 highlight_color=getattr(self, '_orig_lyric_highlight_color', '#FB923C'),
             )
+            if win.isVisible():
+                win.show()
+                win.sync_desktop_stack()
+            ctrl = getattr(self.parent(), '_controller', None)
+            if ctrl is not None and ctrl.state.loaded_lyrics:
+                ctrl._reset_playback_lyrics(ctrl._current_song_position())
+        self._lyric_style_preview = False
         super().reject()
 
     def collect_payload(self) -> dict:

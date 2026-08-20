@@ -58,9 +58,13 @@ def build_tray(bridge, main_window, lyrics_window=None, controller=None):
         act_lyrics = QAction('显示/隐藏桌面歌词', main_window)
 
         def toggle_lyrics():
+            if hasattr(lyrics_window, '_server'):
+                lyrics_window._server.ensure_alive()
             lyrics_window.setVisible(not lyrics_window.isVisible())
             if lyrics_window.isVisible():
                 lyrics_window.sync_desktop_stack()
+                if controller is not None and controller.state.loaded_lyrics:
+                    controller._reset_playback_lyrics(controller._current_song_position())
 
         act_lyrics.triggered.connect(toggle_lyrics)
         menu.addAction(act_lyrics)

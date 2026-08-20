@@ -243,11 +243,16 @@ def main():
             def on_user_action(action: str, payload: dict):
                 if action == 'toggle_desktop_lyrics':
                     lyrics = ctx.get('lyrics') or getattr(window, '_quit_lyrics', None)
+                    server = getattr(window, '_quit_lyrics_ipc', None)
+                    if server is not None:
+                        server.ensure_alive()
                     if lyrics is not None:
                         show = not lyrics.isVisible()
                         lyrics.setVisible(show)
                         if show:
                             lyrics.sync_desktop_stack()
+                            if controller.state.loaded_lyrics:
+                                controller._reset_playback_lyrics(controller._current_song_position())
                     return
                 scheduler.publish(BusMessage(SignalType.STATUS, ModuleId.UI, {'action': action, **(payload or {})}))
                 if payload.get('log'):
@@ -289,8 +294,12 @@ def main():
                         return
                 page = window.page_playback if window.is_main_ready() else None
                 make = window.page_song_make if window.is_main_ready() else None
-                if action == 'lyric_tick' and source == ModuleId.LYRICS and page is not None:
-                    page.set_lyric_tick(payload)
+                if action == 'lyric_tick' and source == ModuleId.LYRICS:
+                    if page is not None:
+                        page.set_lyric_tick(payload)
+                    lyrics = ctx.get('lyrics') or getattr(window, '_quit_lyrics', None)
+                    if lyrics is not None:
+                        lyrics.set_lyric_tick(payload)
                     return
                 if source != ModuleId.SCHEDULER:
                     return
@@ -477,7 +486,7 @@ def main():
                 server = None
                 if separate:
                     from app.ops.lyrics_ipc import LyricsIpcServer, LyricsWindowProxy
-                    server = LyricsIpcServer(str(ROOT))
+                    server = LyricsIpcServer(str(ROOT), cfg)
                     if not server.start_process(ROOT, cfg):
                         server = None
                         separate = False

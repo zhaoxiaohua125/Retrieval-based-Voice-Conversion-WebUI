@@ -152,7 +152,11 @@ class ClientController:
 
     def set_lyrics_window(self, window):
         self._lyrics_window = window
-        self.lyrics.set_tick_handler(lambda payload: window.set_lyric_tick(payload))
+        from app.ops.lyrics_ipc import LyricsWindowProxy
+        if isinstance(window, LyricsWindowProxy):
+            self.lyrics.set_tick_handler(None)
+        else:
+            self.lyrics.set_tick_handler(lambda payload: window.set_lyric_tick(payload))
 
     @property
     def library(self):

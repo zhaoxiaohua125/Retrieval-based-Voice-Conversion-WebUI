@@ -3087,3 +3087,55 @@ ewrite；扩展 LyricWord 与字级 matcher
 - **关键决策与解决方案**: 预加载只 pause 流未启动 tick；resume 只 unpause 不发 periodic playback_tick
 - **使用的技术栈**: playback-tick 线程
 - **修改的文件列表**: app/integration/controller.py、README.md
+
+---
+
+## 会话总结 - 2026-08-20（设置关闭后桌面歌词消失）
+
+- **会话主要目的**: 打开设置后直接关闭，桌面歌词不再显示且按钮无效
+- **完成的主要任务**:
+  1. 取消设置时 `apply_desktop_style` 重设窗口 flags，Windows 上 hide/show 后子进程窗体丢失
+  2. 子进程/Proxy 样式应用后强制 `showNormal` + sync；取消时补推歌词 tick
+  3. 桌面歌词切换按钮显示时同步 tick
+- **关键决策与解决方案**: Proxy 仅转发 style 未恢复可见性；reject 改为关键字参数并显式 reshow
+- **使用的技术栈**: PyQt6 窗口 flags、Lyrics IPC
+- **修改的文件列表**: app/ui/lyrics_window.py、app/ui/settings_dialog.py、app/ops/lyrics_ipc.py、scripts/run_desktop_lyrics.py、scripts/run_ui_skeleton.py、app/ui/tray.py、README.md
+
+---
+
+## 会话总结 - 2026-08-20（设置关闭 IPC 管道断开）
+
+- **会话主要目的**: 打开设置直接关闭后桌面歌词消失，再点按钮报 QWindowsPipeWriter 管道已结束
+- **完成的主要任务**:
+  1. 取消设置时未改歌词也会 `apply_desktop_style`，重设 flags 导致子进程崩溃
+  2. 仅在实际预览过歌词样式时（`_lyric_style_preview`）才在 reject 恢复
+  3. IPC 增加 `ensure_alive` 自动重启子进程、写失败入队、断线重连后补发
+- **关键决策与解决方案**: 根因是无变更也触发样式重载；管道错误是子进程已退出仍写入
+- **使用的技术栈**: QLocalSocket、subprocess 重启
+- **修改的文件列表**: app/ui/settings_dialog.py、app/ops/lyrics_ipc.py、app/ui/lyrics_window.py、scripts/run_ui_skeleton.py、app/ui/tray.py、README.md
+
+---
+
+## 会话总结 - 2026-08-20（桌面歌词不跟随主歌词）
+
+- **会话主要目的**: 播放时主界面歌词正常滚动，桌面歌词不再随主歌词变动
+- **完成的主要任务**:
+  1. 定位根因：`playback-tick` 后台线程直接调用 `LyricsWindowProxy.set_lyric_tick`，`QLocalSocket` 必须在主线程写入
+  2. 独立进程桌面歌词改为经 scheduler → UI 线程 bridge 转发 tick（与主界面同路径）
+  3. `LyricsWindowProxy` 禁用 `tick_handler` 直连，避免跨线程 IPC 写入
+- **关键决策与解决方案**: 主界面 tick 走 Qt signal 线程安全；IPC Proxy 无 signal 包装，须主线程 send
+- **使用的技术栈**: PyQt6 QLocalSocket 线程约束、scheduler STATUS 总线
+- **修改的文件列表**: scripts/run_ui_skeleton.py、app/integration/controller.py、README.md
+
+---
+
+## 会话总结 - 2026-08-20（桌面歌词不跟随主歌词）
+
+- **会话主要目的**: 播放时主界面歌词正常滚动，桌面歌词不再随主歌词变动
+- **完成的主要任务**:
+  1. 定位根因：`playback-tick` 后台线程直接调用 `LyricsWindowProxy.set_lyric_tick`，`QLocalSocket` 必须在主线程写入
+  2. 独立进程桌面歌词改为经 scheduler → UI 线程 bridge 转发 tick（与主界面同路径）
+  3. `LyricsWindowProxy` 禁用 `tick_handler` 直连，避免跨线程 IPC 写入
+- **关键决策与解决方案**: 主界面 tick 走 Qt signal 线程安全；IPC Proxy 无 signal 包装，须主线程 send
+- **使用的技术栈**: PyQt6 QLocalSocket 线程约束、scheduler STATUS 总线
+- **修改的文件列表**: scripts/run_ui_skeleton.py、app/integration/controller.py、README.md
