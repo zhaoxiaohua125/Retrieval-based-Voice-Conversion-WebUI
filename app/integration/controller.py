@@ -82,6 +82,7 @@ class ClientController:
         self._smart_vocal_acc = 0.0
         self._update_running = False
         self._active_playback_song_key = ''
+        self._lyrics_ui_path = ''
 
     @staticmethod
     def _song_key(song: dict | None) -> str:
@@ -646,6 +647,8 @@ class ClientController:
             return False
         if not autoplay and mgr.inst_duration > 0 and not mgr.inst_paused:
             mgr.toggle_inst_pause()
+        elif autoplay and mgr.inst_paused and mgr.inst_duration > 0:
+            mgr.toggle_inst_pause()
         self.state.mode = mode
         self.state.passthrough_running = mode in ('reverb_talk', 'normal_talk')
         self.state.ai_follow_running = mode == 'ai_follow' and autoplay
@@ -851,6 +854,7 @@ class ClientController:
             self.state.playback_running = False
             self.lyrics.clear()
             self.state.loaded_lyrics = False
+            self._lyrics_ui_path = ''
             self._publish_status('lyrics_loaded', lines=[])
             self._publish_status('playback_stopped', log='当前歌曲已删除')
         self._scan_library_blocking()
@@ -975,6 +979,8 @@ class ClientController:
             mgr.toggle_inst_pause()
             pos, dur, playing, paused = self._timeline_inst_state()
             self.state.playback_running = playing
+            if playing and (self._playback_tick is None or not self._playback_tick.is_alive()):
+                self._restart_playback_tick()
             self._publish_status('playback_resumed', playing=playing, paused=paused, position=pos, duration=dur)
             self._publish_status('playback_tick', position=pos, duration=dur, playing=playing, paused=paused)
             return
@@ -1058,16 +1064,98 @@ class ClientController:
         if switching:
             self._reset_smart_switch()
         self.state.selected_song = dict(song)
-        defer = lib_changed and (switching or force_switch)
-        if defer:
-            threading.Thread(
-                target=self._select_song_apply,
-                args=(dict(song), dict(payload), switching, lib_changed, force_switch, prev_song),
-                name='select-song',
-                daemon=True,
-            ).start()
-        else:
-            self._select_song_apply(song, payload, switching, lib_changed, force_switch, prev_song)
+        threading.Thread(
+            target=self._select_song_apply,
+            args=(dict(song), dict(payload), switching, lib_changed, force_switch, prev_song),
+            name='select-song',
+            daemon=True,
+        ).start()
+
+    def _warmup_song(self) -> dict | None:
+        for song in (self.library or []):
+            if self._song_unified_ready(song, 'ai_sing'):
+                return dict(song)
+        for song in (self.library or []):
+            play_path = song.get('play_path') or song.get('cover_path')
+            if play_path and Path(play_path).is_file():
+                return dict(song)
+        return None
+
+    def _warmup_lyrics(self, song: dict):
+        lrc = song.get('lrc_path') or find_lrc_in_dir(
+            song.get('dir') or Path(song.get('play_path', '')).parent,
+            song_lookup_stem(song),
+        )
+        if not lrc or not Path(lrc).is_file():
+            return
+        from app.lyrics.aligner import find_vocal_for_song, refresh_karaoke_timing
+        vocal = find_vocal_for_song(song.get('dir') or Path(lrc).parent, song_lookup_stem(song), song)
+        is_accomp = str(song.get('library_type') or '') == 'accompaniment'
+        self.lyrics.load_lrc(lrc, vocal_path=None if is_accomp else vocal, force=True)
+        if is_accomp and vocal and Path(vocal).is_file():
+            doc = refresh_karaoke_timing(self.lyrics.document, vocal_path=vocal)
+            self.lyrics.document = doc
+            self.lyrics.matcher.set_document(doc)
+            self.lyrics._timing_from_file = False
+        self.state.loaded_lyrics = True
+        self.state.selected_song['lrc_path'] = lrc
+
+    def warmup_startup(self, status_cb=None):
+        def status(msg: str):
+            if status_cb:
+                try:
+                    status_cb(str(msg or ''))
+                except Exception:
+                    pass
+        status('正在预热音频模块…')
+        try:
+            import soundfile  # noqa: F401
+            import librosa  # noqa: F401
+            import sounddevice  # noqa: F401
+        except Exception:
+            pass
+        try:
+            self._sync_playback_output_device()
+            from app.audio.devices import resolve_io_devices
+            audio = self.config_store.get('audio', {}) or {}
+            resolve_io_devices(audio.get('input_device'), audio.get('output_device'), hostapi=audio.get('hostapi'))
+        except Exception:
+            logger.debug('warmup devices failed:\n%s', traceback.format_exc())
+        song = self._warmup_song()
+        if not song:
+            status('初始化完成')
+            return
+        self.state.selected_song = dict(song)
+        status('正在预加载首曲音频…')
+        try:
+            if self._song_unified_ready(song, 'ai_sing'):
+                self.audio.switch_playback_mode(
+                    'ai_sing',
+                    inst_path=song.get('instrumental_path'),
+                    vocal_path=song.get('vocal_path'),
+                    inst_seek=0,
+                )
+                mgr = self.audio.manager
+                if mgr is not None and mgr.inst_duration > 0 and not mgr.inst_paused:
+                    mgr.toggle_inst_pause()
+                self.state.mode = 'ai_sing'
+                self.state.selected_mode = 'ai_sing'
+                self.state.playback_running = True
+            else:
+                play_path = song.get('play_path') or song.get('cover_path')
+                if play_path and Path(play_path).is_file():
+                    self._player.load(str(play_path))
+            self.pitch_follow.preload(song)
+            self._schedule_smart_peaks(song)
+        except Exception:
+            logger.warning('warmup audio failed:\n%s', traceback.format_exc())
+        status('正在预加载歌词…')
+        try:
+            self._warmup_lyrics(song)
+        except Exception:
+            logger.debug('warmup lyrics failed:\n%s', traceback.format_exc())
+        status('初始化完成')
+        logger.info('startup warmup done song=%s', song.get('title') or song.get('play_path'))
 
     def _select_song_apply(self, song: dict, payload: dict, switching: bool, lib_changed: bool, force_switch: bool, prev_song: dict | None = None):
         resume_if_playing = payload.get('resume_if_playing', True)
@@ -1096,7 +1184,9 @@ class ClientController:
 
             vocal = find_vocal_for_song(song.get('dir') or Path(lrc).parent, song_lookup_stem(song), song)
             is_accomp = str(song.get('library_type') or '') == 'accompaniment'
-            self.lyrics.load_lrc(lrc, vocal_path=None if is_accomp else vocal, force=True)
+            lrc_resolved = str(Path(lrc).resolve())
+            force_lrc = switching or self.lyrics._loaded_path != lrc_resolved
+            self.lyrics.load_lrc(lrc, vocal_path=None if is_accomp else vocal, force=force_lrc)
             if is_accomp and vocal and Path(vocal).is_file():
                 doc = refresh_karaoke_timing(self.lyrics.document, vocal_path=vocal)
                 self.lyrics.document = doc
@@ -1104,7 +1194,11 @@ class ClientController:
                 self.lyrics._timing_from_file = False
             self.state.loaded_lyrics = True
             self.state.selected_song['lrc_path'] = lrc
-            if switching or self.lyrics._loaded_path != prev_lrc:
+            if (
+                switching
+                or self.lyrics._loaded_path != prev_lrc
+                or self.lyrics._loaded_path != self._lyrics_ui_path
+            ):
                 doc = self.lyrics.document
                 from app.lyrics.aligner import word_timing_label
 
@@ -1123,9 +1217,11 @@ class ClientController:
                     log='已加载歌词：%s（%s 行%s）'
                     % (doc.title or song.get('title', ''), len(doc.lines), suffix),
                 )
+                self._lyrics_ui_path = self.lyrics._loaded_path
         else:
             self.lyrics.clear()
             self.state.loaded_lyrics = False
+            self._lyrics_ui_path = ''
             hint = Path(lrc).name if lrc else '%s.lrc' % song.get('title', '')
             self._publish_status(
                 'lyrics_loaded',

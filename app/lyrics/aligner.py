@@ -145,10 +145,8 @@ def ensure_words(doc: LyricDocument, sing_ratio: float = 0.78) -> LyricDocument:
 
 
 def _load_mono(path: str | Path):
-    import soundfile as sf
-
-    data, sr = sf.read(str(path), dtype='float32', always_2d=True)
-    return np.asarray(data.mean(axis=1), dtype=np.float32), int(sr)
+    from app.audio.wav_cache import load_mono_raw
+    return load_mono_raw(path)
 
 
 def _line_energy_words(line: LyricLine, mono: np.ndarray, sr: int, hop: int, sing_ratio: float) -> list[LyricWord]:

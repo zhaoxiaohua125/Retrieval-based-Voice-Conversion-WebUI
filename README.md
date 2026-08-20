@@ -3040,3 +3040,50 @@ ewrite；扩展 LyricWord 与字级 matcher
 - **关键决策与解决方案**: 主程序蓝底「趣」、歌词绿底「词」，共用 `_char_round_icon` 绘制
 - **使用的技术栈**: PyQt6 QIcon
 - **修改的文件列表**: app/ui/tray.py、scripts/run_ui_skeleton.py、scripts/gen_app_icons.py、scripts/make_desktop_lyrics_exe.bat、assets/main_app.ico、README.md
+
+---
+
+## 会话总结 - 2026-08-20（启动预加载与首播加速）
+
+- **会话主要目的**: 加载页进主页卡顿、点播放等 10~30 秒，需把重活提前到 loading 阶段
+- **完成的主要任务**:
+  1. bootstrap 增加 `warmup_startup`：预热音频模块、预加载首曲 WAV/统一流（暂停待命）、歌词 energy align
+  2. 新增 `app/audio/wav_cache.py`，stream / pitchfix / 歌词对齐共享 WAV 解码缓存，避免同一文件重复读盘
+  3. 选歌 `_select_song_apply` 一律后台线程，避免 energy align 卡 UI
+  4. 修复统一流 autoplay 时 paused 状态不自动 unpause
+- **关键决策与解决方案**: 30s 根因是首播冷启动两次全量 WAV 解码；loading 页预加载 + 缓存后点播放应近秒开
+- **使用的技术栈**: threading、soundfile/librosa 缓存、AudioStreamManager
+- **修改的文件列表**: app/audio/wav_cache.py、app/audio/stream_manager.py、app/pitchfix/service.py、app/lyrics/aligner.py、app/integration/controller.py、scripts/run_ui_skeleton.py、README.md
+
+---
+
+## 会话总结 - 2026-08-20（登录后首曲歌词不显示）
+
+- **会话主要目的**: 登录后默认首曲显示「暂无歌词」，实际 LRC 已存在
+- **完成的主要任务**: 预加载阶段已在后台 load_lrc，但选首曲时因同路径跳过 `lyrics_loaded` 推送；增加 `_lyrics_ui_path` 追踪 UI 是否已同步，未同步则补发
+- **关键决策与解决方案**: 保留同曲不重复推送（避免重置到第一句），仅首进/未同步时补发
+- **使用的技术栈**: ClientController 状态追踪
+- **修改的文件列表**: app/integration/controller.py、README.md
+
+---
+
+## 会话总结 - 2026-08-20（桌面歌词首曲空白）
+
+- **会话主要目的**: 主界面歌词已显示，桌面歌词窗仍空白
+- **完成的主要任务**:
+  1. `lyrics_loaded` 后调用 `_reset_playback_lyrics` 推送桌面 tick
+  2. 歌词窗 IPC 就绪后 350ms 再补同步一次
+  3. IPC 未连接时缓存 tick，子进程连上后自动补发
+- **关键决策与解决方案**: 播放页走 lines 列表，桌面窗走 tick；预加载只更新了 matcher 未推 tick
+- **使用的技术栈**: LyricsService.reset_sync、QLocalSocket 待发队列
+- **修改的文件列表**: scripts/run_ui_skeleton.py、app/ops/lyrics_ipc.py、README.md
+
+---
+
+## 会话总结 - 2026-08-20（播放时间轴不动）
+
+- **会话主要目的**: 预加载后点播放，音频在播但主界面进度条停在 00:00
+- **完成的主要任务**: `_resume_timeline` 恢复统一流播放时补启 `_restart_playback_tick`（与 WavPlayer 路径一致）
+- **关键决策与解决方案**: 预加载只 pause 流未启动 tick；resume 只 unpause 不发 periodic playback_tick
+- **使用的技术栈**: playback-tick 线程
+- **修改的文件列表**: app/integration/controller.py、README.md

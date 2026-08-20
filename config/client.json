@@ -34,8 +34,8 @@
     "wasapi_exclusive": false,
     "ring_ms": 500,
     "passthrough": false,
-    "passthrough_gain": 4.0,
-    "passthrough_ui": 200,
+    "passthrough_gain": 1.0,
+    "passthrough_ui": 50,
     "passthrough_block_ms": 50,
     "reverb_mix": 0.35,
     "reverb_decay": 0.72
@@ -129,18 +129,18 @@
   },
   "ui": {
     "geometry": [
-      387,
-      113,
+      314,
+      339,
       1280,
-      928
+      911
     ],
     "active_tab": 3,
     "active_nav_tab": 0,
     "lyrics_window": {
       "orientation": "vertical",
       "geometry": [
-        2230,
-        108,
+        1601,
+        308,
         140,
         832
       ],
@@ -151,8 +151,8 @@
         166
       ],
       "geometry_v": [
-        2230,
-        108,
+        1601,
+        308,
         140,
         832
       ]

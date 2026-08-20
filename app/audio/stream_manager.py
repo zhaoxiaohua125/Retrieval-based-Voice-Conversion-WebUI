@@ -156,19 +156,13 @@ class AudioStreamManager:
             self._reset_clock_locked(0, active=self._running and not self._inst_paused)
 
     def load_instrumental(self, path: str, seek_sec=0.0):
-        import soundfile as sf
+        from app.audio.wav_cache import load_mono_resampled
 
-        data, sr = sf.read(str(path), dtype='float32', always_2d=True)
-        if data.shape[1] > 1:
-            data = data.mean(axis=1, keepdims=True)
         target_sr = int(self.config.sample_rate)
-        if int(sr) != target_sr:
-            import librosa
-
-            data = librosa.resample(data.T, orig_sr=int(sr), target_sr=target_sr).T.reshape(-1, 1)
+        mono = load_mono_resampled(path, target_sr)
         seek = float(seek_sec or 0)
         with self._lock:
-            self._inst_data = np.asarray(data[:, 0], dtype=np.float32)
+            self._inst_data = mono
             self._inst_pos = max(0, int(seek * target_sr))
             self._inst_duration = len(self._inst_data) / target_sr if target_sr else 0.0
             self._inst_paused = False
@@ -177,18 +171,12 @@ class AudioStreamManager:
             self._reset_clock_locked(self._inst_pos, active=self._running)
 
     def load_ref_vocal(self, path: str):
-        import soundfile as sf
+        from app.audio.wav_cache import load_mono_resampled
 
-        data, sr = sf.read(str(path), dtype='float32', always_2d=True)
-        if data.shape[1] > 1:
-            data = data.mean(axis=1, keepdims=True)
         target_sr = int(self.config.sample_rate)
-        if int(sr) != target_sr:
-            import librosa
-
-            data = librosa.resample(data.T, orig_sr=int(sr), target_sr=target_sr).T.reshape(-1, 1)
+        mono = load_mono_resampled(path, target_sr)
         with self._lock:
-            self._ref_vocal_data = np.asarray(data[:, 0], dtype=np.float32)
+            self._ref_vocal_data = mono
             self._ref_vocal_path = str(Path(path).resolve())
 
     def clear_instrumental(self):

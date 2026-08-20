@@ -39,6 +39,7 @@ class LyricsIpcServer(QObject):
             QLocalServer.removeServer(self._key)
             self._server.listen(self._key)
         self._sock = None
+        self._pending = []
         self._server.newConnection.connect(self._accept)
 
     def key(self) -> str:
@@ -86,16 +87,35 @@ class LyricsIpcServer(QObject):
             except Exception:
                 pass
         self._sock = sock
+        self._flush_pending()
 
-    def send(self, msg: dict):
-        if self._sock is None or self._sock.state() != QLocalSocket.LocalSocketState.ConnectedState:
-            return
+    def _connected(self) -> bool:
+        return self._sock is not None and self._sock.state() == QLocalSocket.LocalSocketState.ConnectedState
+
+    def _write(self, msg: dict):
         try:
             line = json.dumps(msg, ensure_ascii=False) + '\n'
             self._sock.write(line.encode('utf-8'))
             self._sock.waitForBytesWritten(500)
         except Exception:
             pass
+
+    def _flush_pending(self):
+        if not self._connected():
+            return
+        pending = self._pending
+        self._pending = []
+        for msg in pending:
+            self._write(msg)
+
+    def send(self, msg: dict):
+        if not self._connected():
+            op = str((msg or {}).get('op') or '')
+            if op == 'tick':
+                self._pending = [m for m in self._pending if m.get('op') != 'tick']
+            self._pending.append(dict(msg or {}))
+            return
+        self._write(msg)
 
 
 class LyricsWindowProxy:

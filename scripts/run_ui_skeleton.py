@@ -226,6 +226,9 @@ def main():
                 boot.status.emit('正在扫描歌库…')
                 controller._scan_library_blocking()
                 _startup_log('library scan done count=%s' % len(controller.library))
+                boot.status.emit('正在预加载资源…')
+                controller.warmup_startup(status_cb=lambda msg: boot.status.emit(msg))
+                _startup_log('startup warmup done')
                 boot.done.emit()
             except Exception as exc:
                 boot.failed.emit(str(exc))
@@ -363,6 +366,8 @@ def main():
                     page.set_selected_mode(payload.get('mode', 'ai_sing'))
                 elif action == 'lyrics_loaded':
                     page.set_lyrics_lines(payload.get('lines') or [])
+                    if controller.state.loaded_lyrics:
+                        controller._reset_playback_lyrics(controller._current_song_position())
                 elif action == 'lyrics_missing':
                     page.set_lyrics_lines([])
                 elif action == 'play_mode_changed':
@@ -491,6 +496,8 @@ def main():
                 controller.set_lyrics_window(lyrics)
                 ctx['lyrics'] = lyrics
                 window._quit_lyrics = lyrics
+                if controller.state.loaded_lyrics:
+                    QTimer.singleShot(350, lambda: controller._reset_playback_lyrics(controller._current_song_position()))
                 tray = None
                 if QSystemTrayIcon.isSystemTrayAvailable():
                     try:

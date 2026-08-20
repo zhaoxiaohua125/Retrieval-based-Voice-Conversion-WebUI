@@ -116,12 +116,8 @@ class PitchFollowService:
         return self
 
     def _load_wav_mono(self, path, sr):
-        data, file_sr = sf.read(path, dtype='float32', always_2d=True)
-        if file_sr != sr:
-            data = librosa.resample(data.T, orig_sr=file_sr, target_sr=sr).T
-        if data.shape[1] > 1:
-            data = data.mean(axis=1, keepdims=True)
-        return data
+        from app.audio.wav_cache import load_mono_resampled
+        return load_mono_resampled(path, sr).reshape(-1, 1)
 
     def preload(self, song: dict):
         inst_path = song.get('instrumental_path') or ''
