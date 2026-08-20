@@ -4,6 +4,7 @@ import logging
 import threading
 import time
 import traceback
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -102,6 +103,8 @@ class AudioStreamManager:
         self._out_latency = 0.05
         self._clock_active = False
         self._talk_inst_gain = None
+        self._switch_mute_blocks = 0
+        self._talk_out_hist: deque = deque(maxlen=30)
         self._stats = {'callbacks': 0, 'underruns': 0, 'input_overflow': 0, 'restarts': 0}
 
     @property
@@ -273,21 +276,12 @@ class AudioStreamManager:
         prev_reverb = self.config.passthrough_reverb
         talk_modes = ('normal_talk', 'reverb_talk')
         ai_modes = ('ai_sing', 'ai_follow')
-        if prev_mode in talk_modes and cfg.playback_mode in ai_modes:
+        new_mode = cfg.playback_mode
+        if prev_mode in talk_modes and new_mode in ai_modes:
             self._talk_inst_gain = float(self.config.inst_gain)
-        if cfg.playback_mode in talk_modes and self._talk_inst_gain is not None:
+        if new_mode in talk_modes and self._talk_inst_gain is not None:
             cfg.inst_gain = self._talk_inst_gain
-        if (prev_mode in ai_modes) != (cfg.playback_mode in ai_modes):
-            self.output_ring.clear()
-            if self._monitor_ring is not None:
-                self._monitor_ring.clear()
-            self._last_out.fill(0)
-            self._monitor_last_out.fill(0)
-        if prev_mode in ai_modes and cfg.playback_mode in talk_modes:
-            self.clear_ref_vocal()
-            with self._gate_lock:
-                self._voice_gate_smooth = 0.0
-        self.config.playback_mode = cfg.playback_mode
+        self.config.playback_mode = new_mode
         self.config.passthrough = cfg.passthrough
         self.config.passthrough_reverb = cfg.passthrough_reverb
         self.config.passthrough_gain = cfg.passthrough_gain
@@ -302,9 +296,13 @@ class AudioStreamManager:
         self.config.block_ms = cfg.block_ms
         self.config.dual_monitor = cfg.dual_monitor
         self.config.monitor_output_device = cfg.monitor_output_device
-        if cfg.playback_mode == 'reverb_talk' and (prev_mode != 'reverb_talk' or not prev_reverb):
+        if prev_mode in ai_modes and new_mode in talk_modes:
+            self.clear_ref_vocal()
+            with self._gate_lock:
+                self._voice_gate_smooth = 0.0
+        if new_mode == 'reverb_talk' and (prev_mode != 'reverb_talk' or not prev_reverb):
             self._init_reverb()
-        elif cfg.playback_mode != 'reverb_talk' and prev_mode == 'reverb_talk':
+        elif new_mode != 'reverb_talk' and prev_mode == 'reverb_talk':
             self._rev_bufs = self._rev_pos = self._rev_delays = None
         if inst_path:
             resolved = str(Path(inst_path).resolve())
@@ -316,21 +314,29 @@ class AudioStreamManager:
                         self.seek_instrumental(tgt)
             else:
                 self.load_instrumental(inst_path, float(seek_sec or 0))
-        if vocal_path and cfg.playback_mode in ('ai_sing', 'ai_follow'):
+        if vocal_path and new_mode in ('ai_sing', 'ai_follow'):
             resolved = str(Path(vocal_path).resolve())
             if self._ref_vocal_path != resolved:
                 self.load_ref_vocal(vocal_path)
-        if cfg.playback_mode == 'ai_follow':
+        if new_mode == 'ai_follow':
             self._start_vad_worker()
         else:
             self._stop_vad_worker()
             with self._gate_lock:
-                self._voice_gate = 1.0 if cfg.playback_mode == 'ai_sing' else 0.0
+                self._voice_gate = 1.0 if new_mode == 'ai_sing' else 0.0
+        if prev_mode != new_mode:
+            self.output_ring.clear()
+            if self._monitor_ring is not None:
+                self._monitor_ring.clear()
+            self._last_out.fill(0)
+            self._monitor_last_out.fill(0)
+            self._talk_out_hist.clear()
+            self._switch_mute_blocks = 3
         self._sync_monitor_stream()
-        if prev_mode != cfg.playback_mode and cfg.playback_mode in talk_modes:
+        if prev_mode != new_mode and new_mode in talk_modes:
             logger.info(
-                'mode %s->%s live gain=%.2f inst=%.2f talk_inst=%s',
-                prev_mode, cfg.playback_mode, self.config.passthrough_gain, self.config.inst_gain, self._talk_inst_gain,
+                'mode %s->%s live gain=%.2f inst=%.2f talk_inst=%s mute=%s',
+                prev_mode, new_mode, self.config.passthrough_gain, self.config.inst_gain, self._talk_inst_gain, self._switch_mute_blocks,
             )
         return self
 
@@ -469,6 +475,10 @@ class AudioStreamManager:
                 self._init_reverb()
             self._open_stream()
             self._running = True
+            if self.config.playback_mode in ('normal_talk', 'reverb_talk'):
+                self.output_ring.clear()
+                self._talk_out_hist.clear()
+                self._switch_mute_blocks = 2
             self._sync_monitor_stream()
             if self.config.playback_mode == 'ai_follow':
                 self._start_vad_worker()
@@ -695,6 +705,49 @@ class AudioStreamManager:
         except Exception:
             logger.debug('stream close: %s', traceback.format_exc())
 
+    def _cancel_talk_loopback(self, mono_in: np.ndarray) -> np.ndarray:
+        """抵消 VM 回灌（AUX→B2 等）造成的延迟人声重影。"""
+        hist = self._talk_out_hist
+        if len(hist) < 8:
+            return mono_in
+        x = mono_in[:, 0].astype(np.float32)
+        xn = float(np.dot(x, x)) + 1e-9
+        if xn < 1e-8:
+            return mono_in
+        out = x.copy()
+        for old in list(hist)[:-6]:
+            o = old[:, 0].astype(np.float32)
+            on = float(np.dot(o, o)) + 1e-9
+            if on < 1e-8:
+                continue
+            ratio = float(np.dot(x, o)) / on
+            if abs(ratio) < 0.12:
+                continue
+            if abs(ratio) * (on ** 0.5) / (xn ** 0.5) > 0.22:
+                out = out - o * ratio * 0.88
+                break
+        return out.reshape(-1, 1).astype(np.float32)
+
+    def _write_outdata(self, outdata, mix: np.ndarray):
+        channels = self.config.channels
+        need = outdata.shape[0]
+        out = np.zeros((need, channels), dtype=np.float32)
+        got = min(need, len(mix))
+        if got:
+            out[:got] = mix[:got]
+            self._last_out = out[got - 1 : got].copy()
+        if got < need:
+            self._stats['underruns'] += 1
+            fade_len = min(64, need - got)
+            tail = self._last_out[0]
+            for i in range(need - got):
+                gain = max(0.0, 1.0 - (i + 1) / max(1, fade_len))
+                out[got + i] = tail * gain
+        if outdata.ndim == 1:
+            outdata[:] = out[:, 0]
+        else:
+            outdata[:] = out[:, : outdata.shape[1]]
+
     def _callback(self, indata, outdata, frames, time_info, status):
         self._stats['callbacks'] += 1
         if status:
@@ -719,12 +772,26 @@ class AudioStreamManager:
             if lat is not None and lat == lat and 0.005 <= float(lat) <= 0.22:
                 self._out_latency = 0.65 * self._out_latency + 0.35 * float(lat)
             mode = self.config.playback_mode
+            talk = mode in ('normal_talk', 'reverb_talk')
             if mode in PLAYBACK_MODES or self.config.passthrough:
                 inst, ref = self._read_song_frames(frames)
-                self.output_ring.write(self._mix_output(frames, mono_in, inst, ref, for_monitor=False))
+                muted = self._switch_mute_blocks > 0
+                if muted:
+                    self._switch_mute_blocks -= 1
+                    live_mix = np.zeros((frames, 1), dtype=np.float32)
+                elif talk:
+                    mono_in = self._cancel_talk_loopback(mono_in)
+                    live_mix = self._mix_output(frames, mono_in, inst, ref, for_monitor=False)
+                    self._talk_out_hist.append(live_mix.copy())
+                else:
+                    live_mix = self._mix_output(frames, mono_in, inst, ref, for_monitor=False)
                 if self._monitor_ring is not None:
-                    mon_mix = self._mix_output(frames, mono_in, inst, ref, for_monitor=True)
-                    self._monitor_ring.write(mon_mix)
+                    mon_mix = live_mix if muted else self._mix_output(frames, mono_in, inst, ref, for_monitor=True)
+                    self._monitor_ring.write(mon_mix if not muted else np.zeros((frames, 1), dtype=np.float32))
+                if talk:
+                    self._write_outdata(outdata, live_mix)
+                    return
+                self.output_ring.write(live_mix)
             need = outdata.shape[0]
             chunk = self.output_ring.read(need)
             filled = self._smooth_output(chunk, need)

@@ -250,8 +250,8 @@ class SettingsDialog(QDialog):
             self.slider_passthrough.setRange(0, 400)
             self.slider_passthrough.setToolTip(
                 '0%～400%，默认 100%=2 倍增益；控制直播输出中的人声大小。\n'
-                '检测到人声时会自动补增益到合适电平；仍偏小可继续提高或调大 Voicemeeter B2 输入。\n'
-                '开启「双路监听」后，耳机不受此项影响。保存后请重开对应模式。'
+                '检测到人声时会自动补增益到合适电平。\n'
+                'VM：H1 只 B2；AUX 只 B1（勿勾 B2/A1，否则约 2 秒后出现延迟人声回音）。'
             )
             self.lbl_passthrough = QLabel('')
             self.lbl_passthrough.setMinimumWidth(44)

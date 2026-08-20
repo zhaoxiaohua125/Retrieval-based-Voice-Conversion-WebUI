@@ -148,7 +148,6 @@ def pick_voicemeeter_defaults(devices: list[AudioDeviceInfo] | None = None):
     input_idx = _first_device(
         items,
         (
-            lambda d: _in(d) and _vm(d) and 'b1' in d.name.lower(),
             lambda d: _in(d) and d.voicemeeter_role == 'voicemeeter_aux_out',
             lambda d: _in(d) and _vm(d) and 'aux' in d.name.lower() and 'out' in d.name.lower(),
             lambda d: _in(d) and d.voicemeeter_role == 'voicemeeter_vaio3_out',
