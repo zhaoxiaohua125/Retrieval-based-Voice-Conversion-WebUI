@@ -3351,3 +3351,36 @@ ewrite；扩展 LyricWord 与字级 matcher
 - **完成的主要任务**: 无代码改动；确认 VM 路由 H1→B2、AUX→B1、VAIO→A1 与软件回灌消除/直通输出配合有效
 - **关键决策与解决方案**: 延迟人声回音根因为 VM 或软件反馈环；当前配置下问题已缓解
 - **修改的文件列表**: README.md
+
+---
+
+## 会话总结 - 2026-08-20（伴奏/AI人声移入喇叭面板）
+
+- **会话主要目的**: 进度条旁伴奏/AI人声滑块布局别扭，移入下方喇叭按钮弹层
+- **完成的主要任务**: 从 playback 进度行移除两滑块；AiFollowMixPanel 增加 AI人声(0～400%)；喇叭 tooltip 更新
+- **关键决策与解决方案**: 复用现有 AiFollowMixPanel 浮层，伴奏+AI人声+跟唱参数统一入口
+- **修改的文件列表**: app/ui/pages/playback_page.py、app/ui/ai_follow_mix_panel.py、README.md
+
+---
+
+## 会话总结 - 2026-08-20（喇叭面板分组美化）
+
+- **会话主要目的**: 喇叭弹层区分全局参数与 AI 跟唱专用参数，风格对齐设置页 QGroupBox
+- **完成的主要任务**: 全局音量（伴奏、AI人声）与 AI 跟唱专用（门控/原唱/阈值/衰减）分两框；副标题说明；样式与设置页一致
+- **修改的文件列表**: app/ui/ai_follow_mix_panel.py、README.md
+
+---
+
+## 会话总结 - 2026-08-20（喇叭面板去掉组内副标题）
+
+- **会话主要目的**: 去掉「四模式通用」「仅 AI 跟唱模式」组内副标题，界面更简洁
+- **完成的主要任务**: `_make_group` 不再渲染组内灰色说明行
+- **修改的文件列表**: app/ui/ai_follow_mix_panel.py、README.md
+
+---
+
+## 会话总结 - 2026-08-20（默认模式改为普通说话）
+
+- **会话主要目的**: 进入程序默认选中普通说话而非 AI 唱歌/跟唱，避免开播聊天时观众听不到人声
+- **完成的主要任务**: `DEFAULT_PLAYBACK_MODE=normal_talk`；预热音频流切 normal_talk；播放页默认按钮；主界面同步选中状态
+- **修改的文件列表**: app/integration/state.py、app/integration/controller.py、app/ui/pages/playback_page.py、scripts/run_ui_skeleton.py、README.md

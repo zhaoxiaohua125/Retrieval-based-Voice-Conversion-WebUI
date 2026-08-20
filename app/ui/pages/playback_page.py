@@ -19,7 +19,6 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from app.config_store import ConfigStore
 from app.ui.ai_follow_mix_panel import AiFollowMixPanel
 from app.ui.qt_util import clicked
 from app.ui.waveform_widget import WaveformWidget
@@ -159,45 +158,7 @@ class PlaybackPage(QWidget):
         self.progress.sliderReleased.connect(self._on_seek)
         progress_row.addWidget(self.time_label)
         progress_row.addWidget(self.progress, stretch=1)
-        progress_row.addWidget(QLabel('伴奏'))
-        self.slider_inst = QSlider(Qt.Orientation.Horizontal)
-        self.slider_inst.setRange(0, 100)
-        self.slider_inst.setFixedWidth(96)
-        self.slider_inst.setToolTip('歌曲/伴奏音量（普通说话、混响、AI 唱歌/跟唱通用，实时生效）')
-        self.lbl_inst_vol = QLabel('77')
-        self.lbl_inst_vol.setMinimumWidth(28)
-        self.lbl_inst_vol.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self.slider_inst.valueChanged.connect(self._on_inst_volume)
-        progress_row.addWidget(self.slider_inst)
-        progress_row.addWidget(self.lbl_inst_vol)
-        progress_row.addWidget(QLabel('AI人声'))
-        self.slider_ai_vocal = QSlider(Qt.Orientation.Horizontal)
-        self.slider_ai_vocal.setRange(0, 400)
-        self.slider_ai_vocal.setFixedWidth(96)
-        self.slider_ai_vocal.setToolTip(
-            'AI 直播人声 0～400%，与普通说话同一刻度，实时生效。\n'
-            '超过 100% 时仅直播(Aux)变响，耳机(VAIO)封顶 100%。'
-        )
-        self.lbl_ai_vocal = QLabel('100')
-        self.lbl_ai_vocal.setMinimumWidth(28)
-        self.lbl_ai_vocal.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self.slider_ai_vocal.valueChanged.connect(self._on_ai_vocal_volume)
-        progress_row.addWidget(self.slider_ai_vocal)
-        progress_row.addWidget(self.lbl_ai_vocal)
         center_layout.addLayout(progress_row)
-        cfg = ConfigStore().load()
-        pf = cfg.get('pitchfix', {}) or {}
-        audio = cfg.get('audio', {}) or {}
-        inst_ui = int(pf['inst_ui']) if 'inst_ui' in pf else int(round(float(pf.get('inst_gain', 0.77)) * 100))
-        self.slider_inst.blockSignals(True)
-        self.slider_inst.setValue(inst_ui)
-        self.lbl_inst_vol.setText(str(inst_ui))
-        self.slider_inst.blockSignals(False)
-        ai_vocal_ui = int(audio.get('ai_vocal_ui', 100))
-        self.slider_ai_vocal.blockSignals(True)
-        self.slider_ai_vocal.setValue(max(0, min(400, ai_vocal_ui)))
-        self.lbl_ai_vocal.setText(str(self.slider_ai_vocal.value()))
-        self.slider_ai_vocal.blockSignals(False)
 
         ctrl = QHBoxLayout()
         ctrl.addStretch()
@@ -239,7 +200,7 @@ class PlaybackPage(QWidget):
         ctrl.addWidget(self.btn_play_mode)
         self.btn_mix = QToolButton()
         self.btn_mix.setText('🔊')
-        self.btn_mix.setToolTip('AI 跟唱混音调节（伴奏/人声/原唱/阈值）')
+        self.btn_mix.setToolTip('伴奏 / AI人声 / 跟唱混音（点击调节）')
         self.btn_mix.setStyleSheet(
             'QToolButton{padding:8px 10px;border-radius:6px;border:1px solid #cbd5e1;background:#fff;font-size:16px;}'
             'QToolButton:hover{background:#f8fafc;}'
@@ -253,8 +214,8 @@ class PlaybackPage(QWidget):
             self._mode_group.addButton(btn)
         for btn in (self.btn_play, self.btn_ai_follow, self.btn_ai_sing, self.btn_reverb_talk, self.btn_normal_talk):
             btn.setStyleSheet(self.BTN_STYLE)
-        self._mode = 'ai_sing'
-        self.btn_ai_sing.setChecked(True)
+        self._mode = 'normal_talk'
+        self.btn_normal_talk.setChecked(True)
         ctrl.addStretch()
         center_layout.addLayout(ctrl)
         splitter.addWidget(center)
@@ -349,8 +310,6 @@ class PlaybackPage(QWidget):
             self.btn_ai_follow.blockSignals(False)
             if self._selected:
                 self._select_mode_ui('ai_sing')
-        elif not inst_only and (self.btn_normal_talk.isChecked() or self.btn_reverb_talk.isChecked()):
-            self._select_mode_ui('ai_sing')
 
     def _is_accompaniment_selected(self) -> bool:
         return str((self._selected or {}).get('library_type') or '') == 'accompaniment'
@@ -482,14 +441,6 @@ class PlaybackPage(QWidget):
 
     def _on_wave_seek(self, ratio: float):
         self.bridge.emit_action('playback_seek', ratio=ratio)
-
-    def _on_inst_volume(self, v: int):
-        self.lbl_inst_vol.setText(str(v))
-        self.bridge.emit_action('playback_ai_follow_mix', inst_ui=int(v), inst_gain=float(v) / 100.0)
-
-    def _on_ai_vocal_volume(self, v: int):
-        self.lbl_ai_vocal.setText(str(v))
-        self.bridge.emit_action('playback_ai_vocal_mix', ai_vocal_ui=int(v), ai_vocal_gain=round(v / 100.0, 3))
 
     def _on_transport(self):
         self.bridge.emit_action('playback_transport')

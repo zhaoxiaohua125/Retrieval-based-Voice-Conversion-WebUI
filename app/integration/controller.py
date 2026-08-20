@@ -13,7 +13,7 @@ from app.audio.service import ai_vocal_gain_from_audio, inst_gain_from_config, p
 from app.audio.stream_manager import PLAYBACK_MODES
 from app.config_store import ConfigStore
 from app.events import BusMessage, ModuleId, SignalType
-from app.integration.state import ClientState
+from app.integration.state import DEFAULT_PLAYBACK_MODE, ClientState
 from app.lyrics import LyricsService
 from app.playback.waveform_peaks import (
     SILENCE_FLOOR,
@@ -1024,12 +1024,12 @@ class ClientController:
             if not self._playback_matches_selection():
                 self._release_playback_source(handoff=False)
                 self._clear_playback_song()
-                mode = self.state.selected_mode if self.state.selected_mode in MODE_IDS else 'ai_sing'
+                mode = self.state.selected_mode if self.state.selected_mode in MODE_IDS else DEFAULT_PLAYBACK_MODE
                 self._apply_mode(mode, autoplay=True, song=self.state.selected_song)
                 return
             self._resume_timeline()
             return
-        mode = self.state.selected_mode if self.state.selected_mode in MODE_IDS else 'ai_sing'
+        mode = self.state.selected_mode if self.state.selected_mode in MODE_IDS else DEFAULT_PLAYBACK_MODE
         self._apply_mode(mode, autoplay=True)
 
     def _session_playback_mode(self) -> str:
@@ -1137,18 +1137,18 @@ class ClientController:
         self.state.selected_song = dict(song)
         status('正在预加载首曲音频…')
         try:
-            if self._song_unified_ready(song, 'ai_sing'):
+            if self._song_unified_ready(song, 'normal_talk'):
                 self.audio.switch_playback_mode(
-                    'ai_sing',
+                    'normal_talk',
                     inst_path=song.get('instrumental_path'),
-                    vocal_path=song.get('vocal_path'),
                     inst_seek=0,
                 )
                 mgr = self.audio.manager
                 if mgr is not None and mgr.inst_duration > 0 and not mgr.inst_paused:
                     mgr.toggle_inst_pause()
-                self.state.mode = 'ai_sing'
-                self.state.selected_mode = 'ai_sing'
+                self.state.mode = 'normal_talk'
+                self.state.selected_mode = DEFAULT_PLAYBACK_MODE
+                self.state.passthrough_running = True
                 self.state.playback_running = True
             else:
                 play_path = song.get('play_path') or song.get('cover_path')
@@ -1243,7 +1243,7 @@ class ClientController:
                 _stop_prev_if_needed()
                 mode = self._session_playback_mode()
                 if not mode:
-                    mode = self.state.selected_mode if self.state.selected_mode in MODE_IDS else 'ai_sing'
+                    mode = self.state.selected_mode if self.state.selected_mode in MODE_IDS else DEFAULT_PLAYBACK_MODE
                 new_lib = str(song.get('library_type') or '')
                 if new_lib == 'accompaniment' and mode == 'ai_follow':
                     mode = 'ai_sing'
@@ -1264,7 +1264,7 @@ class ClientController:
         if switching and (resume_if_playing or force_switch):
             mode = self._session_playback_mode()
             if not mode:
-                mode = self.state.selected_mode if self.state.selected_mode in MODE_IDS else 'ai_sing'
+                mode = self.state.selected_mode if self.state.selected_mode in MODE_IDS else DEFAULT_PLAYBACK_MODE
             was_active = self._is_timeline_playing() or self._has_paused_session()
             if was_active or user_autoplay:
                 _stop_prev_if_needed()
@@ -1790,7 +1790,7 @@ class ClientController:
             self._publish_status('select_song_ui', title=next_title)
             self._publish_status('track_advance', title=next_title, log=hint)
             self._inst_end_sent = False
-            active_mode = cur_mode if cur_mode in ('ai_sing', 'ai_follow', 'reverb_talk', 'normal_talk') else 'ai_sing'
+            active_mode = cur_mode if cur_mode in ('ai_sing', 'ai_follow', 'reverb_talk', 'normal_talk') else DEFAULT_PLAYBACK_MODE
             self._continue_mode_with_song(active_mode, next_song, 0.0)
             return True
         finally:

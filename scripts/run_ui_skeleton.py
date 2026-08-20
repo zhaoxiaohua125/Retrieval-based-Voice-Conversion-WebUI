@@ -372,7 +372,7 @@ def main():
                 elif action in ('playback_stopped', 'playback_finished'):
                     page.set_playback_stopped()
                 elif action == 'mode_selected':
-                    page.set_selected_mode(payload.get('mode', 'ai_sing'))
+                    page.set_selected_mode(payload.get('mode', 'normal_talk'))
                 elif action == 'lyrics_loaded':
                     page.set_lyrics_lines(payload.get('lines') or [])
                     if controller.state.loaded_lyrics:
@@ -442,13 +442,28 @@ def main():
                     page.set_lyric_tick(payload)
 
             def _on_main_entered():
-                window.page_playback.apply_library(
+                page = window.page_playback
+                page.apply_library(
                     controller.library,
                     inst_songs=controller.library_inst,
                     auto_select=False,
                 )
-                window.page_playback.set_play_mode(controller.config_store.get('playback.play_mode', 'sequential'))
-                QTimer.singleShot(120, window.page_playback.select_initial_song)
+                page.set_play_mode(controller.config_store.get('playback.play_mode', 'sequential'))
+                sm = controller.state.selected_mode
+                if sm in ('ai_sing', 'ai_follow', 'reverb_talk', 'normal_talk'):
+                    page.set_selected_mode(sm)
+                if controller.state.passthrough_running and controller.state.mode in ('normal_talk', 'reverb_talk'):
+                    page.set_mode(controller.state.mode, active=True)
+
+                def _finish_playback_init():
+                    sm = controller.state.selected_mode
+                    if sm in ('ai_sing', 'ai_follow', 'reverb_talk', 'normal_talk'):
+                        page.set_selected_mode(sm)
+                    if controller.state.passthrough_running and controller.state.mode in ('normal_talk', 'reverb_talk'):
+                        page.set_mode(controller.state.mode, active=True)
+
+                QTimer.singleShot(120, page.select_initial_song)
+                QTimer.singleShot(200, _finish_playback_init)
                 _startup_log('main ui wired after login')
 
             window.main_entered.connect(_on_main_entered)

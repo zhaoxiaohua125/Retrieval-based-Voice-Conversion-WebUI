@@ -36,8 +36,8 @@
     "passthrough": false,
     "passthrough_gain": 8.0,
     "passthrough_ui": 400,
-    "ai_vocal_gain": 4.0,
-    "ai_vocal_ui": 400,
+    "ai_vocal_gain": 2.02,
+    "ai_vocal_ui": 202,
     "passthrough_block_ms": 50,
     "reverb_mix": 0.35,
     "reverb_decay": 0.72,
@@ -133,8 +133,8 @@
   },
   "ui": {
     "geometry": [
-      679,
-      243,
+      635,
+      307,
       1280,
       952
     ],
@@ -143,8 +143,8 @@
     "lyrics_window": {
       "orientation": "vertical",
       "geometry": [
-        8,
-        -8,
+        1922,
+        276,
         140,
         832
       ],
@@ -155,8 +155,8 @@
         166
       ],
       "geometry_v": [
-        8,
-        -8,
+        1922,
+        276,
         140,
         832
       ]

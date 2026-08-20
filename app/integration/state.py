@@ -2,11 +2,13 @@
 
 from dataclasses import dataclass, field
 
+DEFAULT_PLAYBACK_MODE = 'normal_talk'
+
 
 @dataclass
 class ClientState:
     mode: str = 'idle'
-    selected_mode: str = 'ai_sing'
+    selected_mode: str = DEFAULT_PLAYBACK_MODE
     offline_running: bool = False
     realtime_running: bool = False
     passthrough_running: bool = False
