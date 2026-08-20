@@ -16,8 +16,8 @@ logger = logging.getLogger('rvc_client.audio')
 def passthrough_gain_from_audio(audio: dict) -> float:
     ui = audio.get('passthrough_ui')
     if ui is not None:
-        return max(0.5, min(4.0, int(ui) / 50.0))
-    return max(0.5, min(4.0, float(audio.get('passthrough_gain', 2.0))))
+        return max(0.0, min(4.0, int(ui) / 50.0))
+    return max(0.0, min(4.0, float(audio.get('passthrough_gain', 2.0))))
 
 
 def inst_gain_from_config(config_store: ConfigStore) -> float:
@@ -94,6 +94,8 @@ class AudioService:
             dtype=str(audio.get('dtype', 'float32')),
             input_device=audio.get('input_device'),
             output_device=audio.get('output_device'),
+            monitor_output_device=audio.get('monitor_output_device', 'auto'),
+            dual_monitor=bool(audio.get('dual_monitor', True)),
             hostapi=audio.get('hostapi'),
             wasapi_exclusive=bool(audio.get('wasapi_exclusive', False)),
             ring_ms=int(audio.get('ring_ms', 500)),
@@ -152,6 +154,8 @@ class AudioService:
                 'action': 'stream_started',
                 'input_device': self.manager.config.input_device,
                 'output_device': self.manager.config.output_device,
+                'monitor_device': getattr(self.manager, '_monitor_dev', None),
+                'dual_monitor': bool(cfg.dual_monitor),
                 'config': asdict(cfg),
             },
         )

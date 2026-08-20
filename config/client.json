@@ -34,11 +34,13 @@
     "wasapi_exclusive": false,
     "ring_ms": 500,
     "passthrough": false,
-    "passthrough_gain": 1.0,
-    "passthrough_ui": 50,
+    "passthrough_gain": 4.0,
+    "passthrough_ui": 200,
     "passthrough_block_ms": 50,
     "reverb_mix": 0.35,
-    "reverb_decay": 0.72
+    "reverb_decay": 0.72,
+    "dual_monitor": true,
+    "monitor_output_device": "auto"
   },
   "rvc": {
     "f0_method": "rmvpe",
@@ -129,7 +131,7 @@
   },
   "ui": {
     "geometry": [
-      706,
+      439,
       336,
       1280,
       911

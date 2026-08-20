@@ -3136,3 +3136,26 @@ ewrite；扩展 LyricWord 与字级 matcher
 - **关键决策与解决方案**: 用 `QListWidgetItem.setIcon` + 窄 pixmap 实现左侧色条，避免自定义 Delegate
 - **使用的技术栈**: PyQt6 QIcon / QPixmap
 - **修改的文件列表**: app/ui/pages/playback_page.py、README.md
+
+---
+
+## 会话总结 - 2026-08-20（普通说话音量可设 0）
+
+- **会话主要目的**: 「普通说话音量」最低从 50% 改为 0%，便于关闭耳机内干声监听
+- **完成的主要任务**: 设置滑块范围 0～200%；`passthrough_gain_from_audio` 增益下限改为 0
+- **关键决策与解决方案**: 仍用 `ui/50` 映射增益，0%=静音、100%=2x、200%=4x
+- **使用的技术栈**: PyQt6 QSlider、音频 passthrough_gain
+- **修改的文件列表**: app/ui/settings_dialog.py、app/audio/service.py、README.md
+
+---
+
+## 会话总结 - 2026-08-20（双路监听不含干声）
+
+- **会话主要目的**: 直播输出含完整麦克风，耳机监听在普通/混响说话时不含干声
+- **完成的主要任务**:
+  1. 新增第二路 `OutputStream` 监听输出（默认 VAIO，直播输出默认 Aux）
+  2. 普通/混响说话：直播混音含干声，监听混音仅伴奏；AI 唱歌/跟唱两路相同
+  3. 设置页增加「监听设备」「双路监听」开关与 Voicemeeter 路由说明
+- **关键决策与解决方案**: 同一次 callback 读一次伴奏帧，分别混两路避免进度错位
+- **使用的技术栈**: sounddevice 双 OutputStream、Voicemeeter Aux/B1 + VAIO/A1
+- **修改的文件列表**: app/audio/stream_manager.py、app/audio/devices.py、app/audio/service.py、app/config_store.py、app/ui/settings_dialog.py、app/integration/controller.py、README.md

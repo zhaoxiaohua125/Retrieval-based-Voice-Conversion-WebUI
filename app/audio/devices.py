@@ -173,6 +173,47 @@ def pick_voicemeeter_defaults(devices: list[AudioDeviceInfo] | None = None):
     return input_idx, output_idx
 
 
+def pick_monitor_default(devices: list[AudioDeviceInfo] | None, stream_out_idx: int | None):
+    """直播输出为 Aux 时，监听默认走 VAIO Input（与 stream 分离）。"""
+    if stream_out_idx is None:
+        return None
+    items = devices if devices is not None else list_devices()
+    stream = next((d for d in items if d.index == stream_out_idx), None)
+    roles = ('voicemeeter_vaio_in', 'voicemeeter_vaio3_in')
+    if stream and stream.voicemeeter_role == 'voicemeeter_aux_in':
+        roles = ('voicemeeter_vaio_in', 'voicemeeter_vaio3_in')
+    elif stream and stream.voicemeeter_role == 'voicemeeter_vaio_in':
+        roles = ('voicemeeter_aux_in', 'voicemeeter_vaio3_in')
+    else:
+        roles = ('voicemeeter_vaio_in', 'voicemeeter_aux_in', 'voicemeeter_vaio3_in')
+    for role in roles:
+        for dev in items:
+            if dev.max_output_channels > 0 and dev.voicemeeter_role == role and dev.index != stream_out_idx:
+                return dev.index
+    for dev in items:
+        if dev.max_output_channels > 0 and 'voicemeeter' in dev.tags and dev.index != stream_out_idx:
+            return dev.index
+    return None
+
+
+def resolve_monitor_device(
+    monitor_ref,
+    stream_out_idx: int | None,
+    hostapi: str | None = None,
+    devices: list[AudioDeviceInfo] | None = None,
+):
+    ref = str(monitor_ref or '').strip().lower()
+    if ref in ('off', 'none', 'false', '0', 'disable', 'disabled'):
+        return None
+    items = devices if devices is not None else list_devices(hostapi=hostapi)
+    if not is_auto_device(monitor_ref):
+        idx = resolve_device_index(monitor_ref, need_output=True, devices=items)
+        if idx is not None and idx != stream_out_idx:
+            return idx
+        return None
+    return pick_monitor_default(items, stream_out_idx)
+
+
 def find_device_by_name(
     name: str,
     devices: list[AudioDeviceInfo] | None = None,

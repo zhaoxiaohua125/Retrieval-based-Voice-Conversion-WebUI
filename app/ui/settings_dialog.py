@@ -29,6 +29,7 @@ from app.audio.devices import (
     is_auto_device,
     list_devices,
     list_hostapis,
+    pick_monitor_default,
     pick_voicemeeter_defaults,
     resolve_device_index,
 )
@@ -163,7 +164,21 @@ class SettingsDialog(QDialog):
             self.cmb_output = QComboBox()
             self.cmb_output.setMinimumWidth(420)
             form.addRow('输入设备', self.cmb_input)
-            form.addRow('输出设备', self.cmb_output)
+            form.addRow('输出设备（直播）', self.cmb_output)
+            self.cmb_monitor = QComboBox()
+            self.cmb_monitor.setMinimumWidth(420)
+            self.cmb_monitor.setToolTip(
+                '双路输出时：直播走「输出设备」（建议 Aux→B1），耳机走「监听设备」（建议 VAIO→A1）。\n'
+                '普通/混响说话时监听不含干声；AI 唱歌/跟唱监听与直播相同。'
+            )
+            form.addRow('监听设备（耳机）', self.cmb_monitor)
+            self.chk_dual_monitor = QCheckBox('双路监听（普通/混响说话时耳机不含干声）')
+            self.chk_dual_monitor.setToolTip(
+                '开启后自动向监听设备输出「仅伴奏/AI 人声」混音；直播输出仍含完整麦克风。\n'
+                'Voicemeeter：输出设备 Aux 只勾 B1，监听设备 VAIO 只勾 A1。'
+            )
+            form.addRow('', self.chk_dual_monitor)
+            self.chk_dual_monitor.toggled.connect(lambda on: self.cmb_monitor.setEnabled(on))
             layout.addLayout(form)
             sr_row = QHBoxLayout()
             self.btn_reload = QPushButton('重载设备列表')
@@ -231,8 +246,11 @@ class SettingsDialog(QDialog):
             pt_row = QHBoxLayout()
             pt_row.addWidget(QLabel('普通说话音量'))
             self.slider_passthrough = QSlider(Qt.Orientation.Horizontal)
-            self.slider_passthrough.setRange(50, 200)
-            self.slider_passthrough.setToolTip('50%～200%，默认 100%=2 倍增益；保存后请重开「普通说话」')
+            self.slider_passthrough.setRange(0, 200)
+            self.slider_passthrough.setToolTip(
+                '0%～200%，默认 100%=2 倍增益；控制直播输出中的人声大小。\n'
+                '开启「双路监听」后，耳机不受此项影响（普通/混响说话时不含干声）。保存后请重开对应模式。'
+            )
             self.lbl_passthrough = QLabel('')
             self.lbl_passthrough.setMinimumWidth(44)
             self.lbl_passthrough.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
@@ -553,8 +571,9 @@ class SettingsDialog(QDialog):
         self.edit_log_dir.setText(str(self.config.get('paths.log_dir', layout.get('log_dir', 'logs/client'))))
         self.spin_sample_rate.setValue(int(self.config.get('audio.sample_rate', 48000)))
         self.chk_wasapi.setChecked(bool(self.config.get('audio.wasapi_exclusive', False)))
+        self.chk_dual_monitor.setChecked(bool(self.config.get('audio.dual_monitor', True)))
         pt_ui = int(self.config.get('audio.passthrough_ui', 100))
-        self.slider_passthrough.setValue(max(50, min(200, pt_ui)))
+        self.slider_passthrough.setValue(max(0, min(200, pt_ui)))
         self.lbl_passthrough.setText('%s%%' % self.slider_passthrough.value())
         mix = float(self.config.get('audio.reverb_mix', 0.35) or 0.35)
         decay = float(self.config.get('audio.reverb_decay', 0.72) or 0.72)
@@ -678,6 +697,7 @@ class SettingsDialog(QDialog):
         devices = list_devices(hostapi=hostapi)
         in_ref = self.config.get('audio.input_device')
         out_ref = self.config.get('audio.output_device')
+        mon_ref = self.config.get('audio.monitor_output_device', 'auto')
         def_in, def_out = pick_voicemeeter_defaults(devices)
 
         def fill_combo(combo, items, selected_ref, default_idx, need_input=False, need_output=False):
@@ -711,6 +731,36 @@ class SettingsDialog(QDialog):
         outputs = [d for d in devices if d.max_output_channels > 0]
         fill_combo(self.cmb_input, inputs, in_ref, def_in, need_input=True)
         fill_combo(self.cmb_output, outputs, out_ref, def_out, need_output=True)
+        out_idx = resolve_device_index(out_ref, need_output=True, devices=devices)
+        if out_idx is None and is_auto_device(out_ref):
+            out_idx = def_out
+        self.cmb_monitor.blockSignals(True)
+        self.cmb_monitor.clear()
+        self.cmb_monitor.addItem('自动（配对 VAIO / Aux）', 'auto')
+        self.cmb_monitor.addItem('关闭', 'off')
+        sel_mon = 0 if is_auto_device(mon_ref) else 1 if str(mon_ref).lower() == 'off' else -1
+        mon_idx = None
+        if not is_auto_device(mon_ref) and str(mon_ref).lower() != 'off':
+            mon_idx = resolve_device_index(mon_ref, need_output=True, devices=devices)
+        for dev in outputs:
+            self.cmb_monitor.addItem('[%s] %s' % (dev.index, dev.name), dev.name)
+            if sel_mon >= 0:
+                continue
+            if mon_idx is not None and dev.index == mon_idx:
+                sel_mon = self.cmb_monitor.count() - 1
+            elif isinstance(mon_ref, str) and mon_ref.strip().lower() == dev.name.lower():
+                sel_mon = self.cmb_monitor.count() - 1
+        if sel_mon < 0:
+            def_mon = pick_monitor_default(devices, out_idx)
+            if def_mon is not None:
+                for i in range(2, self.cmb_monitor.count()):
+                    name = self.cmb_monitor.itemData(i)
+                    if any(d.index == def_mon and d.name == name for d in outputs):
+                        sel_mon = i
+                        break
+        self.cmb_monitor.setCurrentIndex(sel_mon if sel_mon >= 0 else 0)
+        self.cmb_monitor.blockSignals(False)
+        self.cmb_monitor.setEnabled(self.chk_dual_monitor.isChecked())
         self._sync_device_sample_rate_hint()
 
     def _sync_sr_controls(self):
@@ -795,6 +845,11 @@ class SettingsDialog(QDialog):
         devices = list_devices(hostapi=hostapi)
         in_ref = device_ref_for_config(self.cmb_input.currentData(), devices)
         out_ref = device_ref_for_config(self.cmb_output.currentData(), devices)
+        dual_mon = self.chk_dual_monitor.isChecked()
+        mon_data = self.cmb_monitor.currentData()
+        mon_ref = 'off' if not dual_mon else str(mon_data or 'auto')
+        if dual_mon and mon_data not in ('auto', 'off'):
+            mon_ref = device_ref_for_config(mon_data, devices)
         if sr_type == 'sr_device':
             idx = resolve_device_index(in_ref, need_input=True, devices=devices)
             if idx is None and is_auto_device(in_ref):
@@ -834,6 +889,8 @@ class SettingsDialog(QDialog):
                 'wasapi_exclusive': self.chk_wasapi.isChecked(),
                 'input_device': in_ref,
                 'output_device': out_ref,
+                'dual_monitor': dual_mon,
+                'monitor_output_device': mon_ref,
                 'sample_rate': sample_rate,
                 'passthrough_ui': int(self.slider_passthrough.value()),
                 'passthrough_gain': round(int(self.slider_passthrough.value()) / 50.0, 3),

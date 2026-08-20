@@ -733,6 +733,7 @@ class ClientController:
         if self._switch_unified_playback(mode, song, carry_pos, autoplay):
             in_dev = self.audio.manager.config.input_device if self.audio.manager else in_dev
             out_dev = self.audio.manager.config.output_device if self.audio.manager else out_dev
+            mon_dev = getattr(self.audio.manager, '_monitor_dev', None) if self.audio.manager else None
             gain = passthrough_gain_from_audio(audio_cfg)
             pos, dur, playing, paused = self._timeline_inst_state()
             has_inst = bool(inst_path)
@@ -747,11 +748,12 @@ class ClientController:
                     'reverb_talk': '伴奏+混响麦' if has_inst else '干声+混响直通',
                     'normal_talk': '伴奏+干声麦' if has_inst else '干声直通已启动（不经 RVC）',
                 }
-                log = '%s：%s\nIN: %s\nOUT: %s\n监听增益: %.1fx（设置里 %s%%）%s%s' % (
+                log = '%s：%s\nIN: %s\nOUT: %s%s\n直播人声: %.1fx（设置 %s%%）%s%s' % (
                     label,
                     talk_mode_desc.get(mode, ''),
                     self._device_name(in_dev),
                     self._device_name(out_dev),
+                    ('\nMON: %s（耳机不含干声）' % self._device_name(mon_dev)) if mon_dev is not None else '',
                     gain,
                     int(gain * 50),
                     extra,
@@ -2677,17 +2679,19 @@ class ClientController:
     def _save_settings(self, payload: dict):
         payload = payload or {}
         audio = payload.get('audio') or {}
-        old_audio_keys = ('input_device', 'output_device', 'hostapi', 'sample_rate', 'wasapi_exclusive')
+        old_audio_keys = ('input_device', 'output_device', 'hostapi', 'sample_rate', 'wasapi_exclusive', 'dual_monitor', 'monitor_output_device')
         old_audio = {k: self.config_store.get('audio.%s' % k) for k in old_audio_keys}
         from app.audio.devices import device_ref_for_config, list_devices
         devices = list_devices(hostapi=audio.get('hostapi') or self.config_store.get('audio.hostapi'))
-        for key in ('hostapi', 'wasapi_exclusive', 'sample_rate', 'passthrough_gain', 'passthrough_ui', 'reverb_mix', 'reverb_decay'):
+        for key in ('hostapi', 'wasapi_exclusive', 'sample_rate', 'passthrough_gain', 'passthrough_ui', 'reverb_mix', 'reverb_decay', 'dual_monitor', 'monitor_output_device'):
             if key in audio:
                 self.config_store.set('audio.%s' % key, audio[key])
         if 'input_device' in audio:
             self.config_store.set('audio.input_device', device_ref_for_config(audio['input_device'], devices))
         if 'output_device' in audio:
             self.config_store.set('audio.output_device', device_ref_for_config(audio['output_device'], devices))
+        if 'monitor_output_device' in audio and not audio.get('dual_monitor', True):
+            self.config_store.set('audio.monitor_output_device', 'off')
         if 'passthrough_ui' in audio:
             from app.audio.service import passthrough_gain_from_audio
             merged = dict(self.config_store.get('audio', {}) or {})

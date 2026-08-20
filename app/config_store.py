@@ -49,6 +49,8 @@ DEFAULT_CONFIG = {
         'passthrough_block_ms': 50,
         'reverb_mix': 0.35,
         'reverb_decay': 0.72,
+        'dual_monitor': True,
+        'monitor_output_device': 'auto',
     },
     'rvc': {
         'f0_method': 'rmvpe',
