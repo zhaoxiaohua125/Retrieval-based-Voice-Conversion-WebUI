@@ -3384,3 +3384,12 @@ ewrite；扩展 LyricWord 与字级 matcher
 - **会话主要目的**: 进入程序默认选中普通说话而非 AI 唱歌/跟唱，避免开播聊天时观众听不到人声
 - **完成的主要任务**: `DEFAULT_PLAYBACK_MODE=normal_talk`；预热音频流切 normal_talk；播放页默认按钮；主界面同步选中状态
 - **修改的文件列表**: app/integration/state.py、app/integration/controller.py、app/ui/pages/playback_page.py、scripts/run_ui_skeleton.py、README.md
+
+---
+
+## 会话总结 - 2026-08-20（修复四模式切换停顿）
+
+- **会话主要目的**: 四模式互切（如 AI 唱歌→普通说话）出现明显暂停/停顿
+- **完成的主要任务**: 移除切换后 3 块静音（`_switch_mute_blocks`）；同族切换（AI↔AI、说话↔说话）不再清空 output/monitor ring
+- **关键决策与解决方案**: 停顿主因是切换静音约 150～300ms；仅 AI↔说话跨族切换时清 ring 防残响，族内热切换保持连续输出
+- **修改的文件列表**: app/audio/stream_manager.py、README.md

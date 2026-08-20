@@ -103,7 +103,6 @@ class AudioStreamManager:
         self._out_latency = 0.05
         self._clock_active = False
         self._talk_inst_gain = None
-        self._switch_mute_blocks = 0
         self._talk_out_hist: deque = deque(maxlen=30)
         self._stats = {'callbacks': 0, 'underruns': 0, 'input_overflow': 0, 'restarts': 0}
 
@@ -324,19 +323,19 @@ class AudioStreamManager:
             self._stop_vad_worker()
             with self._gate_lock:
                 self._voice_gate = 1.0 if new_mode == 'ai_sing' else 0.0
-        if prev_mode != new_mode:
+        cross_ai_talk = (prev_mode in ai_modes) != (new_mode in ai_modes)
+        if cross_ai_talk:
             self.output_ring.clear()
             if self._monitor_ring is not None:
                 self._monitor_ring.clear()
             self._last_out.fill(0)
             self._monitor_last_out.fill(0)
             self._talk_out_hist.clear()
-            self._switch_mute_blocks = 3
         self._sync_monitor_stream()
         if prev_mode != new_mode and new_mode in talk_modes:
             logger.info(
-                'mode %s->%s live gain=%.2f inst=%.2f talk_inst=%s mute=%s',
-                prev_mode, new_mode, self.config.passthrough_gain, self.config.inst_gain, self._talk_inst_gain, self._switch_mute_blocks,
+                'mode %s->%s live gain=%.2f inst=%.2f talk_inst=%s cross=%s',
+                prev_mode, new_mode, self.config.passthrough_gain, self.config.inst_gain, self._talk_inst_gain, cross_ai_talk,
             )
         return self
 
@@ -476,9 +475,7 @@ class AudioStreamManager:
             self._open_stream()
             self._running = True
             if self.config.playback_mode in ('normal_talk', 'reverb_talk'):
-                self.output_ring.clear()
                 self._talk_out_hist.clear()
-                self._switch_mute_blocks = 2
             self._sync_monitor_stream()
             if self.config.playback_mode == 'ai_follow':
                 self._start_vad_worker()
@@ -775,19 +772,15 @@ class AudioStreamManager:
             talk = mode in ('normal_talk', 'reverb_talk')
             if mode in PLAYBACK_MODES or self.config.passthrough:
                 inst, ref = self._read_song_frames(frames)
-                muted = self._switch_mute_blocks > 0
-                if muted:
-                    self._switch_mute_blocks -= 1
-                    live_mix = np.zeros((frames, 1), dtype=np.float32)
-                elif talk:
+                if talk:
                     mono_in = self._cancel_talk_loopback(mono_in)
                     live_mix = self._mix_output(frames, mono_in, inst, ref, for_monitor=False)
                     self._talk_out_hist.append(live_mix.copy())
                 else:
                     live_mix = self._mix_output(frames, mono_in, inst, ref, for_monitor=False)
                 if self._monitor_ring is not None:
-                    mon_mix = live_mix if muted else self._mix_output(frames, mono_in, inst, ref, for_monitor=True)
-                    self._monitor_ring.write(mon_mix if not muted else np.zeros((frames, 1), dtype=np.float32))
+                    mon_mix = self._mix_output(frames, mono_in, inst, ref, for_monitor=True)
+                    self._monitor_ring.write(mon_mix)
                 if talk:
                     self._write_outdata(outdata, live_mix)
                     return
