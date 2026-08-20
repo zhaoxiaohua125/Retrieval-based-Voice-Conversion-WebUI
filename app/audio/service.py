@@ -16,8 +16,8 @@ logger = logging.getLogger('rvc_client.audio')
 def passthrough_gain_from_audio(audio: dict) -> float:
     ui = audio.get('passthrough_ui')
     if ui is not None:
-        return max(0.0, min(4.0, int(ui) / 50.0))
-    return max(0.0, min(4.0, float(audio.get('passthrough_gain', 2.0))))
+        return max(0.0, min(8.0, int(ui) / 50.0))
+    return max(0.0, min(8.0, float(audio.get('passthrough_gain', 2.0))))
 
 
 def inst_gain_from_config(config_store: ConfigStore) -> float:

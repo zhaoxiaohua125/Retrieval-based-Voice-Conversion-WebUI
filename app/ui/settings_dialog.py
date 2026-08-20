@@ -168,14 +168,15 @@ class SettingsDialog(QDialog):
             self.cmb_monitor = QComboBox()
             self.cmb_monitor.setMinimumWidth(420)
             self.cmb_monitor.setToolTip(
-                '双路输出时：直播走「输出设备」（建议 Aux→B1），耳机走「监听设备」（建议 VAIO→A1）。\n'
-                '普通/混响说话时监听不含干声；AI 唱歌/跟唱监听与直播相同。'
+                '双路输出：直播走「输出设备 Aux→B1」，耳机走「监听设备 VAIO→A1」。\n'
+                '普通/混响说话：耳机仅伴奏；AI 唱歌/跟唱：耳机为完整混音。\n'
+                'AUX 只勾 B1、VAIO 只勾 A1。'
             )
             form.addRow('监听设备（耳机）', self.cmb_monitor)
             self.chk_dual_monitor = QCheckBox('双路监听（普通/混响说话时耳机不含干声）')
             self.chk_dual_monitor.setToolTip(
-                '开启后自动向监听设备输出「仅伴奏/AI 人声」混音；直播输出仍含完整麦克风。\n'
-                'Voicemeeter：输出设备 Aux 只勾 B1，监听设备 VAIO 只勾 A1。'
+                '普通/混响：直播 Aux→B1（含人声），监听 VAIO→A1（仅伴奏）。\n'
+                'AI 唱歌/跟唱：直播 Aux→B1，监听 VAIO→A1（完整混音）。'
             )
             form.addRow('', self.chk_dual_monitor)
             self.chk_dual_monitor.toggled.connect(lambda on: self.cmb_monitor.setEnabled(on))
@@ -246,10 +247,11 @@ class SettingsDialog(QDialog):
             pt_row = QHBoxLayout()
             pt_row.addWidget(QLabel('普通说话音量'))
             self.slider_passthrough = QSlider(Qt.Orientation.Horizontal)
-            self.slider_passthrough.setRange(0, 200)
+            self.slider_passthrough.setRange(0, 400)
             self.slider_passthrough.setToolTip(
-                '0%～200%，默认 100%=2 倍增益；控制直播输出中的人声大小。\n'
-                '开启「双路监听」后，耳机不受此项影响（普通/混响说话时不含干声）。保存后请重开对应模式。'
+                '0%～400%，默认 100%=2 倍增益；控制直播输出中的人声大小。\n'
+                '检测到人声时会自动补增益到合适电平；仍偏小可继续提高或调大 Voicemeeter B2 输入。\n'
+                '开启「双路监听」后，耳机不受此项影响。保存后请重开对应模式。'
             )
             self.lbl_passthrough = QLabel('')
             self.lbl_passthrough.setMinimumWidth(44)
@@ -573,7 +575,7 @@ class SettingsDialog(QDialog):
         self.chk_wasapi.setChecked(bool(self.config.get('audio.wasapi_exclusive', False)))
         self.chk_dual_monitor.setChecked(bool(self.config.get('audio.dual_monitor', True)))
         pt_ui = int(self.config.get('audio.passthrough_ui', 100))
-        self.slider_passthrough.setValue(max(0, min(200, pt_ui)))
+        self.slider_passthrough.setValue(max(0, min(400, pt_ui)))
         self.lbl_passthrough.setText('%s%%' % self.slider_passthrough.value())
         mix = float(self.config.get('audio.reverb_mix', 0.35) or 0.35)
         decay = float(self.config.get('audio.reverb_decay', 0.72) or 0.72)

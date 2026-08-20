@@ -173,6 +173,42 @@ def pick_voicemeeter_defaults(devices: list[AudioDeviceInfo] | None = None):
     return input_idx, output_idx
 
 
+def _is_vm_or_cable(dev: AudioDeviceInfo) -> bool:
+    return 'voicemeeter' in dev.tags or 'vb_cable' in dev.tags
+
+
+def pick_direct_headphone_default(devices: list[AudioDeviceInfo] | None, stream_out_idx: int | None):
+    """AI 监听：直连物理耳机/扬声器，不经 Voicemeeter 虚拟输入，避免与 Aux 叠进 B1。"""
+    items = devices if devices is not None else list_devices()
+
+    def ok_out(dev: AudioDeviceInfo) -> bool:
+        return dev.max_output_channels > 0 and dev.index != stream_out_idx and not _is_vm_or_cable(dev)
+
+    try:
+        import sounddevice as sd
+
+        default = sd.default.device
+        idx = default[1] if isinstance(default, (list, tuple)) and len(default) > 1 else default
+        if isinstance(idx, int) and idx >= 0:
+            dev = next((d for d in items if d.index == idx), None)
+            if dev and ok_out(dev):
+                return idx
+    except Exception:
+        pass
+    for dev in items:
+        if ok_out(dev) and 'WASAPI' in (dev.hostapi or ''):
+            n = dev.name.lower()
+            if 'headphone' in n or 'headset' in n or '耳机' in n:
+                return dev.index
+    for dev in items:
+        if ok_out(dev) and 'WASAPI' in (dev.hostapi or ''):
+            return dev.index
+    for dev in items:
+        if ok_out(dev):
+            return dev.index
+    return None
+
+
 def pick_monitor_default(devices: list[AudioDeviceInfo] | None, stream_out_idx: int | None):
     """直播输出为 Aux 时，监听默认走 VAIO Input（与 stream 分离）。"""
     if stream_out_idx is None:
@@ -201,6 +237,7 @@ def resolve_monitor_device(
     stream_out_idx: int | None,
     hostapi: str | None = None,
     devices: list[AudioDeviceInfo] | None = None,
+    playback_mode: str = '',
 ):
     ref = str(monitor_ref or '').strip().lower()
     if ref in ('off', 'none', 'false', '0', 'disable', 'disabled'):
@@ -211,7 +248,12 @@ def resolve_monitor_device(
         if idx is not None and idx != stream_out_idx:
             return idx
         return None
-    return pick_monitor_default(items, stream_out_idx)
+    vm = pick_monitor_default(items, stream_out_idx)
+    if vm is not None:
+        return vm
+    if playback_mode in ('ai_sing', 'ai_follow'):
+        return pick_direct_headphone_default(items, stream_out_idx)
+    return None
 
 
 def find_device_by_name(

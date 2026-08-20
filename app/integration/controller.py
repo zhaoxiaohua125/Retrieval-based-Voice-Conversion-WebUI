@@ -1916,8 +1916,11 @@ class ClientController:
             )
         mgr = self.audio.manager
         if mgr is not None and mgr.running and mgr.config.playback_mode in PLAYBACK_MODES:
+            if 'inst_gain' in p:
+                mgr.config.inst_gain = float(p['inst_gain'])
+            else:
+                mgr.config.inst_gain = inst_gain_from_config(self.config_store)
             mix = pitchfix_mix_from_config(self.config_store)
-            mgr.config.inst_gain = inst_gain_from_config(self.config_store)
             mgr.config.mic_gain = mix['mic_gain']
             mgr.config.ref_vocal_gain = mix['ref_vocal_gain']
             mgr.config.follow_threshold = mix['follow_threshold']
@@ -2809,7 +2812,7 @@ class ClientController:
         mgr = self.audio.manager
         if mgr and mgr.running:
             audio_cfg = dict(self.config_store.get('audio', {}) or {})
-            if mgr.config.passthrough:
+            if mgr.config.playback_mode in ('normal_talk', 'reverb_talk') or mgr.config.passthrough:
                 from app.audio.service import passthrough_gain_from_audio
                 mgr.config.passthrough_gain = passthrough_gain_from_audio(audio_cfg)
             mgr.config.reverb_mix = float(audio_cfg.get('reverb_mix', 0.35))

@@ -3159,3 +3159,86 @@ ewrite；扩展 LyricWord 与字级 matcher
 - **关键决策与解决方案**: 同一次 callback 读一次伴奏帧，分别混两路避免进度错位
 - **使用的技术栈**: sounddevice 双 OutputStream、Voicemeeter Aux/B1 + VAIO/A1
 - **修改的文件列表**: app/audio/stream_manager.py、app/audio/devices.py、app/audio/service.py、app/config_store.py、app/ui/settings_dialog.py、app/integration/controller.py、README.md
+
+---
+
+## 会话总结 - 2026-08-20（伴奏盖人声 + 播放条伴奏音量）
+
+- **会话主要目的**: 有伴奏时直播间听不到普通说话；播放页增加酷狗式伴奏音量；更新开发大纲双路监听
+- **完成的主要任务**:
+  1. 根因：普通/混响说话混音用硬 clip，伴奏峰值高时削掉人声；改为与 AI 模式相同的峰值归一化
+  2. 播放条进度旁增加「伴奏」滑块（0~100%），实时写 `pitchfix.inst_ui` 并更新流
+  3. `开发大纲.md` 补充双路监听、VM 路由、混音与排错表
+- **关键决策与解决方案**: 直播路 normalize 保人声比例；用户可再降伴奏滑块
+- **使用的技术栈**: numpy 峰值归一化、playback_ai_follow_mix 复用
+- **修改的文件列表**: app/audio/stream_manager.py、app/ui/pages/playback_page.py、开发大纲.md、README.md
+
+---
+
+## 会话总结 - 2026-08-20（伴奏 0 仍出声 / 直播无人声）
+
+- **会话主要目的**: 伴奏滑块为 0 仍有声音；普通说话直播间听不见
+- **完成的主要任务**:
+  1. 根因：`inst_gain or 0.77` 在增益为 0 时误用 0.77，伴奏无法静音且盖过人声
+  2. 新增 `_cfg_gain` 正确支持 0；说话混音改人声优先（伴奏自动让位，不再整体 peak 归一化压人声）
+  3. 滑块变更时立即写 `mgr.config.inst_gain`
+- **关键决策与解决方案**: 波形条是文件能量显示，与伴奏输出音量无关
+- **修改的文件列表**: app/audio/stream_manager.py、app/integration/controller.py、开发大纲.md、README.md
+
+---
+
+## 会话总结 - 2026-08-20（直播普通说话音量偏低）
+
+- **会话主要目的**: 普通说话音量 200% 时直播间人声仍偏小
+- **完成的主要任务**:
+  1. 去掉混音前硬 clip，允许增益把人声顶满后再限幅
+  2. 直播路检测到人声时自动补增益（峰值目标约 92%）
+  3. 「普通说话音量」上限 200%→400%（增益最高 8x）
+- **关键决策与解决方案**: VM B2 输入电平偏低时靠客户端补增益；仍不够可调 Potato H1 推子
+- **修改的文件列表**: app/audio/stream_manager.py、app/audio/service.py、app/ui/settings_dialog.py、app/integration/controller.py、开发大纲.md、README.md
+
+---
+
+## 会话总结 - 2026-08-20（双路监听 AI 唱歌回响）
+
+- **会话主要目的**: 开启双路监听后 AI 唱歌耳机有回响，关闭则正常
+- **完成的主要任务**: 首版改为 talk 才写监听路，导致 AI 模式耳机无声；后调整为 AI 也写 VAIO
+- **关键决策与解决方案**: 回响来自 AUX 与 VAIO 同进 A1，非双路本身
+- **修改的文件列表**: app/audio/stream_manager.py、README.md
+
+---
+
+## 会话总结 - 2026-08-20（双路 AI 唱歌耳机无声）
+
+- **会话主要目的**: 修复双路监听下 AI 唱歌耳机无声（此前为消回响关闭了 AI 监听路）
+- **完成的主要任务**: AI 唱歌/跟唱恢复 VAIO 监听完整混音；talk 仍监听仅伴奏；复用同帧 stream_mix 避免重复读轨
+- **关键决策与解决方案**: 回响根因是 AUX 勾 A1，不是双路本身；须 VM：AUX 只 B1、VAIO 只 A1
+- **修改的文件列表**: app/audio/stream_manager.py、app/ui/settings_dialog.py、开发大纲.md、README.md
+
+---
+
+## 会话总结 - 2026-08-20（直播间 AI 唱歌回响）
+
+- **会话主要目的**: 双路监听开启时直播间 AI 唱歌/跟唱有回响（非耳机）；VM 已 AUX→B1、VAIO→A1
+- **完成的主要任务**: AI 模式完全关闭 VAIO 监听 OutputStream；仅 talk 模式双路；切模式时 `_sync_monitor_stream` 动态开关
+- **关键决策与解决方案**: Potato 双虚拟输入同内容时 B1 可能叠音；AI 耳机可 AUX 勾 A1+B1 同源；跟唱 orig_ui>0 也会叠原唱
+- **修改的文件列表**: app/audio/stream_manager.py、app/ui/settings_dialog.py、开发大纲.md、README.md
+
+---
+
+## 会话总结 - 2026-08-20（AI 耳机直连免改 VM）
+
+- **会话主要目的**: AI 唱歌/跟唱戴耳机监听时，避免用户手动给 AUX 勾选 A1
+- **完成的主要任务**: AI 模式监听改直连物理耳机（WASAPI），不经 Voicemeeter VAIO；直播仍只走 Aux→B1；切模式时自动切换监听设备
+- **关键决策与解决方案**: 回响根因是 Aux+VAIO 双虚拟输入同内容叠进 B1；AI 监听绕过 VM 虚拟输入即可既无回响又无需改条带勾选
+- **使用的技术栈**: sounddevice 双 OutputStream、WASAPI 默认输出设备解析
+- **修改的文件列表**: app/audio/devices.py、app/audio/stream_manager.py、app/ui/settings_dialog.py、README.md
+
+---
+
+## 会话总结 - 2026-08-20（AI 耳机无声修复）
+
+- **会话主要目的**: AI 唱歌时耳机无声音（用户 VM 耳机走 VAIO→A1）
+- **完成的主要任务**: 查日志定位 AI 监听误选 Realtek Digital Output(23) 而非 VAIO Input(22)；改回 auto 优先 VAIO；监听流打开失败时自动 fallback
+- **关键决策与解决方案**: 用户耳机经 Voicemeeter A1 监听，直连物理声卡无效；须与 talk 同走 VAIO Input
+- **修改的文件列表**: app/audio/devices.py、app/audio/stream_manager.py、app/ui/settings_dialog.py、README.md

@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from app.config_store import ConfigStore
 from app.ui.ai_follow_mix_panel import AiFollowMixPanel
 from app.ui.qt_util import clicked
 from app.ui.waveform_widget import WaveformWidget
@@ -158,7 +159,24 @@ class PlaybackPage(QWidget):
         self.progress.sliderReleased.connect(self._on_seek)
         progress_row.addWidget(self.time_label)
         progress_row.addWidget(self.progress, stretch=1)
+        progress_row.addWidget(QLabel('伴奏'))
+        self.slider_inst = QSlider(Qt.Orientation.Horizontal)
+        self.slider_inst.setRange(0, 100)
+        self.slider_inst.setFixedWidth(96)
+        self.slider_inst.setToolTip('歌曲/伴奏音量（普通说话、混响、AI 唱歌/跟唱通用，实时生效）')
+        self.lbl_inst_vol = QLabel('77')
+        self.lbl_inst_vol.setMinimumWidth(28)
+        self.lbl_inst_vol.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.slider_inst.valueChanged.connect(self._on_inst_volume)
+        progress_row.addWidget(self.slider_inst)
+        progress_row.addWidget(self.lbl_inst_vol)
         center_layout.addLayout(progress_row)
+        pf = ConfigStore().load().get('pitchfix', {}) or {}
+        inst_ui = int(pf['inst_ui']) if 'inst_ui' in pf else int(round(float(pf.get('inst_gain', 0.77)) * 100))
+        self.slider_inst.blockSignals(True)
+        self.slider_inst.setValue(inst_ui)
+        self.lbl_inst_vol.setText(str(inst_ui))
+        self.slider_inst.blockSignals(False)
 
         ctrl = QHBoxLayout()
         ctrl.addStretch()
@@ -443,6 +461,10 @@ class PlaybackPage(QWidget):
 
     def _on_wave_seek(self, ratio: float):
         self.bridge.emit_action('playback_seek', ratio=ratio)
+
+    def _on_inst_volume(self, v: int):
+        self.lbl_inst_vol.setText(str(v))
+        self.bridge.emit_action('playback_ai_follow_mix', inst_ui=int(v), inst_gain=float(v) / 100.0)
 
     def _on_transport(self):
         self.bridge.emit_action('playback_transport')

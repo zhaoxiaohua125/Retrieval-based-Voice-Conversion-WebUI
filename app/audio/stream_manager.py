@@ -18,6 +18,10 @@ logger = logging.getLogger('rvc_client.audio')
 PLAYBACK_MODES = ('normal_talk', 'reverb_talk', 'ai_sing', 'ai_follow')
 
 
+def _cfg_gain(val, default: float) -> float:
+    return default if val is None else float(val)
+
+
 @dataclass
 class AudioStreamConfig:
     sample_rate: int = 48000
@@ -116,7 +120,8 @@ class AudioStreamManager:
         )
 
     def resolve_monitor_device(self, stream_out_idx: int | None):
-        if not self.config.dual_monitor:
+        mode = self.config.playback_mode
+        if not self.config.dual_monitor and mode not in ('ai_sing', 'ai_follow'):
             return None
         from app.audio.devices import resolve_monitor_device
 
@@ -124,6 +129,7 @@ class AudioStreamManager:
             self.config.monitor_output_device,
             stream_out_idx,
             hostapi=self.config.hostapi,
+            playback_mode=mode,
         )
 
     @property
@@ -297,6 +303,7 @@ class AudioStreamManager:
             self._stop_vad_worker()
             with self._gate_lock:
                 self._voice_gate = 1.0 if cfg.playback_mode == 'ai_sing' else 0.0
+        self._sync_monitor_stream()
         return self
 
     def _smooth_follow_gate(self) -> float:
@@ -370,6 +377,56 @@ class AudioStreamManager:
                 logger.error('stream vad error:\n%s', traceback.format_exc())
                 time.sleep(0.02)
 
+    def _monitor_wanted(self) -> bool:
+        mode = self.config.playback_mode
+        if mode in ('ai_sing', 'ai_follow'):
+            return True
+        return bool(self.config.dual_monitor) and mode in ('normal_talk', 'reverb_talk')
+
+    def _sync_monitor_stream(self):
+        if not self._running:
+            return
+        if not self._monitor_wanted():
+            if self._monitor_stream is not None:
+                self._close_monitor_stream()
+            return
+        want_dev = self.resolve_monitor_device(self.config.output_device)
+        if want_dev is None or want_dev == self.config.output_device:
+            if self._monitor_stream is not None:
+                self._close_monitor_stream()
+            return
+        if self._monitor_stream is not None and self._monitor_dev == want_dev:
+            return
+        self._close_monitor_stream()
+        self._monitor_dev = want_dev
+        try:
+            self._open_monitor_stream()
+            logger.info('monitor stream opened dev=%s mode=%s', self._monitor_dev, self.config.playback_mode)
+        except Exception as exc:
+            logger.warning('monitor stream unavailable dev=%s: %s', want_dev, exc)
+            self._close_monitor_stream()
+            self._monitor_dev = None
+            fallback = self._monitor_fallback_device(want_dev)
+            if fallback is not None:
+                self._monitor_dev = fallback
+                try:
+                    self._open_monitor_stream()
+                    logger.info('monitor stream fallback dev=%s mode=%s', self._monitor_dev, self.config.playback_mode)
+                except Exception as exc2:
+                    logger.warning('monitor fallback failed dev=%s: %s', fallback, exc2)
+                    self._close_monitor_stream()
+                    self._monitor_dev = None
+
+    def _monitor_fallback_device(self, failed: int | None) -> int | None:
+        from app.audio.devices import list_devices, pick_direct_headphone_default, pick_monitor_default
+
+        items = list_devices(hostapi=self.config.hostapi)
+        out = self.config.output_device
+        for idx in (pick_monitor_default(items, out), pick_direct_headphone_default(items, out)):
+            if idx is not None and idx != out and idx != failed:
+                return idx
+        return None
+
     def start(self):
         with self._lock:
             if self._running:
@@ -383,14 +440,8 @@ class AudioStreamManager:
             if self.config.playback_mode == 'reverb_talk':
                 self._init_reverb()
             self._open_stream()
-            if self._monitor_dev is not None:
-                try:
-                    self._open_monitor_stream()
-                except Exception as exc:
-                    logger.warning('monitor stream unavailable: %s', exc)
-                    self._monitor_dev = None
-                    self._close_monitor_stream()
             self._running = True
+            self._sync_monitor_stream()
             if self.config.playback_mode == 'ai_follow':
                 self._start_vad_worker()
             self._watchdog = threading.Thread(target=self._watch_loop, name='audio-watchdog', daemon=True)
@@ -510,37 +561,67 @@ class AudioStreamManager:
         wet *= 0.25
         return np.clip(dry * (1.0 - mix) + wet * mix, -1.0, 1.0)
 
-    def _mix_output(self, frames: int, mono_in: np.ndarray, inst=None, ref=None, for_monitor: bool = False) -> np.ndarray:
-        mode = self.config.playback_mode or ('reverb_talk' if self.config.passthrough_reverb else 'normal_talk' if self.config.passthrough else '')
-        if inst is None or ref is None:
-            inst, ref = self._read_song_frames(frames)
-        ig = float(self.config.inst_gain or 0.77)
-        if mode in ('normal_talk', 'reverb_talk'):
-            if for_monitor and self.config.dual_monitor:
-                boosted = np.zeros_like(mono_in)
-            else:
-                gain = float(self.config.passthrough_gain or 1.0)
-                boosted = np.clip(mono_in * gain, -1.0, 1.0)
-                if mode == 'reverb_talk':
-                    boosted[:, 0] = self._reverb_mono(boosted)
-            if self._inst_data is not None:
-                return np.clip(boosted + inst.reshape(-1, 1) * ig, -1.0, 1.0)
-            return boosted
-        if mode == 'ai_sing':
-            mg = float(self.config.mic_gain or 0.77)
-            mix = inst.reshape(-1, 1) * ig + ref.reshape(-1, 1) * mg
-        elif mode == 'ai_follow':
-            gate = self._smooth_follow_gate()
-            mg = float(self.config.mic_gain or 0.77)
-            rg = float(self.config.ref_vocal_gain or 0.0)
-            vocal = ref.reshape(-1, 1)
-            mix = inst.reshape(-1, 1) * ig + vocal * gate * mg + vocal * rg
-        else:
-            return np.zeros((frames, 1), dtype=np.float32)
+    def _normalize_peak(self, mix: np.ndarray) -> np.ndarray:
         peak = float(np.max(np.abs(mix))) if mix.size else 0.0
         if peak > 1.0:
             mix = mix / peak
         return mix.astype(np.float32)
+
+    def _mix_talk(self, boosted: np.ndarray, inst: np.ndarray, ig: float, for_monitor: bool) -> np.ndarray:
+        if for_monitor and self.config.dual_monitor:
+            if self._inst_data is None or ig <= 0:
+                return np.zeros_like(boosted, dtype=np.float32)
+            return np.clip(inst.reshape(-1, 1) * ig, -1.0, 1.0).astype(np.float32)
+        voice = boosted
+        if self._inst_data is None or ig <= 0:
+            mix = voice
+        else:
+            music = inst.reshape(-1, 1) * ig
+            v_peak = float(np.max(np.abs(voice))) if voice.size else 0.0
+            m_peak = float(np.max(np.abs(music))) if music.size else 0.0
+            if v_peak >= 1.0:
+                mix = voice / v_peak
+            elif m_peak > 0 and v_peak + m_peak > 1.0:
+                mix = voice + music * ((1.0 - v_peak) / m_peak)
+            else:
+                mix = voice + music
+        if not for_monitor:
+            v_active = float(np.max(np.abs(voice))) if voice.size else 0.0
+            if v_active > 0.02:
+                peak = float(np.max(np.abs(mix))) if mix.size else 0.0
+                if 0 < peak < 0.88:
+                    mix = mix * min(3.0, 0.92 / peak)
+        peak = float(np.max(np.abs(mix))) if mix.size else 0.0
+        if peak > 1.0:
+            mix = mix / peak
+        return np.clip(mix, -1.0, 1.0).astype(np.float32)
+
+    def _mix_output(self, frames: int, mono_in: np.ndarray, inst=None, ref=None, for_monitor: bool = False) -> np.ndarray:
+        mode = self.config.playback_mode or ('reverb_talk' if self.config.passthrough_reverb else 'normal_talk' if self.config.passthrough else '')
+        if inst is None or ref is None:
+            inst, ref = self._read_song_frames(frames)
+        ig = _cfg_gain(self.config.inst_gain, 0.77)
+        if mode in ('normal_talk', 'reverb_talk'):
+            if for_monitor and self.config.dual_monitor:
+                boosted = np.zeros_like(mono_in)
+            else:
+                gain = _cfg_gain(self.config.passthrough_gain, 1.0)
+                boosted = mono_in * gain
+                if mode == 'reverb_talk':
+                    boosted[:, 0] = self._reverb_mono(boosted)
+            return self._mix_talk(boosted, inst, ig, for_monitor)
+        if mode == 'ai_sing':
+            mg = _cfg_gain(self.config.mic_gain, 0.77)
+            mix = inst.reshape(-1, 1) * ig + ref.reshape(-1, 1) * mg
+        elif mode == 'ai_follow':
+            gate = self._smooth_follow_gate()
+            mg = _cfg_gain(self.config.mic_gain, 0.77)
+            rg = _cfg_gain(self.config.ref_vocal_gain, 0.0)
+            vocal = ref.reshape(-1, 1)
+            mix = inst.reshape(-1, 1) * ig + vocal * gate * mg + vocal * rg
+        else:
+            return np.zeros((frames, 1), dtype=np.float32)
+        return self._normalize_peak(mix)
 
     def _close_stream(self, stream=None):
         if stream is None:
@@ -583,7 +664,8 @@ class AudioStreamManager:
                 inst, ref = self._read_song_frames(frames)
                 self.output_ring.write(self._mix_output(frames, mono_in, inst, ref, for_monitor=False))
                 if self._monitor_ring is not None:
-                    self._monitor_ring.write(self._mix_output(frames, mono_in, inst, ref, for_monitor=True))
+                    mon_mix = self._mix_output(frames, mono_in, inst, ref, for_monitor=mode in ('normal_talk', 'reverb_talk'))
+                    self._monitor_ring.write(mon_mix)
             need = outdata.shape[0]
             chunk = self.output_ring.read(need)
             filled = self._smooth_output(chunk, need)
@@ -667,12 +749,7 @@ class AudioStreamManager:
                     if not self._running:
                         break
                     self._open_stream()
-                    if self._monitor_dev is not None:
-                        try:
-                            self._open_monitor_stream()
-                        except Exception as exc:
-                            logger.warning('monitor stream reopen failed: %s', exc)
-                            self._monitor_dev = None
+                    self._sync_monitor_stream()
                     self._stats['restarts'] += 1
                     self._error = None
                 logger.warning('audio stream restarted after device/error event')
