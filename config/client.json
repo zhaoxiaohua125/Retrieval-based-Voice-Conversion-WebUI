@@ -85,6 +85,11 @@
     "desktop_chroma_color": "#00FF00",
     "desktop_click_through": false,
     "desktop_stay_on_top": false,
+    "desktop_chroma_text_color": "#FFFFFF",
+    "desktop_chroma_highlight_color": "#FB923C",
+    "desktop_separate_process": true,
+    "desktop_window_title": "【直播歌词】桌面歌词",
+    "desktop_launcher": "",
     "mtc_port": "",
     "sim_speed": 1.0
   },
@@ -124,8 +129,8 @@
   },
   "ui": {
     "geometry": [
-      344,
-      284,
+      387,
+      113,
       1280,
       928
     ],
@@ -134,10 +139,10 @@
     "lyrics_window": {
       "orientation": "vertical",
       "geometry": [
-        1935,
-        400,
+        2230,
+        108,
         140,
-        645
+        832
       ],
       "geometry_h": [
         179,
@@ -146,10 +151,10 @@
         166
       ],
       "geometry_v": [
-        1935,
-        400,
+        2230,
+        108,
         140,
-        645
+        832
       ]
     }
   }

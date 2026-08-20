@@ -1,22 +1,39 @@
 """系统托盘菜单。"""
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QAction, QIcon, QPainter, QPixmap
+from PyQt6.QtGui import QAction, QIcon, QPainter, QPixmap, QColor
 from PyQt6.QtWidgets import QMenu, QSystemTrayIcon
 
 
-def fallback_app_icon() -> QIcon:
+def _char_round_icon(text: str, bg: str, font_size: int = 30) -> QIcon:
     px = QPixmap(64, 64)
     px.fill(Qt.GlobalColor.transparent)
     painter = QPainter(px)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(Qt.GlobalColor.white)
+    painter.setBrush(QColor(bg))
     painter.drawRoundedRect(6, 6, 52, 52, 14, 14)
-    painter.setBrush(Qt.GlobalColor.darkBlue)
-    painter.drawRoundedRect(14, 14, 36, 36, 10, 10)
+    painter.setPen(QColor('#FFFFFF'))
+    font = painter.font()
+    font.setFamily('Microsoft YaHei UI')
+    font.setBold(True)
+    font.setPixelSize(font_size)
+    painter.setFont(font)
+    painter.drawText(px.rect(), int(Qt.AlignmentFlag.AlignCenter), text)
     painter.end()
     return QIcon(px)
+
+
+def main_app_icon() -> QIcon:
+    return _char_round_icon('趣', '#2563EB')
+
+
+def fallback_app_icon() -> QIcon:
+    return main_app_icon()
+
+
+def desktop_lyrics_icon() -> QIcon:
+    return _char_round_icon('词', '#16A34A')
 
 
 def build_tray(bridge, main_window, lyrics_window=None, controller=None):

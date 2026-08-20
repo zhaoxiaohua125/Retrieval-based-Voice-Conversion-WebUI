@@ -403,6 +403,8 @@ class SettingsDialog(QDialog):
             hint = QLabel(
                 '绿幕模式：窗口大小请自行拖拽。「歌词颜色」建议直播用纯白；「当前字」可设橙黄高亮。'
                 '伴侣键色与抠像底色一致，相似度 280~380。'
+                '直播伴侣采集请选「【直播歌词】桌面歌词」；若与主程序同为 python.exe 易绑错，'
+                '可将 python 复制为项目根目录「桌面歌词.exe」后重启（歌词会独立进程启动）。'
             )
             hint.setWordWrap(True)
             hint.setStyleSheet('color:#64748b;font-size:12px;')

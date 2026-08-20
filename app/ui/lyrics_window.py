@@ -11,6 +11,7 @@ from PyQt6.QtGui import (
 from PyQt6.QtWidgets import QBoxLayout, QLabel, QLayout, QMenu, QSizePolicy, QWidget
 
 from app.ui.layout_store import load_ui_layout, save_ui_layout
+from app.ui.tray import desktop_lyrics_icon
 
 _ORIENT_H = 'horizontal'
 _ORIENT_V = 'vertical'
@@ -65,7 +66,11 @@ class LyricsWindow(QWidget):
         self._use_html = False
         self._anchor_window = None
         self._chroma_font = QFont('Microsoft YaHei UI', 10)
-        self.setWindowTitle('桌面歌词')
+        title = '【直播歌词】桌面歌词'
+        if self._config:
+            title = str(self._config.get('lyrics.desktop_window_title', title) or title).strip() or title
+        self.setWindowTitle(title)
+        self.setWindowIcon(desktop_lyrics_icon())
         self._apply_window_flags()
         self.setMouseTracking(True)
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)

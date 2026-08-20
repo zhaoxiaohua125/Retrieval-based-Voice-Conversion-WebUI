@@ -57,7 +57,7 @@ from app.integration import ClientController
 from app.ops.rotating_log import setup_rotating_logging
 from app.scheduler import AppScheduler
 from app.ui import MainWindow, LyricsWindow, UiBridge, build_tray
-from app.ui.tray import fallback_app_icon
+from app.ui.tray import main_app_icon
 
 
 _crash_log_file = None
@@ -161,10 +161,16 @@ def main():
             _startup_log('existing instance detected, raise and exit')
             return 0
         app.setQuitOnLastWindowClosed(False)
-        app.setApplicationName('来取文化')
+        app.setApplicationName('来趣文化')
         app.setApplicationVersion(CLIENT_VERSION)
-        app_icon = fallback_app_icon()
+        app_icon = main_app_icon()
         app.setWindowIcon(app_icon)
+        if sys.platform == 'win32':
+            try:
+                import ctypes
+                ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('LaiquCulture.MainApp.1')
+            except Exception:
+                pass
 
         from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 
@@ -257,9 +263,13 @@ def main():
                     pass
                 if scheduler.running:
                     scheduler.shutdown()
-                lyrics = getattr(window, '_quit_lyrics', None)
-                if lyrics is not None:
-                    lyrics.close()
+                server = getattr(window, '_quit_lyrics_ipc', None)
+                if server is not None:
+                    server.stop_process()
+                else:
+                    lyrics = getattr(window, '_quit_lyrics', None)
+                    if lyrics is not None:
+                        lyrics.close()
                 tray = getattr(window, '_quit_tray', None)
                 if tray is not None:
                     tray.hide()
@@ -457,10 +467,27 @@ def main():
             window.mark_backend_ready()
 
             def _init_lyrics_tray():
-                lyrics = LyricsWindow(config=controller.config_store)
-                lyrics.set_anchor_window(window)
-                if not getattr(lyrics, '_restored_geo', False):
-                    lyrics.move(window.x() + 40, window.y() + 80)
+                cfg = controller.config_store
+                separate = bool(cfg.get('lyrics.desktop_separate_process', True))
+                server = None
+                if separate:
+                    from app.ops.lyrics_ipc import LyricsIpcServer, LyricsWindowProxy
+                    server = LyricsIpcServer(str(ROOT))
+                    if not server.start_process(ROOT, cfg):
+                        server = None
+                        separate = False
+                if separate and server is not None:
+                    lyrics = LyricsWindowProxy(server, window)
+                    lyrics.set_anchor_window(window)
+                    lyrics.show()
+                    window._quit_lyrics_ipc = server
+                    from PyQt6.QtCore import QTimer as _QTimer
+                    _QTimer.singleShot(400, lambda: lyrics.move_beside_anchor() or lyrics.sync_desktop_stack())
+                else:
+                    lyrics = LyricsWindow(config=cfg)
+                    lyrics.set_anchor_window(window)
+                    if not getattr(lyrics, '_restored_geo', False):
+                        lyrics.move(window.x() + 40, window.y() + 80)
                 controller.set_lyrics_window(lyrics)
                 ctx['lyrics'] = lyrics
                 window._quit_lyrics = lyrics

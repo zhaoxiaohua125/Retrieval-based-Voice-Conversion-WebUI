@@ -2989,3 +2989,54 @@ ewrite；扩展 LyricWord 与字级 matcher
 - **关键决策与解决方案**: 颜色写入 config，apply_desktop_style 驱动 QPainter 填色
 - **使用的技术栈**: PyQt6 QComboBox、config_store
 - **修改的文件列表**: app/ui/lyrics_window.py、app/ui/settings_dialog.py、app/config_store.py、README.md
+
+---
+
+## 会话总结 - 2026-08-20（直播伴侣 python.exe 混淆）
+
+- **会话主要目的**: 解决抖音直播伴侣窗口采集时，主程序与桌面歌词同为 python.exe 导致绑错窗口、需反复删素材重加的问题
+- **完成的主要任务**:
+  1. 桌面歌词默认改为独立子进程（IPC 同步 tick/样式/显隐），与主程序分离 PID
+  2. 窗口标题改为「【直播歌词】桌面歌词」，伴侣按窗口名更易识别
+  3. 支持项目根目录 `桌面歌词.exe` 作为歌词启动器（复制 python 即可改进程名）
+  4. 新增 `scripts/make_desktop_lyrics_exe.bat` 一键生成 `桌面歌词.exe`
+  5. 设置页补充伴侣采集说明
+- **关键决策与解决方案**: 仅改窗口标题不够；需独立进程 + 可选独立 exe 名，伴侣列表才会稳定显示「桌面歌词.exe 【直播歌词】桌面歌词」
+- **使用的技术栈**: PyQt6 QLocalServer/QLocalSocket、subprocess、ConfigStore
+- **修改的文件列表**: app/ops/lyrics_ipc.py、scripts/run_desktop_lyrics.py、scripts/run_ui_skeleton.py、app/ui/lyrics_window.py、app/ui/settings_dialog.py、app/ui/main_window.py、app/config_store.py、scripts/make_desktop_lyrics_exe.bat、README.md
+
+---
+
+## 会话总结 - 2026-08-20（修复 make_desktop_lyrics_exe.bat）
+
+- **会话主要目的**: 用户运行 `make_desktop_lyrics_exe.bat` 报「未找到 python.exe」
+- **完成的主要任务**: 脚本增加 `C:\Python312` 等常见路径及 `where python` 回退；已成功生成 `桌面歌词.exe`
+- **关键决策与解决方案**: 原脚本只查 venv 与 `%LOCALAPPDATA%\Programs\Python`，未覆盖本机 `C:\Python312\python.exe`
+- **使用的技术栈**: Windows batch
+- **修改的文件列表**: scripts/make_desktop_lyrics_exe.bat、README.md
+
+---
+
+## 会话总结 - 2026-08-20（桌面歌词任务栏图标）
+
+- **会话主要目的**: 桌面歌词进程在任务栏显示默认空白图标，不便区分
+- **完成的主要任务**:
+  1. 新增绿色圆角「词」字 `desktop_lyrics_icon()`，主/子进程歌词窗均设置窗口图标
+  2. 生成 `assets/desktop_lyrics.ico`，`make_desktop_lyrics_exe.bat` 用 rcedit 嵌入 exe 图标
+  3. 歌词子进程设置独立 AppUserModelID，任务栏与主程序分开
+- **关键决策与解决方案**: 窗口图标 + exe 嵌入双保险；更新 exe 前需先关闭正在运行的桌面歌词进程
+- **使用的技术栈**: PyQt6 QIcon、rcedit、ICO(PNG) 生成
+- **修改的文件列表**: app/ui/tray.py、app/ui/lyrics_window.py、scripts/run_desktop_lyrics.py、scripts/gen_desktop_lyrics_ico.py、scripts/make_desktop_lyrics_exe.bat、assets/desktop_lyrics.ico、README.md
+
+---
+
+## 会话总结 - 2026-08-20（主程序「趣」图标）
+
+- **会话主要目的**: 主程序任务栏/托盘图标与桌面歌词统一风格，文字改为「趣」
+- **完成的主要任务**:
+  1. 新增蓝色圆角「趣」字 `main_app_icon()`，替换原白框蓝块 fallback 图标
+  2. 主程序设置 AppUserModelID，任务栏与歌词进程区分
+  3. `gen_app_icons.py` 同时生成 `assets/main_app.ico` 与 `desktop_lyrics.ico`
+- **关键决策与解决方案**: 主程序蓝底「趣」、歌词绿底「词」，共用 `_char_round_icon` 绘制
+- **使用的技术栈**: PyQt6 QIcon
+- **修改的文件列表**: app/ui/tray.py、scripts/run_ui_skeleton.py、scripts/gen_app_icons.py、scripts/make_desktop_lyrics_exe.bat、assets/main_app.ico、README.md

@@ -477,7 +477,10 @@ class MainWindow(QMainWindow):
         if self._quit_timer:
             self._quit_timer.stop()
         lyrics = getattr(self, '_quit_lyrics', None)
-        if lyrics is not None:
+        server = getattr(self, '_quit_lyrics_ipc', None)
+        if server is not None:
+            server.stop_process()
+        elif lyrics is not None:
             lyrics.close()
         tray = getattr(self, '_quit_tray', None)
         if tray is not None:
