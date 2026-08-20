@@ -36,6 +36,8 @@
     "passthrough": false,
     "passthrough_gain": 8.0,
     "passthrough_ui": 400,
+    "ai_vocal_gain": 4.0,
+    "ai_vocal_ui": 400,
     "passthrough_block_ms": 50,
     "reverb_mix": 0.35,
     "reverb_decay": 0.72,
@@ -103,7 +105,7 @@
     "normal_talk": "F4"
   },
   "playback": {
-    "play_mode": "shuffle",
+    "play_mode": "sequential",
     "smart_switch": false,
     "smart_switch_min_gap_sec": 1.0
   },
@@ -113,9 +115,9 @@
   },
   "pitchfix": {
     "strength": 0.85,
-    "inst_gain": 0.73,
+    "inst_gain": 0.46,
     "mic_gain": 1.5,
-    "inst_ui": 73,
+    "inst_ui": 46,
     "mic_ui": 150,
     "orig_ui": 0,
     "threshold": 100,
@@ -131,8 +133,8 @@
   },
   "ui": {
     "geometry": [
-      440,
-      268,
+      679,
+      243,
       1280,
       952
     ],
@@ -141,8 +143,8 @@
     "lyrics_window": {
       "orientation": "vertical",
       "geometry": [
-        8,
-        -8,
+        1966,
+        212,
         140,
         832
       ],
@@ -153,8 +155,8 @@
         166
       ],
       "geometry_v": [
-        8,
-        -8,
+        1966,
+        212,
         140,
         832
       ]

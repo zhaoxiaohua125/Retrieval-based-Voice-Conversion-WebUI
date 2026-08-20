@@ -9,7 +9,7 @@ import traceback
 from pathlib import Path
 
 from app.audio import AudioService
-from app.audio.service import inst_gain_from_config, passthrough_gain_from_audio, pitchfix_mix_from_config
+from app.audio.service import ai_vocal_gain_from_audio, inst_gain_from_config, passthrough_gain_from_audio, pitchfix_mix_from_config
 from app.audio.stream_manager import PLAYBACK_MODES
 from app.config_store import ConfigStore
 from app.events import BusMessage, ModuleId, SignalType
@@ -236,6 +236,7 @@ class ClientController:
             'playback_seek': self._seek_playback,
             'playback_ai_follow': lambda p: self.stop_ai_follow() if (p or {}).get('stop') else self._select_mode({**(p or {}), 'mode': 'ai_follow'}),
             'playback_ai_follow_mix': self._update_ai_follow_mix,
+            'playback_ai_vocal_mix': self._update_ai_vocal_mix,
             'realtime_start': self._start_realtime_voice,
             'realtime_stop': self.stop_realtime,
             'playback_normal_talk': lambda p: self._select_mode({**(p or {}), 'mode': 'normal_talk'}),
@@ -308,6 +309,8 @@ class ClientController:
                 audio_cfg = dict(self.config_store.get('audio', {}) or {})
                 if mgr.config.passthrough:
                     mgr.config.passthrough_gain = passthrough_gain_from_audio(audio_cfg)
+                if mgr.config.playback_mode in ('ai_sing', 'ai_follow'):
+                    mgr.config.ai_vocal_gain = ai_vocal_gain_from_audio(audio_cfg)
                 mgr.config.reverb_mix = float(audio_cfg.get('reverb_mix', 0.35))
                 mgr.config.reverb_decay = float(audio_cfg.get('reverb_decay', 0.72))
                 mgr.config.inst_gain = inst_gain_from_config(self.config_store)
@@ -1927,6 +1930,20 @@ class ClientController:
             mgr.config.follow_attenuation = mix['follow_attenuation']
         self._schedule_config_save()
 
+    def _update_ai_vocal_mix(self, payload: dict):
+        p = payload or {}
+        cs = self.config_store
+        if 'ai_vocal_ui' in p:
+            ui = int(p['ai_vocal_ui'])
+            cs.set('audio.ai_vocal_ui', ui)
+            cs.set('audio.ai_vocal_gain', max(0.0, min(4.0, ui / 100.0)))
+        elif 'ai_vocal_gain' in p:
+            cs.set('audio.ai_vocal_gain', float(p['ai_vocal_gain']))
+        mgr = self.audio.manager
+        if mgr is not None and mgr.running and mgr.config.playback_mode in ('ai_sing', 'ai_follow'):
+            mgr.config.ai_vocal_gain = ai_vocal_gain_from_audio(dict(cs.get('audio', {}) or {}))
+        self._schedule_config_save()
+
     def _release_playback_source(self, handoff: bool = True) -> float:
         pos = self._current_song_position()
         if handoff and self._unified_stream_active():
@@ -2686,7 +2703,7 @@ class ClientController:
         old_audio = {k: self.config_store.get('audio.%s' % k) for k in old_audio_keys}
         from app.audio.devices import device_ref_for_config, list_devices
         devices = list_devices(hostapi=audio.get('hostapi') or self.config_store.get('audio.hostapi'))
-        for key in ('hostapi', 'wasapi_exclusive', 'sample_rate', 'passthrough_gain', 'passthrough_ui', 'reverb_mix', 'reverb_decay', 'dual_monitor', 'monitor_output_device'):
+        for key in ('hostapi', 'wasapi_exclusive', 'sample_rate', 'passthrough_gain', 'passthrough_ui', 'ai_vocal_gain', 'ai_vocal_ui', 'reverb_mix', 'reverb_decay', 'dual_monitor', 'monitor_output_device'):
             if key in audio:
                 self.config_store.set('audio.%s' % key, audio[key])
         if 'input_device' in audio:
@@ -2815,6 +2832,8 @@ class ClientController:
             if mgr.config.playback_mode in ('normal_talk', 'reverb_talk') or mgr.config.passthrough:
                 from app.audio.service import passthrough_gain_from_audio
                 mgr.config.passthrough_gain = passthrough_gain_from_audio(audio_cfg)
+            if mgr.config.playback_mode in ('ai_sing', 'ai_follow'):
+                mgr.config.ai_vocal_gain = ai_vocal_gain_from_audio(audio_cfg)
             mgr.config.reverb_mix = float(audio_cfg.get('reverb_mix', 0.35))
             mgr.config.reverb_decay = float(audio_cfg.get('reverb_decay', 0.72))
             if mgr.config.playback_mode in PLAYBACK_MODES:

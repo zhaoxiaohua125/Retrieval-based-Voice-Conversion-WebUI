@@ -169,14 +169,14 @@ class SettingsDialog(QDialog):
             self.cmb_monitor.setMinimumWidth(420)
             self.cmb_monitor.setToolTip(
                 '双路输出：直播走「输出设备 Aux→B1」，耳机走「监听设备 VAIO→A1」。\n'
-                '普通/混响说话：耳机仅伴奏；AI 唱歌/跟唱：耳机为完整混音。\n'
-                'AUX 只勾 B1、VAIO 只勾 A1。'
+                '普通/混响：耳机仅伴奏；AI 唱歌/跟唱：耳机为完整混音（>100% 时耳机音量封顶 100%）。\n'
+                'AUX 只勾 B1、VAIO 只勾 A1，AUX 勿勾 A1。'
             )
             form.addRow('监听设备（耳机）', self.cmb_monitor)
             self.chk_dual_monitor = QCheckBox('双路监听（普通/混响说话时耳机不含干声）')
             self.chk_dual_monitor.setToolTip(
                 '普通/混响：直播 Aux→B1（含人声），监听 VAIO→A1（仅伴奏）。\n'
-                'AI 唱歌/跟唱：直播 Aux→B1，监听 VAIO→A1（完整混音）。'
+                'AI 唱歌/跟唱：直播 Aux→B1，监听 VAIO→A1（完整混音）；AUX 勿勾 A1。'
             )
             form.addRow('', self.chk_dual_monitor)
             self.chk_dual_monitor.toggled.connect(lambda on: self.cmb_monitor.setEnabled(on))
@@ -260,6 +260,21 @@ class SettingsDialog(QDialog):
             pt_row.addWidget(self.slider_passthrough, stretch=1)
             pt_row.addWidget(self.lbl_passthrough)
             talk_layout.addLayout(pt_row)
+            ai_row = QHBoxLayout()
+            ai_row.addWidget(QLabel('AI 直播人声'))
+            self.slider_ai_vocal = QSlider(Qt.Orientation.Horizontal)
+            self.slider_ai_vocal.setRange(0, 400)
+            self.slider_ai_vocal.setToolTip(
+                '0%～400%，与普通说话同一刻度：400% 时直播人声目标电平一致。\n'
+                '超过 100% 时直播更响，耳机监听封顶 100%。AUX 只 B1、VAIO 只 A1。'
+            )
+            self.lbl_ai_vocal = QLabel('')
+            self.lbl_ai_vocal.setMinimumWidth(44)
+            self.lbl_ai_vocal.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.slider_ai_vocal.valueChanged.connect(lambda v: self.lbl_ai_vocal.setText('%s%%' % v))
+            ai_row.addWidget(self.slider_ai_vocal, stretch=1)
+            ai_row.addWidget(self.lbl_ai_vocal)
+            talk_layout.addLayout(ai_row)
             for key, label, lo, hi, tip, scale in (
                 ('reverb_mix', '混响湿度', 0, 100, '混响说话模式下湿声比例', 100.0),
                 ('reverb_decay', '混响衰减', 50, 95, '越大混响尾音越长', 100.0),
@@ -577,6 +592,9 @@ class SettingsDialog(QDialog):
         pt_ui = int(self.config.get('audio.passthrough_ui', 100))
         self.slider_passthrough.setValue(max(0, min(400, pt_ui)))
         self.lbl_passthrough.setText('%s%%' % self.slider_passthrough.value())
+        av_ui = int(self.config.get('audio.ai_vocal_ui', 100))
+        self.slider_ai_vocal.setValue(max(0, min(400, av_ui)))
+        self.lbl_ai_vocal.setText('%s%%' % self.slider_ai_vocal.value())
         mix = float(self.config.get('audio.reverb_mix', 0.35) or 0.35)
         decay = float(self.config.get('audio.reverb_decay', 0.72) or 0.72)
         self.slider_reverb_mix.setValue(int(round(mix * 100)))
@@ -896,6 +914,8 @@ class SettingsDialog(QDialog):
                 'sample_rate': sample_rate,
                 'passthrough_ui': int(self.slider_passthrough.value()),
                 'passthrough_gain': round(int(self.slider_passthrough.value()) / 50.0, 3),
+                'ai_vocal_ui': int(self.slider_ai_vocal.value()),
+                'ai_vocal_gain': round(int(self.slider_ai_vocal.value()) / 100.0, 3),
                 'reverb_mix': round(self.slider_reverb_mix.value() / 100.0, 3),
                 'reverb_decay': round(self.slider_reverb_decay.value() / 100.0, 3),
             },

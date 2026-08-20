@@ -20,6 +20,13 @@ def passthrough_gain_from_audio(audio: dict) -> float:
     return max(0.0, min(8.0, float(audio.get('passthrough_gain', 2.0))))
 
 
+def ai_vocal_gain_from_audio(audio: dict) -> float:
+    ui = audio.get('ai_vocal_ui')
+    if ui is not None:
+        return max(0.0, min(4.0, int(ui) / 100.0))
+    return max(0.0, min(4.0, float(audio.get('ai_vocal_gain', 1.0))))
+
+
 def inst_gain_from_config(config_store: ConfigStore) -> float:
     pf = config_store.get('pitchfix', {}) or {}
     if pf.get('inst_gain') is not None:
@@ -80,9 +87,11 @@ class AudioService:
             cfg.block_ms = int(audio.get('passthrough_block_ms', 50))
             cfg.reverb_mix = float(audio.get('reverb_mix', 0.35))
             cfg.reverb_decay = float(audio.get('reverb_decay', 0.72))
+            cfg.passthrough_gain = passthrough_gain_from_audio(audio)
         elif mode in ('ai_sing', 'ai_follow'):
             pf = self.config_store.get('pitchfix', {}) or {}
             cfg.block_ms = int(pf.get('block_ms', audio.get('passthrough_block_ms', 50)))
+            cfg.ai_vocal_gain = ai_vocal_gain_from_audio(audio)
         return cfg
 
     def load_stream_config(self) -> AudioStreamConfig:
@@ -101,6 +110,7 @@ class AudioService:
             ring_ms=int(audio.get('ring_ms', 500)),
             passthrough=bool(audio.get('passthrough', False)),
             passthrough_gain=passthrough_gain_from_audio(audio),
+            ai_vocal_gain=ai_vocal_gain_from_audio(audio),
             passthrough_reverb=False,
             reverb_mix=float(audio.get('reverb_mix', 0.35)),
             reverb_decay=float(audio.get('reverb_decay', 0.72)),

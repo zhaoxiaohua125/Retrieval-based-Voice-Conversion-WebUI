@@ -170,13 +170,34 @@ class PlaybackPage(QWidget):
         self.slider_inst.valueChanged.connect(self._on_inst_volume)
         progress_row.addWidget(self.slider_inst)
         progress_row.addWidget(self.lbl_inst_vol)
+        progress_row.addWidget(QLabel('AI人声'))
+        self.slider_ai_vocal = QSlider(Qt.Orientation.Horizontal)
+        self.slider_ai_vocal.setRange(0, 400)
+        self.slider_ai_vocal.setFixedWidth(96)
+        self.slider_ai_vocal.setToolTip(
+            'AI 直播人声 0～400%，与普通说话同一刻度，实时生效。\n'
+            '超过 100% 时仅直播(Aux)变响，耳机(VAIO)封顶 100%。'
+        )
+        self.lbl_ai_vocal = QLabel('100')
+        self.lbl_ai_vocal.setMinimumWidth(28)
+        self.lbl_ai_vocal.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.slider_ai_vocal.valueChanged.connect(self._on_ai_vocal_volume)
+        progress_row.addWidget(self.slider_ai_vocal)
+        progress_row.addWidget(self.lbl_ai_vocal)
         center_layout.addLayout(progress_row)
-        pf = ConfigStore().load().get('pitchfix', {}) or {}
+        cfg = ConfigStore().load()
+        pf = cfg.get('pitchfix', {}) or {}
+        audio = cfg.get('audio', {}) or {}
         inst_ui = int(pf['inst_ui']) if 'inst_ui' in pf else int(round(float(pf.get('inst_gain', 0.77)) * 100))
         self.slider_inst.blockSignals(True)
         self.slider_inst.setValue(inst_ui)
         self.lbl_inst_vol.setText(str(inst_ui))
         self.slider_inst.blockSignals(False)
+        ai_vocal_ui = int(audio.get('ai_vocal_ui', 100))
+        self.slider_ai_vocal.blockSignals(True)
+        self.slider_ai_vocal.setValue(max(0, min(400, ai_vocal_ui)))
+        self.lbl_ai_vocal.setText(str(self.slider_ai_vocal.value()))
+        self.slider_ai_vocal.blockSignals(False)
 
         ctrl = QHBoxLayout()
         ctrl.addStretch()
@@ -465,6 +486,10 @@ class PlaybackPage(QWidget):
     def _on_inst_volume(self, v: int):
         self.lbl_inst_vol.setText(str(v))
         self.bridge.emit_action('playback_ai_follow_mix', inst_ui=int(v), inst_gain=float(v) / 100.0)
+
+    def _on_ai_vocal_volume(self, v: int):
+        self.lbl_ai_vocal.setText(str(v))
+        self.bridge.emit_action('playback_ai_vocal_mix', ai_vocal_ui=int(v), ai_vocal_gain=round(v / 100.0, 3))
 
     def _on_transport(self):
         self.bridge.emit_action('playback_transport')

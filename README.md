@@ -3242,3 +3242,85 @@ ewrite；扩展 LyricWord 与字级 matcher
 - **完成的主要任务**: 查日志定位 AI 监听误选 Realtek Digital Output(23) 而非 VAIO Input(22)；改回 auto 优先 VAIO；监听流打开失败时自动 fallback
 - **关键决策与解决方案**: 用户耳机经 Voicemeeter A1 监听，直连物理声卡无效；须与 talk 同走 VAIO Input
 - **修改的文件列表**: app/audio/devices.py、app/audio/stream_manager.py、app/ui/settings_dialog.py、README.md
+
+---
+
+## 会话总结 - 2026-08-20（模式切换后直播音量偏小）
+
+- **会话主要目的**: 普通说话→AI 唱歌→普通说话后，直播间听感变小
+- **完成的主要任务**: 离开 talk 时快照 `_talk_inst_gain`，从 AI 回到 talk 时恢复；AI↔talk 切换清空 output/monitor 环缓并重置淡出；回到 talk 强制刷新 `passthrough_gain`
+- **关键决策与解决方案**: AI 与 talk 共用 pitchfix 伴奏滑块，AI 常设 0 导致回 talk 后直播无伴奏；快照隔离两模式伴奏增益
+- **修改的文件列表**: app/audio/stream_manager.py、app/audio/service.py、README.md
+
+---
+
+## 会话总结 - 2026-08-20（双路监听终版文档）
+
+- **会话主要目的**: 双路监听验收通过后，整理最终实现并写入开发大纲
+- **完成的主要任务**: 开发大纲新增「双路监听（已验收）」专节：软件双 OutputStream、按模式分混音、VM 条带路由、配置项与踩坑；更新联调表与任务 3 模块说明
+- **关键决策与解决方案**: 直播 Aux→B1（talk 含干声/AI 完整混音）；监听 VAIO→A1（talk 仅伴奏/AI 完整混音）；AUX 只 B1、VAIO 只 A1
+- **修改的文件列表**: 开发大纲.md、README.md
+
+---
+
+## 会话总结 - 2026-08-20（AI 直播人声音量）
+
+- **会话主要目的**: AI 唱歌/跟唱直播人声可独立调节，与普通人说话音量对齐
+- **完成的主要任务**: 新增 `ai_vocal_ui`（0～400%）播放条+设置页滑块；AI 混音改用人声优先（复用 `_mix_talk`），去掉 `_normalize_peak` 压满
+- **关键决策与解决方案**: 原 AI 混音 normalize 导致电平恒满、与 mic 说话听感不一致；AI 直播人声与普通说话音量分开配置
+- **修改的文件列表**: app/audio/stream_manager.py、app/audio/service.py、app/config_store.py、app/ui/pages/playback_page.py、app/ui/settings_dialog.py、app/integration/controller.py、开发大纲.md、README.md
+
+---
+
+## 会话总结 - 2026-08-20（AI 高音量耳机回响）
+
+- **会话主要目的**: AI人声 400% 时耳机出现回响；200/400 听感曾相同（自动压限）
+- **完成的主要任务**: AI 专用 `_mix_ai_live` 线性增益；ai_vocal 改 ui/100；>100% 时直播全量、耳机 VAIO 仅伴奏防叠音
+- **关键决策与解决方案**: 高 AI 人声同时走 Aux+VAIO 易在 A1 叠音；与普通说话一致，超 100% 监听路不含 AI 人声
+- **修改的文件列表**: app/audio/stream_manager.py、app/audio/service.py、app/ui/pages/playback_page.py、app/ui/settings_dialog.py、开发大纲.md、README.md
+
+---
+
+## 会话总结 - 2026-08-20（AI 伴奏耳机回响）
+
+- **会话主要目的**: AI 人声回响修好后，耳机里伴奏也有回响
+- **完成的主要任务**: AI 唱歌/跟唱关闭 VAIO 监听路，仅 Aux 单路输出；文档说明 AI 戴耳机用 AUX 勾 A1+B1 同源
+- **关键决策与解决方案**: 伴奏同时从 Aux+VAIO 进 A1 会叠音；AI 与普通说话分路，AI 不再送 VAIO
+- **修改的文件列表**: app/audio/stream_manager.py、app/ui/settings_dialog.py、app/ui/pages/playback_page.py、开发大纲.md、README.md
+
+---
+
+## 会话总结 - 2026-08-20（AI 耳机恢复无回响）
+
+- **会话主要目的**: 关 VAIO 后 AI 耳机无声，需恢复监听且保持无叠音回响
+- **完成的主要任务**: 恢复 AI 模式 VAIO 监听完整混音；AI人声>100% 时耳机路径增益封顶 100%、直播仍可调至 400%
+- **关键决策与解决方案**: 无回响靠 VM 分路（AUX 只 B1、VAIO 只 A1、AUX 勿勾 A1）；不需用户 AUX 勾 A1
+- **修改的文件列表**: app/audio/stream_manager.py、app/ui/settings_dialog.py、app/ui/pages/playback_page.py、开发大纲.md、README.md
+
+---
+
+## 会话总结 - 2026-08-20（回音确认为 VM 误勾 A1）
+
+- **会话主要目的**: 用户确认 AI 双路监听暂正常；回溯早前伴奏/人声回响原因
+- **完成的主要任务**: 无代码改动；确认 AUX 误勾 A1 会导致 Aux+VAIO 叠进耳机产生回响
+- **关键决策与解决方案**: 固定路由 AUX 只 B1、VAIO 只 A1、H1 只 B2 即可稳定使用当前软件双路方案
+- **修改的文件列表**: README.md
+
+---
+
+## 会话总结 - 2026-08-20（AI/说话直播音量刻度对齐）
+
+- **会话主要目的**: AI 人声 400% 明显响于普通说话 400%，同刻度听感不一致
+- **完成的主要任务**: AI 直播路 RVC 干声先归一化至 25% 峰值再乘增益，并复用 `_mix_talk` 自动补增益/限幅；耳机监听仍走 `_mix_ai_live`
+- **关键决策与解决方案**: RVC 预渲染干声电平远高于麦克风干声，旧 `_mix_ai_live` 线性放大导致 AI 400% 过响；现与普通说话共用直播混音逻辑，400% 目标电平一致
+- **使用的技术栈**: numpy 混音、sounddevice 双路输出
+- **修改的文件列表**: app/audio/stream_manager.py、app/ui/settings_dialog.py、app/ui/pages/playback_page.py、README.md
+
+---
+
+## 会话总结 - 2026-08-20（修复 AI 直播呲呲电流声）
+
+- **会话主要目的**: 音量对齐改动后出现呲呲呲电流声
+- **完成的主要任务**: 去掉每 100ms 音频块单独峰值归一化及 `_mix_talk` 自动补增益；改为加载 RVC 干声时记录整轨峰值，直播路用固定比例缩放 + `_mix_ai_live` 整段限幅
+- **关键决策与解决方案**: 分块增益突变会放大底噪并产生 zipper noise；整轨校准增益稳定，仅混音后峰值>1 时归一
+- **修改的文件列表**: app/audio/stream_manager.py、README.md

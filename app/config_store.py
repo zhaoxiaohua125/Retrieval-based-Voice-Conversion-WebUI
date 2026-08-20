@@ -46,6 +46,8 @@ DEFAULT_CONFIG = {
         'passthrough': False,
         'passthrough_gain': 2.0,
         'passthrough_ui': 100,
+        'ai_vocal_gain': 1.0,
+        'ai_vocal_ui': 100,
         'passthrough_block_ms': 50,
         'reverb_mix': 0.35,
         'reverb_decay': 0.72,

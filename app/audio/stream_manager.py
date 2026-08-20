@@ -16,6 +16,7 @@ from app.audio.ring_buffer import RingBuffer
 logger = logging.getLogger('rvc_client.audio')
 
 PLAYBACK_MODES = ('normal_talk', 'reverb_talk', 'ai_sing', 'ai_follow')
+AI_LIVE_VOCAL_HEADROOM = 0.25
 
 
 def _cfg_gain(val, default: float) -> float:
@@ -37,6 +38,7 @@ class AudioStreamConfig:
     ring_ms: int = 500
     passthrough: bool = False
     passthrough_gain: float = 2.0
+    ai_vocal_gain: float = 1.0
     passthrough_reverb: bool = False
     reverb_mix: float = 0.35
     reverb_decay: float = 0.72
@@ -86,6 +88,7 @@ class AudioStreamManager:
         self._inst_path = ''
         self._ref_vocal_data = None
         self._ref_vocal_path = ''
+        self._ref_vocal_peak = 1.0
         self._voice_gate = 0.0
         self._voice_gate_smooth = 0.0
         self._voice_on_at = None
@@ -98,6 +101,7 @@ class AudioStreamManager:
         self._clock_origin_mono = 0.0
         self._out_latency = 0.05
         self._clock_active = False
+        self._talk_inst_gain = None
         self._stats = {'callbacks': 0, 'underruns': 0, 'input_overflow': 0, 'restarts': 0}
 
     @property
@@ -201,6 +205,7 @@ class AudioStreamManager:
         with self._lock:
             self._ref_vocal_data = mono
             self._ref_vocal_path = str(Path(path).resolve())
+            self._ref_vocal_peak = max(float(np.max(np.abs(mono))) if mono.size else 1.0, 1e-3)
 
     def clear_instrumental(self):
         with self._lock:
@@ -216,6 +221,7 @@ class AudioStreamManager:
         with self._lock:
             self._ref_vocal_data = None
             self._ref_vocal_path = ''
+            self._ref_vocal_peak = 1.0
 
     def seek_instrumental(self, seconds: float):
         with self._lock:
@@ -265,10 +271,27 @@ class AudioStreamManager:
         """seek_sec=None 表示同曲热切换时保持当前进度（勿标成 float，Cython 会拒收 None）。"""
         prev_mode = self.config.playback_mode
         prev_reverb = self.config.passthrough_reverb
+        talk_modes = ('normal_talk', 'reverb_talk')
+        ai_modes = ('ai_sing', 'ai_follow')
+        if prev_mode in talk_modes and cfg.playback_mode in ai_modes:
+            self._talk_inst_gain = float(self.config.inst_gain)
+        if cfg.playback_mode in talk_modes and self._talk_inst_gain is not None:
+            cfg.inst_gain = self._talk_inst_gain
+        if (prev_mode in ai_modes) != (cfg.playback_mode in ai_modes):
+            self.output_ring.clear()
+            if self._monitor_ring is not None:
+                self._monitor_ring.clear()
+            self._last_out.fill(0)
+            self._monitor_last_out.fill(0)
+        if prev_mode in ai_modes and cfg.playback_mode in talk_modes:
+            self.clear_ref_vocal()
+            with self._gate_lock:
+                self._voice_gate_smooth = 0.0
         self.config.playback_mode = cfg.playback_mode
         self.config.passthrough = cfg.passthrough
         self.config.passthrough_reverb = cfg.passthrough_reverb
         self.config.passthrough_gain = cfg.passthrough_gain
+        self.config.ai_vocal_gain = cfg.ai_vocal_gain
         self.config.reverb_mix = cfg.reverb_mix
         self.config.reverb_decay = cfg.reverb_decay
         self.config.inst_gain = cfg.inst_gain
@@ -304,6 +327,11 @@ class AudioStreamManager:
             with self._gate_lock:
                 self._voice_gate = 1.0 if cfg.playback_mode == 'ai_sing' else 0.0
         self._sync_monitor_stream()
+        if prev_mode != cfg.playback_mode and cfg.playback_mode in talk_modes:
+            logger.info(
+                'mode %s->%s live gain=%.2f inst=%.2f talk_inst=%s',
+                prev_mode, cfg.playback_mode, self.config.passthrough_gain, self.config.inst_gain, self._talk_inst_gain,
+            )
         return self
 
     def _smooth_follow_gate(self) -> float:
@@ -596,6 +624,29 @@ class AudioStreamManager:
             mix = mix / peak
         return np.clip(mix, -1.0, 1.0).astype(np.float32)
 
+    def _mix_ai_live(self, vocal: np.ndarray, inst: np.ndarray, ig: float, live_limit: bool = False) -> np.ndarray:
+        """AI 混音；live_limit 时仅对整段混音做峰值归一，避免分块归一化产生呲呲声。"""
+        voice = vocal
+        if self._inst_data is None or ig <= 0:
+            mix = voice
+        else:
+            music = inst.reshape(-1, 1) * ig
+            v_peak = float(np.max(np.abs(voice))) if voice.size else 0.0
+            m_peak = float(np.max(np.abs(music))) if music.size else 0.0
+            if v_peak > 0 and m_peak > 0 and v_peak + m_peak > 1.0:
+                mix = voice + music * max(0.0, (1.0 - v_peak) / m_peak)
+            else:
+                mix = voice + music
+        if live_limit:
+            peak = float(np.max(np.abs(mix))) if mix.size else 0.0
+            if peak > 1.0:
+                mix = mix / peak
+        return np.clip(mix, -1.0, 1.0).astype(np.float32)
+
+    def _ai_live_vocal(self, ref: np.ndarray, gain: float) -> np.ndarray:
+        scale = AI_LIVE_VOCAL_HEADROOM / max(self._ref_vocal_peak, 1e-3)
+        return ref.reshape(-1, 1).astype(np.float32) * gain * scale
+
     def _mix_output(self, frames: int, mono_in: np.ndarray, inst=None, ref=None, for_monitor: bool = False) -> np.ndarray:
         mode = self.config.playback_mode or ('reverb_talk' if self.config.passthrough_reverb else 'normal_talk' if self.config.passthrough else '')
         if inst is None or ref is None:
@@ -611,17 +662,25 @@ class AudioStreamManager:
                     boosted[:, 0] = self._reverb_mono(boosted)
             return self._mix_talk(boosted, inst, ig, for_monitor)
         if mode == 'ai_sing':
-            mg = _cfg_gain(self.config.mic_gain, 0.77)
-            mix = inst.reshape(-1, 1) * ig + ref.reshape(-1, 1) * mg
-        elif mode == 'ai_follow':
+            vg = _cfg_gain(self.config.ai_vocal_gain, 1.0)
+            vocal = ref.reshape(-1, 1).astype(np.float32)
+            if for_monitor:
+                return self._mix_ai_live(vocal * min(vg, 1.0), inst, ig)
+            return self._mix_ai_live(self._ai_live_vocal(ref, vg), inst, ig, live_limit=True)
+        if mode == 'ai_follow':
             gate = self._smooth_follow_gate()
             mg = _cfg_gain(self.config.mic_gain, 0.77)
             rg = _cfg_gain(self.config.ref_vocal_gain, 0.0)
-            vocal = ref.reshape(-1, 1)
-            mix = inst.reshape(-1, 1) * ig + vocal * gate * mg + vocal * rg
-        else:
-            return np.zeros((frames, 1), dtype=np.float32)
-        return self._normalize_peak(mix)
+            vg = _cfg_gain(self.config.ai_vocal_gain, 1.0)
+            vocal = ref.reshape(-1, 1).astype(np.float32)
+            if for_monitor:
+                vg = min(vg, 1.0)
+                boosted = vocal * vg * gate * mg + vocal * rg
+                return self._mix_ai_live(boosted, inst, ig)
+            scaled = self._ai_live_vocal(ref, 1.0)
+            boosted = scaled * vg * gate * mg + scaled * rg
+            return self._mix_ai_live(boosted, inst, ig, live_limit=True)
+        return np.zeros((frames, 1), dtype=np.float32)
 
     def _close_stream(self, stream=None):
         if stream is None:
@@ -664,7 +723,7 @@ class AudioStreamManager:
                 inst, ref = self._read_song_frames(frames)
                 self.output_ring.write(self._mix_output(frames, mono_in, inst, ref, for_monitor=False))
                 if self._monitor_ring is not None:
-                    mon_mix = self._mix_output(frames, mono_in, inst, ref, for_monitor=mode in ('normal_talk', 'reverb_talk'))
+                    mon_mix = self._mix_output(frames, mono_in, inst, ref, for_monitor=True)
                     self._monitor_ring.write(mon_mix)
             need = outdata.shape[0]
             chunk = self.output_ring.read(need)
