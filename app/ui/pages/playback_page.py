@@ -1,6 +1,7 @@
 """播放 Tab：歌库 + 歌词显示 + AI 唱歌控制。"""
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor
 from PyQt6.QtWidgets import (
     QButtonGroup,
     QHBoxLayout,
@@ -29,6 +30,17 @@ def _fmt_time(sec: float) -> str:
     return '%02d:%02d' % (m, s)
 
 
+def _now_play_icon() -> QIcon:
+    pm = QPixmap(4, 18)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(QColor('#2563eb'))
+    p.drawRoundedRect(0, 2, 4, 14, 1, 1)
+    p.end()
+    return QIcon(pm)
+
+
 class PlaybackPage(QWidget):
     """对标 SoundTrail「播放」页，优先完成 AI 唱歌。"""
 
@@ -48,6 +60,8 @@ class PlaybackPage(QWidget):
         self._lib_tab = 'sing'
         self._row_by_tab = {'sing': -1, 'inst': -1}
         self._selected = None
+        self._now_play_key = ''
+        self._now_play_icon = _now_play_icon()
         self._switching = False
         self._mode = 'idle'
         self._build_ui()
@@ -91,6 +105,8 @@ class PlaybackPage(QWidget):
         self.search_box.textChanged.connect(self._filter_songs)
         lib_layout.addWidget(self.search_box)
         self.song_list = QListWidget()
+        self.song_list.setIconSize(QSize(4, 18))
+        self.song_list.setStyleSheet('QListWidget::item{padding-left:2px;}')
         self.song_list.setToolTip('双击切换歌曲；右键可删除')
         self.song_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.song_list.customContextMenuRequested.connect(self._on_song_context_menu)
@@ -241,6 +257,21 @@ class PlaybackPage(QWidget):
         self._lyric_row = -1
         self._pump()
 
+    def _song_key(self, song) -> str:
+        if not song:
+            return ''
+        return '%s|%s' % (song.get('id') or song.get('play_path') or '', song.get('library_type') or '')
+
+    def _sync_now_playing_mark(self):
+        key = self._now_play_key
+        empty = QIcon()
+        for row in range(self.song_list.count()):
+            item = self.song_list.item(row)
+            if not item:
+                continue
+            song = item.data(Qt.ItemDataRole.UserRole) or {}
+            item.setIcon(self._now_play_icon if key and self._song_key(song) == key else empty)
+
     def apply_library(self, songs: list, inst_songs: list | None = None, auto_select: bool = True):
         keep = self._selected
         self._songs_sing = list(songs or [])
@@ -297,6 +328,7 @@ class PlaybackPage(QWidget):
             item.setData(Qt.ItemDataRole.UserRole, song)
             self.song_list.addItem(item)
         self.song_list.blockSignals(False)
+        self._sync_now_playing_mark()
         if auto_select and self.song_list.count() and self.song_list.currentRow() < 0:
             self.select_initial_song()
 
@@ -365,12 +397,16 @@ class PlaybackPage(QWidget):
     ):
         if row < 0:
             self._selected = None
+            self._now_play_key = ''
+            self._sync_now_playing_mark()
             return
         item = self.song_list.item(row)
         if not item:
             return
         song = item.data(Qt.ItemDataRole.UserRole) or {}
         self._selected = song
+        self._now_play_key = self._song_key(song)
+        self._sync_now_playing_mark()
         if show_switching:
             self.set_song_switching(True, song.get('title', '未命名'))
         elif not self._switching:
@@ -618,7 +654,9 @@ class PlaybackPage(QWidget):
 
     def clear_current_song(self):
         self._selected = None
+        self._now_play_key = ''
         self._switching = False
+        self._sync_now_playing_mark()
         self.song_list.setEnabled(True)
         self.search_box.setEnabled(True)
         self.btn_refresh.setEnabled(True)

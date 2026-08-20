@@ -3129,13 +3129,10 @@ ewrite；扩展 LyricWord 与字级 matcher
 
 ---
 
-## 会话总结 - 2026-08-20（桌面歌词不跟随主歌词）
+## 会话总结 - 2026-08-20（歌库当前播放标识）
 
-- **会话主要目的**: 播放时主界面歌词正常滚动，桌面歌词不再随主歌词变动
-- **完成的主要任务**:
-  1. 定位根因：`playback-tick` 后台线程直接调用 `LyricsWindowProxy.set_lyric_tick`，`QLocalSocket` 必须在主线程写入
-  2. 独立进程桌面歌词改为经 scheduler → UI 线程 bridge 转发 tick（与主界面同路径）
-  3. `LyricsWindowProxy` 禁用 `tick_handler` 直连，避免跨线程 IPC 写入
-- **关键决策与解决方案**: 主界面 tick 走 Qt signal 线程安全；IPC Proxy 无 signal 包装，须主线程 send
-- **使用的技术栈**: PyQt6 QLocalSocket 线程约束、scheduler STATUS 总线
-- **修改的文件列表**: scripts/run_ui_skeleton.py、app/integration/controller.py、README.md
+- **会话主要目的**: 歌库列表中当前加载/播放的歌曲左侧增加颜色标识，便于快速识别
+- **完成的主要任务**: 歌库 `QListWidget` 为当前歌曲项设置蓝色竖条 icon（`#2563eb`），切歌、刷新、删除后同步更新
+- **关键决策与解决方案**: 用 `QListWidgetItem.setIcon` + 窄 pixmap 实现左侧色条，避免自定义 Delegate
+- **使用的技术栈**: PyQt6 QIcon / QPixmap
+- **修改的文件列表**: app/ui/pages/playback_page.py、README.md
