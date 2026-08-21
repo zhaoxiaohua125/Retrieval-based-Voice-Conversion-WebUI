@@ -254,6 +254,7 @@ class ClientController:
             'skip_update': self._skip_update,
             'settings_save': self._save_settings,
             'audio_test_mic': self._test_mic,
+            'audio_after_device_reload': lambda p: self._restart_playback_after_device_change(),
         }
         handler = handlers.get(action)
         if handler is None:

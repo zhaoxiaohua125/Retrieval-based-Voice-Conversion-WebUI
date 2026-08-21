@@ -1,6 +1,7 @@
 """系统设置：侧栏 Tab + 音频/播放/歌词/常规/快捷键。"""
 
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QShowEvent
 from PyQt6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -32,6 +33,8 @@ from app.audio.devices import (
     pick_monitor_default,
     pick_voicemeeter_defaults,
     resolve_device_index,
+    vm_default_echo_risk,
+    refresh_portaudio,
 )
 from app.config_store import ConfigStore
 from app.integration.controller import PLAY_MODE_LABELS, PLAY_MODES
@@ -76,6 +79,11 @@ class SettingsDialog(QDialog):
         self._build_ui()
         self._load_values()
         self._reload_devices()
+
+    def showEvent(self, event: QShowEvent):
+        super().showEvent(event)
+        if hasattr(self, 'lbl_vm_default_warn'):
+            self.lbl_vm_default_warn.setText(vm_default_echo_risk(self._hostapi_filter()) or '')
 
     def _build_ui(self):
         outer = QHBoxLayout(self)
@@ -170,7 +178,8 @@ class SettingsDialog(QDialog):
             self.cmb_monitor.setToolTip(
                 '双路输出：直播走「输出设备 Aux→B1」，耳机走「监听设备 VAIO→A1」。\n'
                 '普通/混响：耳机仅伴奏；AI 唱歌/跟唱：耳机为完整混音（>100% 时耳机音量封顶 100%）。\n'
-                'AUX 只勾 B1、VAIO 只勾 A1，AUX 勿勾 A1。'
+                'AUX 只勾 B1、VAIO 只勾 A1，AUX 勿勾 A1。\n'
+                'Windows 系统默认播放请设 Realtek 等物理声卡，勿设 VoiceMeeter Input。'
             )
             form.addRow('监听设备（耳机）', self.cmb_monitor)
             self.chk_dual_monitor = QCheckBox('双路监听（普通/混响说话时耳机不含干声）')
@@ -180,6 +189,10 @@ class SettingsDialog(QDialog):
             )
             form.addRow('', self.chk_dual_monitor)
             self.chk_dual_monitor.toggled.connect(lambda on: self.cmb_monitor.setEnabled(on))
+            self.lbl_vm_default_warn = QLabel('')
+            self.lbl_vm_default_warn.setWordWrap(True)
+            self.lbl_vm_default_warn.setStyleSheet('color:#E65100;font-size:12px;')
+            form.addRow('', self.lbl_vm_default_warn)
             layout.addLayout(form)
             sr_row = QHBoxLayout()
             self.btn_reload = QPushButton('重载设备列表')
@@ -713,6 +726,8 @@ class SettingsDialog(QDialog):
         return data if data else None
 
     def _reload_devices(self):
+        refresh_portaudio()
+        self.bridge.emit_action('audio_after_device_reload')
         hostapi = self._hostapi_filter()
         devices = list_devices(hostapi=hostapi)
         in_ref = self.config.get('audio.input_device')
@@ -781,6 +796,12 @@ class SettingsDialog(QDialog):
         self.cmb_monitor.setCurrentIndex(sel_mon if sel_mon >= 0 else 0)
         self.cmb_monitor.blockSignals(False)
         self.cmb_monitor.setEnabled(self.chk_dual_monitor.isChecked())
+        risk = vm_default_echo_risk(hostapi)
+        self.lbl_vm_default_warn.setText(risk or '')
+        if risk:
+            self.lbl_vm_default_warn.setToolTip('若刚修改 Windows 默认播放设备，点「重载设备列表」刷新；播放中会短暂重启音频流。')
+        else:
+            self.lbl_vm_default_warn.setToolTip('')
         self._sync_device_sample_rate_hint()
 
     def _sync_sr_controls(self):

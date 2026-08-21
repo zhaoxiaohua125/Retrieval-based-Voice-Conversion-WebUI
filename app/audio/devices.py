@@ -176,6 +176,104 @@ def _is_vm_or_cable(dev: AudioDeviceInfo) -> bool:
     return 'voicemeeter' in dev.tags or 'vb_cable' in dev.tags
 
 
+def normalize_device_name(name: str) -> str:
+    return ''.join(ch for ch in (name or '').lower() if ch.isalnum())
+
+
+def is_vm_vaio_playback_name(name: str) -> bool:
+    lower = (name or '').lower()
+    if 'voicemeeter' not in lower or 'aux' in lower:
+        return False
+    return 'input' in lower and ('voicemeeter input' in lower or 'vaio' in lower)
+
+
+def refresh_portaudio():
+    """仅在没有打开音频流时调用；运行中 terminate 会导致四模式全部无声。"""
+    try:
+        import sounddevice as sd
+        sd._terminate()
+        sd._initialize()
+    except Exception:
+        pass
+
+
+def windows_default_playback_name(hostapi: str | None = None, refresh: bool = False) -> str | None:
+    """读取系统默认播放设备名称；refresh=True 时先刷新 PortAudio（改系统默认后须刷新）。"""
+    if refresh:
+        refresh_portaudio()
+    try:
+        import sounddevice as sd
+        if hostapi:
+            for api in sd.query_hostapis():
+                if api.get('name') == hostapi:
+                    idx = api.get('default_output_device', -1)
+                    if isinstance(idx, int) and idx >= 0:
+                        return str(sd.query_devices(idx).get('name', '') or '').strip() or None
+                    break
+        default = sd.default.device
+        idx = int(default[1])
+        if idx >= 0:
+            return str(sd.query_devices(idx).get('name', '') or '').strip() or None
+    except Exception:
+        pass
+    return None
+
+
+def windows_default_output_index(hostapi: str | None = None) -> int | None:
+    try:
+        import sounddevice as sd
+        if hostapi:
+            for api in sd.query_hostapis():
+                if api.get('name') == hostapi:
+                    idx = api.get('default_output_device', -1)
+                    if isinstance(idx, int) and idx >= 0:
+                        return idx
+                    break
+        default = sd.default.device
+        idx = int(default[1])
+        return idx if idx >= 0 else None
+    except Exception:
+        return None
+
+
+def device_names_match(a: str, b: str) -> bool:
+    if not a or not b:
+        return False
+    if a.strip().lower() == b.strip().lower():
+        return True
+    return normalize_device_name(a) == normalize_device_name(b)
+
+
+def is_vm_vaio_output_device(dev: AudioDeviceInfo | None) -> bool:
+    if dev is None:
+        return False
+    if dev.voicemeeter_role in ('voicemeeter_vaio_in', 'voicemeeter_vaio3_in'):
+        return True
+    return is_vm_vaio_playback_name(dev.name)
+
+
+def vm_default_echo_risk(hostapi: str | None = None, refresh: bool = False) -> str | None:
+    """Windows 默认播放为 VoiceMeeter VAIO 时，与客户端监听叠音易导致直播 B1 回响。"""
+    name = windows_default_playback_name(hostapi, refresh=refresh)
+    if not name or not is_vm_vaio_playback_name(name):
+        return None
+    return (
+        'Windows 默认播放设备为「%s」。请改为 Realtek 等物理声卡；'
+        'Voicemeeter 仅由客户端 Aux/VAIO 路由，否则 AI 唱歌时直播间 B1 易回响。'
+    ) % name
+
+
+def should_skip_monitor_for_vm_default(want_dev_idx: int | None, hostapi: str | None, refresh: bool = False) -> bool:
+    if not is_vm_vaio_playback_name(windows_default_playback_name(hostapi, refresh=refresh) or ''):
+        return False
+    items = list_devices(hostapi=hostapi)
+    mon = next((d for d in items if d.index == want_dev_idx), None)
+    if mon is None:
+        return False
+    def_name = windows_default_playback_name(hostapi, refresh=refresh) or ''
+    return is_vm_vaio_output_device(mon) or device_names_match(mon.name, def_name)
+
+
 def pick_direct_headphone_default(devices: list[AudioDeviceInfo] | None, stream_out_idx: int | None):
     """AI 监听：直连物理耳机/扬声器，不经 Voicemeeter 虚拟输入，避免与 Aux 叠进 B1。"""
     items = devices if devices is not None else list_devices()
@@ -187,7 +285,10 @@ def pick_direct_headphone_default(devices: list[AudioDeviceInfo] | None, stream_
         import sounddevice as sd
 
         default = sd.default.device
-        idx = default[1] if isinstance(default, (list, tuple)) and len(default) > 1 else default
+        try:
+            idx = default[1]
+        except (TypeError, IndexError, KeyError):
+            idx = default
         if isinstance(idx, int) and idx >= 0:
             dev = next((d for d in items if d.index == idx), None)
             if dev and ok_out(dev):

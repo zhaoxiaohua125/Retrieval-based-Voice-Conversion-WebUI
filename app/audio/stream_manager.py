@@ -324,7 +324,7 @@ class AudioStreamManager:
             with self._gate_lock:
                 self._voice_gate = 1.0 if new_mode == 'ai_sing' else 0.0
         cross_ai_talk = (prev_mode in ai_modes) != (new_mode in ai_modes)
-        if cross_ai_talk:
+        if cross_ai_talk or (new_mode in ai_modes and prev_mode != new_mode):
             self.output_ring.clear()
             if self._monitor_ring is not None:
                 self._monitor_ring.clear()
@@ -424,6 +424,13 @@ class AudioStreamManager:
                 self._close_monitor_stream()
             return
         want_dev = self.resolve_monitor_device(self.config.output_device)
+        if want_dev is not None:
+            from app.audio.devices import should_skip_monitor_for_vm_default, vm_default_echo_risk
+            risk = vm_default_echo_risk(self.config.hostapi)
+            if risk:
+                logger.warning(risk)
+                if should_skip_monitor_for_vm_default(want_dev, self.config.hostapi):
+                    want_dev = None
         if want_dev is None or want_dev == self.config.output_device:
             if self._monitor_stream is not None:
                 self._close_monitor_stream()
@@ -770,6 +777,7 @@ class AudioStreamManager:
                 self._out_latency = 0.65 * self._out_latency + 0.35 * float(lat)
             mode = self.config.playback_mode
             talk = mode in ('normal_talk', 'reverb_talk')
+            ai = mode in ('ai_sing', 'ai_follow')
             if mode in PLAYBACK_MODES or self.config.passthrough:
                 inst, ref = self._read_song_frames(frames)
                 if talk:
@@ -781,7 +789,7 @@ class AudioStreamManager:
                 if self._monitor_ring is not None:
                     mon_mix = self._mix_output(frames, mono_in, inst, ref, for_monitor=True)
                     self._monitor_ring.write(mon_mix)
-                if talk:
+                if talk or ai:
                     self._write_outdata(outdata, live_mix)
                     return
                 self.output_ring.write(live_mix)

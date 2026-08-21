@@ -115,9 +115,9 @@
   },
   "pitchfix": {
     "strength": 0.85,
-    "inst_gain": 0.5,
+    "inst_gain": 0.33,
     "mic_gain": 1.5,
-    "inst_ui": 50,
+    "inst_ui": 33,
     "mic_ui": 150,
     "orig_ui": 0,
     "threshold": 100,
@@ -133,8 +133,8 @@
   },
   "ui": {
     "geometry": [
-      295,
-      318,
+      939,
+      307,
       1280,
       952
     ],
@@ -143,8 +143,8 @@
     "lyrics_window": {
       "orientation": "vertical",
       "geometry": [
-        1582,
-        287,
+        2226,
+        276,
         140,
         832
       ],
@@ -155,8 +155,8 @@
         166
       ],
       "geometry_v": [
-        1582,
-        287,
+        2226,
+        276,
         140,
         832
       ]

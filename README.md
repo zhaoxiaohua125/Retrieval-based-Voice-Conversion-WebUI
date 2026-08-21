@@ -3420,3 +3420,21 @@ ewrite；扩展 LyricWord 与字级 matcher
 - **完成的主要任务**: 打包改用 `pythonw.exe` 生成 `桌面歌词.exe`；歌词子进程启动统一加 `CREATE_NO_WINDOW`；开发脚本 `make_desktop_lyrics_exe.bat` 同步优先 pythonw
 - **关键决策与解决方案**: 黑窗因 `python.exe` 为控制台程序；pythonw 为无控制台 GUI 解释器，进程名仍可为「桌面歌词.exe」
 - **修改的文件列表**: app/ops/lyrics_ipc.py、scripts/build_client_package.py、scripts/make_desktop_lyrics_exe.bat、README.md
+
+---
+
+## 会话总结 - 2026-08-21（AI 回响根因：Windows 默认设备）
+
+- **会话主要目的**: AI 唱歌直播间仍有回响、耳机正常；用户发现默认播放改 Realtek 无回响、改 VoiceMeeter Input 有回响
+- **完成的主要任务**: 确认非打包引起；Windows 默认 VAIO 与客户端监听叠音致 B1 回响；增加 `vm_default_echo_risk` 检测、设置页橙色提示、默认 VAIO 时跳过监听路
+- **关键决策与解决方案**: VM 条带正确仍不够；系统默认应 Realtek，Voicemeeter 仅由客户端 Aux/VAIO 显式路由
+- **修改的文件列表**: app/audio/devices.py、app/audio/stream_manager.py、app/ui/settings_dialog.py、README.md
+
+---
+
+## 会话总结 - 2026-08-21（修复 AI 唱歌直播间回响）
+
+- **会话主要目的**: AI 唱歌时直播间有回响、耳机正常；打包后更明显
+- **完成的主要任务**: AI 唱歌/跟唱直播路改直通 outdata（与普通说话一致，不经 output_ring）；切入 AI 模式时清 ring 残响
+- **关键决策与解决方案**: 非打包脚本引起；昨天修 talk 时已直通直播，AI 仍走 ring 读写，双路下 Aux 直播与 ring 延迟叠进 B1 易回响；耳机只收 VAIO 故正常
+- **修改的文件列表**: app/audio/stream_manager.py、README.md
