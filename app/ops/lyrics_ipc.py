@@ -20,11 +20,17 @@ def resolve_lyrics_launcher(root: Path, config=None) -> str:
             return custom
     root = Path(root)
     exe_dir = Path(getattr(sys, 'executable', '') or '').resolve().parent
-    for base in (root, exe_dir):
+    for base in (root / 'python', exe_dir, root):
         for name in ('桌面歌词.exe', 'DesktopLyrics.exe'):
             p = base / name
             if p.is_file():
                 return str(p)
+    bundled = root / 'python' / 'pythonw.exe'
+    if bundled.is_file():
+        return str(bundled)
+    bundled = root / 'python' / 'python.exe'
+    if bundled.is_file():
+        return str(bundled)
     return sys.executable
 
 

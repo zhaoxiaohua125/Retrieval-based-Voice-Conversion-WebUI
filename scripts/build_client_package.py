@@ -85,27 +85,34 @@ def copy_tree(src: Path, dst: Path, manifest: dict, stats: dict):
 
 
 def ship_desktop_lyrics(out_dir: Path) -> bool:
-    """在包根目录生成/复制 桌面歌词.exe（独立进程名，供直播伴侣窗口采集）。"""
+    """在 python/ 下生成 桌面歌词.exe（与 python312.dll 同目录，供直播伴侣按进程名采集）。"""
     out_dir = Path(out_dir)
-    dst = out_dir / '桌面歌词.exe'
-    bundled_w = out_dir / 'python' / 'pythonw.exe'
-    bundled = bundled_w if bundled_w.is_file() else out_dir / 'python' / 'python.exe'
+    py_dir = out_dir / 'python'
+    stale = out_dir / '桌面歌词.exe'
+    if stale.is_file():
+        stale.unlink()
+    dst = py_dir / '桌面歌词.exe'
+    bundled_w = py_dir / 'pythonw.exe'
+    bundled = bundled_w if bundled_w.is_file() else py_dir / 'python.exe'
     if bundled.is_file():
         shutil.copy2(bundled, dst)
     elif (ROOT / '桌面歌词.exe').is_file():
+        if not py_dir.is_dir():
+            print('WARNING: 包内无 python/，无法生成 桌面歌词.exe')
+            return False
         shutil.copy2(ROOT / '桌面歌词.exe', dst)
     else:
         print('')
         print('WARNING: 包内无 桌面歌词.exe。CondaPack 完成后可执行：')
         print('  python scripts/build_client_package.py --ship-desktop-lyrics "%s"' % out_dir)
-        print('  或手动：copy python\\pythonw.exe 桌面歌词.exe')
+        print('  或手动：copy python\\pythonw.exe python\\桌面歌词.exe')
         return False
     ico = ROOT / 'assets' / 'desktop_lyrics.ico'
     rcedit = ROOT / 'scripts' / 'tools' / 'rcedit-x64.exe'
     if ico.is_file() and rcedit.is_file():
         import subprocess
         subprocess.run([str(rcedit), str(dst), '--set-icon', str(ico)], check=False)
-    print('  desktop lyrics: %s' % dst.name)
+    print('  desktop lyrics: python/%s' % dst.name)
     return True
 
 

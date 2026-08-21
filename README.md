@@ -3438,3 +3438,12 @@ ewrite；扩展 LyricWord 与字级 matcher
 - **完成的主要任务**: AI 唱歌/跟唱直播路改直通 outdata（与普通说话一致，不经 output_ring）；切入 AI 模式时清 ring 残响
 - **关键决策与解决方案**: 非打包脚本引起；昨天修 talk 时已直通直播，AI 仍走 ring 读写，双路下 Aux 直播与 ring 延迟叠进 B1 易回响；耳机只收 VAIO 故正常
 - **修改的文件列表**: app/audio/stream_manager.py、README.md
+
+---
+
+## 会话总结 - 2026-08-21（修复打包 桌面歌词.exe 缺 python312.dll）
+
+- **会话主要目的**: 客户机运行启动包报错：桌面歌词.exe 找不到 python312.dll
+- **完成的主要任务**: `桌面歌词.exe` 改生成在 `python/` 目录（与 python312.dll 同目录）；启动解析优先 `python/桌面歌词.exe`；删除包根目录旧 exe
+- **关键决策与解决方案**: 根目录 pythonw 副本找不到 python 目录内 DLL；CondaPack 运行时 DLL 仅在 python/ 下
+- **修改的文件列表**: scripts/build_client_package.py、app/ops/lyrics_ipc.py、app/ui/settings_dialog.py、README.md
