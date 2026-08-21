@@ -28,6 +28,12 @@ def resolve_lyrics_launcher(root: Path, config=None) -> str:
     return sys.executable
 
 
+def _lyrics_spawn_flags() -> int:
+    if sys.platform != 'win32':
+        return 0
+    return getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+
+
 class LyricsIpcServer(QObject):
     def __init__(self, root: str, config=None):
         super().__init__()
@@ -63,9 +69,8 @@ class LyricsIpcServer(QObject):
             return False
         launcher = resolve_lyrics_launcher(root, cfg)
         cmd = [launcher, str(script), '--ipc', self._key, '--root', str(root.resolve())]
-        flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0) if launcher.lower().endswith('python.exe') else 0
         try:
-            self._proc = subprocess.Popen(cmd, cwd=str(root), creationflags=flags)
+            self._proc = subprocess.Popen(cmd, cwd=str(root), creationflags=_lyrics_spawn_flags())
             return True
         except OSError:
             self._proc = None

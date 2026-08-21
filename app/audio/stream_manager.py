@@ -720,7 +720,7 @@ class AudioStreamManager:
             ratio = float(np.dot(x, o)) / on
             if abs(ratio) < 0.12:
                 continue
-            if abs(ratio) * (on ** 0.5) / (xn ** 0.5) > 0.22:
+            if ratio * ratio * on / xn > 0.0484:
                 out = out - o * ratio * 0.88
                 break
         return out.reshape(-1, 1).astype(np.float32)

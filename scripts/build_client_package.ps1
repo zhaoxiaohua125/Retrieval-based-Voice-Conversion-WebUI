@@ -107,6 +107,9 @@ if ($CondaPack) {
     Write-Host "Verify package..."
     & $bundledPy (Join-Path $Root "scripts\verify_client_package.py") $OutDir
     if ($LASTEXITCODE -ne 0) { throw "package verify failed" }
+    Write-Host "Ship desktop lyrics exe..."
+    & $EnvPython (Join-Path $Root "scripts\build_client_package.py") --ship-desktop-lyrics $OutDir
+    if ($LASTEXITCODE -ne 0) { throw "desktop lyrics exe ship failed" }
     Write-Host "Python runtime OK: $bundledPy"
     $variantFile = Join-Path $OutDir "GPU_VARIANT.txt"
     @(

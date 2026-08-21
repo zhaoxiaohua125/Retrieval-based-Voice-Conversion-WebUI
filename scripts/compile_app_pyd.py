@@ -149,7 +149,7 @@ def _write_launchers(scripts_dir: Path):
 
 def _copy_scripts_extra(out_scripts: Path):
     src_scripts = ROOT / 'scripts'
-    for name in ('resolve_launch_python.ps1', 'repair_bundled_torch.ps1'):
+    for name in ('resolve_launch_python.ps1', 'repair_bundled_torch.ps1', 'run_desktop_lyrics.py'):
         src = src_scripts / name
         if src.is_file():
             shutil.copy2(src, out_scripts / name)

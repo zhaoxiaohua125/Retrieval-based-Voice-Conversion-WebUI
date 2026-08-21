@@ -34,8 +34,8 @@
     "wasapi_exclusive": false,
     "ring_ms": 500,
     "passthrough": false,
-    "passthrough_gain": 6.0,
-    "passthrough_ui": 300,
+    "passthrough_gain": 4.42,
+    "passthrough_ui": 221,
     "ai_vocal_gain": 2.02,
     "ai_vocal_ui": 202,
     "passthrough_block_ms": 50,
@@ -119,10 +119,10 @@
     "mic_gain": 1.5,
     "inst_ui": 50,
     "mic_ui": 150,
-    "orig_ui": 100,
+    "orig_ui": 0,
     "threshold": 100,
     "attenuation_ui": 1,
-    "ref_vocal_gain": 1.0,
+    "ref_vocal_gain": 0.0,
     "follow_threshold": 100.0,
     "follow_attenuation": 0.1,
     "detune_mode": "off",
@@ -133,8 +133,8 @@
   },
   "ui": {
     "geometry": [
-      635,
-      307,
+      295,
+      318,
       1280,
       952
     ],
@@ -143,8 +143,8 @@
     "lyrics_window": {
       "orientation": "vertical",
       "geometry": [
-        1922,
-        276,
+        1582,
+        287,
         140,
         832
       ],
@@ -155,8 +155,8 @@
         166
       ],
       "geometry_v": [
-        1922,
-        276,
+        1582,
+        287,
         140,
         832
       ]

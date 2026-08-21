@@ -32,6 +32,11 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
+set "SRCW=%SRC:python.exe=pythonw.exe%"
+if exist "%SRCW%" (
+    copy /Y "%SRCW%" "桌面歌词.exe" >nul
+    echo 使用 pythonw.exe 生成（无黑窗控制台）
+)
 set "RCEDIT=%~dp0tools\rcedit-x64.exe"
 if not exist "%RCEDIT%" (
     echo 正在下载 rcedit 以嵌入 exe 图标...

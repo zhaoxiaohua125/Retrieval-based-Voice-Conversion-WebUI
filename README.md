@@ -3393,3 +3393,30 @@ ewrite；扩展 LyricWord 与字级 matcher
 - **完成的主要任务**: 移除切换后 3 块静音（`_switch_mute_blocks`）；同族切换（AI↔AI、说话↔说话）不再清空 output/monitor ring
 - **关键决策与解决方案**: 停顿主因是切换静音约 150～300ms；仅 AI↔说话跨族切换时清 ring 防残响，族内热切换保持连续输出
 - **修改的文件列表**: app/audio/stream_manager.py、README.md
+
+---
+
+## 会话总结 - 2026-08-21（修复打包 Cython 编译失败）
+
+- **会话主要目的**: 运行「打包演示客户端.bat」时 Cython 编译 `stream_manager.py` 失败
+- **完成的主要任务**: 修复 `_cancel_talk_loopback` 中 `** 0.5` 比较导致 `complex types are unordered` 的 Cython 兼容问题
+- **关键决策与解决方案**: 与桌面歌词无关；将 `abs(ratio)*sqrt(on)/sqrt(xn)>0.22` 等价改写为 `ratio*ratio*on/xn>0.0484`，避免 Cython 对幂运算类型推断为复数
+- **修改的文件列表**: app/audio/stream_manager.py、README.md
+
+---
+
+## 会话总结 - 2026-08-21（打包含桌面歌词.exe）
+
+- **会话主要目的**: 打包后 dist 缺少 `桌面歌词.exe`，咨询手动拷贝是否可行
+- **完成的主要任务**: 打包脚本自动复制/生成 `桌面歌词.exe`；pyd 模式补打 `scripts/run_desktop_lyrics.py`；CondaPack 后自动从 `python/python.exe` 生成并嵌图标
+- **关键决策与解决方案**: 手动拷贝到**包根目录**可行，但必须来自包内 `python/python.exe` 且需保留歌词启动脚本；已集成进 `build_client_package.py` / `.ps1`
+- **修改的文件列表**: scripts/build_client_package.py、scripts/build_client_package.ps1、scripts/compile_app_pyd.py、README.md
+
+---
+
+## 会话总结 - 2026-08-21（隐藏桌面歌词黑窗）
+
+- **会话主要目的**: 打包后桌面歌词可调起，但伴随黑色控制台窗，关闭后歌词也消失
+- **完成的主要任务**: 打包改用 `pythonw.exe` 生成 `桌面歌词.exe`；歌词子进程启动统一加 `CREATE_NO_WINDOW`；开发脚本 `make_desktop_lyrics_exe.bat` 同步优先 pythonw
+- **关键决策与解决方案**: 黑窗因 `python.exe` 为控制台程序；pythonw 为无控制台 GUI 解释器，进程名仍可为「桌面歌词.exe」
+- **修改的文件列表**: app/ops/lyrics_ipc.py、scripts/build_client_package.py、scripts/make_desktop_lyrics_exe.bat、README.md
