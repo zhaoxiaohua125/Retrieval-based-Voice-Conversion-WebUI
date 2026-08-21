@@ -4,6 +4,8 @@ import signal
 import subprocess
 import time
 
+from tools.win_subprocess import spawn_kwargs
+
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +28,7 @@ def kill_process_tree(process, process_name="", task_logger=None):
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 check=False,
+                **spawn_kwargs(),
             )
         except OSError:
             try:

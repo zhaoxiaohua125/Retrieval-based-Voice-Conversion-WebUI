@@ -3,6 +3,7 @@ import html
 import json
 import logging
 import os
+import queue
 import subprocess
 import sys
 import tempfile
@@ -21,6 +22,7 @@ import torch
 
 from configs.config import Config
 from tools.process_utils import kill_process_tree
+from tools.win_subprocess import spawn_kwargs
 
 
 logger = logging.getLogger(__name__)
@@ -146,6 +148,7 @@ PYMSS_WORKER_STATE = {
     "stop_requested": False,
 }
 PYMSS_WORKER_OUTPUT_LOCK = threading.Lock()
+PYMSS_INPROCESS_SINK = None
 DML_FP16_DISABLED_MODEL_TYPES = set()
 
 
@@ -328,7 +331,7 @@ def _write_audio(path, audio, sample_rate, output_format):
         input=audio.tobytes(),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        **spawn_kwargs(),
     )
     if completed.returncode != 0:
         detail = completed.stderr.decode("utf-8", errors="replace").strip()
@@ -546,9 +549,53 @@ class MSSTBatchSeparator:
 
 
 def _worker_emit(event):
+    sink = PYMSS_INPROCESS_SINK
+    if sink is not None:
+        sink.put(event)
+        return
     with PYMSS_WORKER_OUTPUT_LOCK:
         sys.stdout.write(json.dumps(event, ensure_ascii=False) + "\n")
         sys.stdout.flush()
+
+
+def _pymss_use_inprocess_worker():
+    if os.name != 'nt':
+        return False
+    return os.environ.get('RVC_PYMSS_SUBPROCESS', '').strip() != '1'
+
+
+def _pymss_process_worker_event(event, state, protocol_noise):
+    event_type = event.get("event")
+    if event_type == "done":
+        state["saw_done"] = True
+        logger.info("PyMSS worker completed %s file(s)", event.get("processed", 0))
+        return event
+    if event_type == "retry_fp32":
+        state["retry_event"] = event
+        logger.warning("PyMSS worker: %s", event.get("message", ""))
+        return None
+    if event_type == "fatal":
+        if event.get("retry_fp32"):
+            state["retry_event"] = event
+        else:
+            state["saw_fatal"] = True
+            logger.error("PyMSS worker: %s", event.get("message", ""))
+        return event
+    if event_type == "log":
+        log_level = getattr(logging, str(event.get("level", "INFO")).upper(), logging.INFO)
+        logger.log(log_level, "PyMSS worker: %s", event.get("message", ""))
+        return event
+    if event_type == "file":
+        log_method = logger.info if event.get("ok") else logger.error
+        log_method("PyMSS worker: %s", event.get("message", ""))
+        return event
+    if event_type in {"file_start", "status"}:
+        logger.info("PyMSS worker: %s", event.get("message", ""))
+        return event
+    if event_type == "progress":
+        return event
+    protocol_noise.append(str(event))
+    return None
 
 
 class _WorkerEventLogHandler(logging.Handler):
@@ -591,7 +638,19 @@ def _fp16_retryable(error, requested_dtype, allow_fp32_retry):
     )
 
 
+def _pymss_worker_python():
+    exe = Path(sys.executable)
+    if os.name == 'nt' and exe.name.lower() == 'python.exe':
+        pw = exe.with_name('pythonw.exe')
+        if pw.is_file():
+            return str(pw)
+    return str(exe)
+
+
 def _pymss_worker_main(request_path):
+    from app.runtime_env import bootstrap_runtime
+
+    bootstrap_runtime(PROJECT_ROOT)
     request = {}
     use_dml = False
     requested_dtype = "auto"
@@ -856,6 +915,74 @@ def _read_worker_log(path, limit=12000):
         return ""
 
 
+def _pymss_worker_finalize(task_id, input_paths, state, protocol_noise, return_code, stderr_path=None):
+    if protocol_noise:
+        logger.warning(
+            "Ignored non-protocol PyMSS worker stdout: %s",
+            " | ".join(protocol_noise),
+        )
+    if _pymss_task_stop_requested(task_id):
+        yield {
+            "event": "cancelled",
+            "message": "PyMSS 分离任务已停止。",
+            "file_count": len(input_paths),
+        }
+        return
+    retry_event = state.get("retry_event")
+    if retry_event is not None:
+        detail = retry_event.get("detail") or retry_event.get("message") or ""
+        logger.warning("DirectML FP16 worker requested FP32 fallback: %s", detail)
+        raise DMLFP16Fallback(detail)
+    if state.get("saw_fatal"):
+        return
+    if return_code != 0 or not state.get("saw_done"):
+        detail = _read_worker_log(stderr_path) if stderr_path else ""
+        if protocol_noise:
+            noise = "\n".join(protocol_noise)
+            detail = "%s\nstdout:\n%s" % (detail, noise) if detail else "stdout:\n%s" % noise
+        raise RuntimeError(
+            "PyMSS worker exited unexpectedly (code=%s)%s"
+            % (return_code, "\n%s" % detail if detail else "")
+        )
+
+
+def _pymss_worker_events_inprocess(task_id, request, input_paths, request_path):
+    event_queue = queue.Queue()
+    state = {"saw_done": False, "saw_fatal": False, "retry_event": None}
+    protocol_noise = deque(maxlen=5)
+    return_code = 1
+
+    def run_worker():
+        global PYMSS_INPROCESS_SINK
+        nonlocal return_code
+        old_sink = PYMSS_INPROCESS_SINK
+        PYMSS_INPROCESS_SINK = event_queue
+        try:
+            return_code = _pymss_worker_main(str(request_path))
+        except BaseException:
+            return_code = 1
+            raise
+        finally:
+            PYMSS_INPROCESS_SINK = old_sink
+
+    thread = threading.Thread(target=run_worker, name="pymss-inprocess", daemon=True)
+    thread.start()
+    while thread.is_alive() or not event_queue.empty():
+        try:
+            event = event_queue.get(timeout=0.05)
+        except queue.Empty:
+            if _pymss_task_stop_requested(task_id):
+                break
+            continue
+        out = _pymss_process_worker_event(event, state, protocol_noise)
+        if out is not None:
+            yield out
+            if state.get("saw_fatal") or state.get("retry_event") is not None:
+                break
+    thread.join(timeout=7200)
+    yield from _pymss_worker_finalize(task_id, input_paths, state, protocol_noise, return_code)
+
+
 def _pymss_worker_events(
     task_id,
     spec,
@@ -877,8 +1004,11 @@ def _pymss_worker_events(
     }
     worker_code = (
         "import sys;"
+        "from pathlib import Path;"
         "request_path=sys.argv[1];"
         "sys.argv[:]=[sys.argv[0]];"
+        "from app.runtime_env import bootstrap_runtime;"
+        "bootstrap_runtime(Path.cwd());"
         "from tools.pymss_webui import _pymss_worker_main;"
         "raise SystemExit(_pymss_worker_main(request_path))"
     )
@@ -898,30 +1028,30 @@ def _pymss_worker_events(
             json.dumps(request, ensure_ascii=False),
             encoding="utf-8",
         )
+        if _pymss_use_inprocess_worker():
+            yield from _pymss_worker_events_inprocess(task_id, request, input_paths, request_path)
+            return
 
         process = None
         return_code = None
-        saw_done = False
-        saw_fatal = False
-        retry_event = None
-        cancel_requested = False
+        state = {"saw_done": False, "saw_fatal": False, "retry_event": None}
         protocol_noise = deque(maxlen=5)
         with open(stderr_path, "wb") as stderr_file:
             try:
                 environment = os.environ.copy()
                 environment["PYTHONIOENCODING"] = "utf-8"
                 environment["PYTHONUTF8"] = "1"
-                process_group_kwargs = {}
+                process_group_kwargs = spawn_kwargs() if os.name == "nt" else {}
                 if os.name == "nt":
                     process_group_kwargs["creationflags"] = (
-                        subprocess.CREATE_NO_WINDOW
+                        process_group_kwargs.get("creationflags", 0)
                         | subprocess.CREATE_NEW_PROCESS_GROUP
                     )
                 else:
-                    process_group_kwargs["start_new_session"] = True
+                    process_group_kwargs = {"start_new_session": True}
                 process = subprocess.Popen(
                     [
-                        sys.executable,
+                        _pymss_worker_python(),
                         "-u",
                         "-c",
                         worker_code,
@@ -952,46 +1082,11 @@ def _pymss_worker_events(
                     if not isinstance(event, dict):
                         protocol_noise.append(line)
                         continue
-                    event_type = event.get("event")
-                    if event_type == "done":
-                        saw_done = True
-                        logger.info(
-                            "PyMSS worker completed %s file(s)",
-                            event.get("processed", 0),
-                        )
-                        yield event
-                    elif event_type == "retry_fp32":
-                        retry_event = event
-                        logger.warning("PyMSS worker: %s", event.get("message", ""))
-                    elif event_type == "fatal":
-                        if event.get("retry_fp32"):
-                            retry_event = event
-                        else:
-                            saw_fatal = True
-                            logger.error("PyMSS worker: %s", event.get("message", ""))
-                            yield event
-                    elif event_type == "log":
-                        log_level = getattr(
-                            logging,
-                            str(event.get("level", "INFO")).upper(),
-                            logging.INFO,
-                        )
-                        logger.log(log_level, "PyMSS worker: %s", event.get("message", ""))
-                        yield event
-                    elif event_type == "file":
-                        log_method = logger.info if event.get("ok") else logger.error
-                        log_method("PyMSS worker: %s", event.get("message", ""))
-                        yield event
-                    elif event_type in {"file_start", "status"}:
-                        logger.info("PyMSS worker: %s", event.get("message", ""))
-                        yield event
-                    elif event_type == "progress":
-                        yield event
-                    else:
-                        protocol_noise.append(line)
+                    out = _pymss_process_worker_event(event, state, protocol_noise)
+                    if out is not None:
+                        yield out
                 return_code = process.wait()
             finally:
-                cancel_requested = _pymss_task_stop_requested(task_id)
                 if process is not None:
                     try:
                         kill_process_tree(process, "PyMSS", logger)
@@ -1002,37 +1097,9 @@ def _pymss_worker_events(
                         finally:
                             _unregister_worker(task_id, process)
 
-        if protocol_noise:
-            logger.warning(
-                "Ignored non-protocol PyMSS worker stdout: %s",
-                " | ".join(protocol_noise),
-            )
-        if cancel_requested:
-            yield {
-                "event": "cancelled",
-                "message": "PyMSS 分离任务已停止。",
-                "file_count": len(input_paths),
-            }
-            return
-        if retry_event is not None:
-            detail = retry_event.get("detail") or retry_event.get("message") or ""
-            logger.warning("DirectML FP16 worker requested FP32 fallback: %s", detail)
-            raise DMLFP16Fallback(detail)
-        if saw_fatal:
-            return
-        if return_code != 0 or not saw_done:
-            detail = _read_worker_log(stderr_path)
-            if protocol_noise:
-                noise = "\n".join(protocol_noise)
-                detail = (
-                    "%s\nstdout:\n%s" % (detail, noise)
-                    if detail
-                    else "stdout:\n%s" % noise
-                )
-            raise RuntimeError(
-                "PyMSS worker exited unexpectedly (code=%s)%s"
-                % (return_code, "\n%s" % detail if detail else "")
-            )
+        yield from _pymss_worker_finalize(
+            task_id, input_paths, state, protocol_noise, return_code, stderr_path
+        )
 
 
 def pymss_separate(

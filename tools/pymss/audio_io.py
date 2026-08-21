@@ -1,8 +1,11 @@
 import json
+import os
 import subprocess
 
 import av
 import numpy as np
+
+from tools.win_subprocess import spawn_kwargs
 
 
 def _frame_to_audio(frame, mono):
@@ -19,10 +22,16 @@ def _frame_to_audio(frame, mono):
     return (audio.mean(axis=0, keepdims=True) if mono and audio.shape[0] > 1 else audio).astype(np.float32, copy=False)
 
 
+def _ffmpeg_cli(name):
+    key = 'FFMPEG_BINARY' if name == 'ffmpeg' else 'FFPROBE_BINARY'
+    path = os.environ.get(key)
+    return path if path and os.path.isfile(path) else name
+
+
 def _ffmpeg_audio_stream_info(path):
     """Return basic audio stream information from ffprobe."""
     command = [
-        "ffprobe",
+        _ffmpeg_cli("ffprobe"),
         "-v",
         "error",
         "-select_streams",
@@ -33,7 +42,7 @@ def _ffmpeg_audio_stream_info(path):
         "json",
         str(path),
     ]
-    result = subprocess.run(command, check=True, capture_output=True, text=True)
+    result = subprocess.run(command, check=True, capture_output=True, text=True, **spawn_kwargs())
     streams = json.loads(result.stdout or "{}").get("streams") or []
     if not streams:
         raise ValueError(f"No audio stream found in {path!s}.")
@@ -46,14 +55,14 @@ def _load_audio_ffmpeg(path, sr=None, mono=False, offset=0.0, duration=None):
     source_rate, source_channels = _ffmpeg_audio_stream_info(path)
     out_rate = int(sr or source_rate)
     channels = 1 if mono else source_channels
-    command = ["ffmpeg", "-nostdin", "-v", "error"]
+    command = [_ffmpeg_cli("ffmpeg"), "-nostdin", "-v", "error"]
     if offset:
         command += ["-ss", str(float(offset))]
     command += ["-i", str(path), "-map", "0:a:0", "-vn"]
     if duration is not None:
         command += ["-t", str(float(duration))]
     command += ["-f", "f32le", "-acodec", "pcm_f32le", "-ar", str(out_rate), "-ac", str(channels), "-"]
-    result = subprocess.run(command, check=True, capture_output=True)
+    result = subprocess.run(command, check=True, capture_output=True, **spawn_kwargs())
     audio = np.frombuffer(result.stdout, dtype="<f4")
     complete_samples = audio.size // channels
     audio = audio[: complete_samples * channels]
@@ -152,11 +161,10 @@ def load_audio(path, sr=None, mono=False, offset=0.0, duration=None):
         ... )
         >>> clip.ndim
         1"""
-    loaders = [
-        ("PyAV", _load_audio_av),
-        ("librosa", _load_audio_librosa),
-        ("ffmpeg CLI", _load_audio_ffmpeg),
-    ]
+    loaders = [("PyAV", _load_audio_av)]
+    if os.name != "nt":
+        loaders.append(("librosa", _load_audio_librosa))
+    loaders.append(("ffmpeg CLI", _load_audio_ffmpeg))
 
     errors = []
     for name, loader in loaders:

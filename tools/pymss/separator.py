@@ -8,7 +8,6 @@ from concurrent.futures import ThreadPoolExecutor
 import torch
 import numpy as np
 import platform
-import subprocess
 from time import time
 from tqdm import tqdm
 
@@ -1068,12 +1067,13 @@ class MSSeparator:
 
         Returns:
             None: A warning is logged when ffmpeg cannot be found."""
-        try:
-            ffmpeg_version_output = subprocess.check_output(["ffmpeg", "-version"], text=True)
-            first_line = ffmpeg_version_output.splitlines()[0]
-            self.logger.debug(f"FFmpeg installed: {first_line}")
-        except FileNotFoundError:
-            self.logger.warning("FFmpeg is not installed. Please install FFmpeg to use this package.")
+        import shutil
+
+        ffmpeg = os.environ.get("FFMPEG_BINARY") or shutil.which("ffmpeg")
+        if ffmpeg and os.path.isfile(ffmpeg):
+            self.logger.debug("FFmpeg installed: %s", ffmpeg)
+            return
+        self.logger.warning("FFmpeg is not installed. Please install FFmpeg to use this package.")
 
     def load_model(self):
         """Load model weights and build the runtime config.

@@ -2476,7 +2476,10 @@ class ClientController:
         self._cancel_offline(wait=False)
 
     def _offline_worker(self, payload: dict):
+        from app.runtime_env import bootstrap_runtime
         from app.rvc import OfflineSongPipeline
+
+        bootstrap_runtime(self.project_root)
 
         preset = payload.get('preset', 'normal')
         output_dir = payload.get('output_dir', 'opt/task4_offline')

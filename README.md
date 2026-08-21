@@ -3447,3 +3447,48 @@ ewrite；扩展 LyricWord 与字级 matcher
 - **完成的主要任务**: `桌面歌词.exe` 改生成在 `python/` 目录（与 python312.dll 同目录）；启动解析优先 `python/桌面歌词.exe`；删除包根目录旧 exe
 - **关键决策与解决方案**: 根目录 pythonw 副本找不到 python 目录内 DLL；CondaPack 运行时 DLL 仅在 python/ 下
 - **修改的文件列表**: scripts/build_client_package.py、app/ops/lyrics_ipc.py、app/ui/settings_dialog.py、README.md
+
+---
+
+## 会话总结 - 2026-08-21（打包做歌时消除 CMD 闪窗）
+
+- **会话主要目的**: 打包后制作歌曲时频繁出现 CMD 黑窗一闪而过，影响操作；源码运行无此现象
+- **完成的主要任务**: 在 `bootstrap_runtime` 全局为 Windows 子进程注入 `CREATE_NO_WINDOW`（ffmpeg/ffprobe/pymss 等 subprocess 调用）
+- **关键决策与解决方案**: 打包主程序用 pythonw 无控制台，子进程 console 程序会弹窗；源码用 python.exe 不明显；统一 patch `subprocess.run/Popen`，`shell=True` 不 patch 以免破坏更新脚本
+- **修改的文件列表**: app/runtime_env.py、README.md
+
+---
+
+## 会话总结 - 2026-08-21（分离阶段 MSST 子进程消除 CMD 闪窗）
+
+- **会话主要目的**: 全局 subprocess 补丁后做歌闪窗少很多，但 MSST 分离阶段仍有 CMD 一闪而过
+- **完成的主要任务**: MSST worker 子进程启动前调用 `bootstrap_runtime`；worker 改用 `pythonw.exe`；worker 内 ffmpeg/ffprobe 同样注入 `CREATE_NO_WINDOW`
+- **关键决策与解决方案**: 分离在独立 python 子进程跑，主进程 patch 不生效；每阶段一次 worker + 多次 ffmpeg 检测/解码导致剩余闪窗
+- **修改的文件列表**: tools/pymss_webui.py、app/runtime_env.py、README.md
+
+---
+
+## 会话总结 - 2026-08-21（MSST 分离 Windows 改进程内执行）
+
+- **会话主要目的**: 分离阶段仍闪两次 CMD（开始一次、过一会再一次），变声/混音无闪窗
+- **完成的主要任务**: Windows 默认 MSST 不再 spawn 子进程，改为主进程内线程执行；普通预设两阶段各起 worker 是两次闪窗根因
+- **关键决策与解决方案**: subprocess 即使用 pythonw+CREATE_NO_WINDOW 仍可能闪；进程内通过队列转发 worker 事件；设 `RVC_PYMSS_SUBPROCESS=1` 可恢复子进程模式
+- **修改的文件列表**: tools/pymss_webui.py、README.md
+
+---
+
+## 会话总结 - 2026-08-21（分离阶段 CMD 闪窗彻底修复）
+
+- **会话主要目的**: 进程内 MSST 后分离阶段仍会弹 CMD
+- **完成的主要任务**: 新增 `tools/win_subprocess.py`（CREATE_NO_WINDOW+STARTUPINFO）；MSST 加载模型不再跑 `ffmpeg -version`；Windows 跳过 librosa 解码；ffmpeg/ffprobe 显式无窗启动；离线线程启动时 bootstrap
+- **关键决策与解决方案**: 每阶段 MSSeparator 初始化会 subprocess 检测 ffmpeg 是主要闪窗源；librosa 内部也可能调 ffmpeg 且不带隐藏标志
+- **修改的文件列表**: tools/win_subprocess.py、app/runtime_env.py、tools/pymss/audio_io.py、tools/pymss/separator.py、tools/process_utils.py、tools/pymss_webui.py、app/integration/controller.py、README.md
+
+---
+
+## 会话总结 - 2026-08-21（修复 MSST 进程内 worker UnboundLocalError）
+
+- **会话主要目的**: 分离阶段报错 `UnboundLocalError: PYMSS_INPROCESS_SINK`，导致 split 阶段失败
+- **完成的主要任务**: 在 `run_worker` 内补 `global PYMSS_INPROCESS_SINK`，修复嵌套函数赋值导致的作用域错误
+- **关键决策与解决方案**: 内层函数对模块变量赋值会被 Python 视为局部变量，读取前未绑定即崩溃
+- **修改的文件列表**: tools/pymss_webui.py、README.md
