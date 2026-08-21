@@ -22,6 +22,12 @@ SCRIPTS_SHIP = frozenset(
 
 # PyQt6 页面编译为 pyd 会信号槽崩溃；输出目录内改为 .pyc 字节码
 APP_PYD_SKIP_DIRS = frozenset({'ui'})
+# 含 PyQt6 QObject/信号槽的业务模块同样不能 pyd
+APP_PYD_SKIP_REL = frozenset({'ops/lyrics_ipc.py', 'ops/single_instance.py'})
+
+
+def _rel_posix(path: Path, root: Path) -> str:
+    return str(path.relative_to(root)).replace('\\', '/')
 
 
 def _app_py_files(root: Path) -> list[Path]:
@@ -29,6 +35,7 @@ def _app_py_files(root: Path) -> list[Path]:
         p
         for p in sorted(root.rglob('*.py'))
         if not (p.relative_to(root).parts and p.relative_to(root).parts[0] in APP_PYD_SKIP_DIRS)
+        and _rel_posix(p, root) not in APP_PYD_SKIP_REL
     ]
 
 
@@ -41,6 +48,7 @@ def _write_setup_script(work: Path):
 
         work = Path(__file__).resolve().parent
         skip_ui = %r
+        skip_rel = set(%r)
         exts = []
         for pkg in ('app', 'scripts'):
             root = work / pkg
@@ -48,8 +56,12 @@ def _write_setup_script(work: Path):
                 continue
             for py in sorted(root.rglob('*.py')):
                 rel = py.relative_to(root)
-                if pkg == 'app' and rel.parts and rel.parts[0] in skip_ui:
-                    continue
+                if pkg == 'app':
+                    rels = '/'.join(rel.parts)
+                    if rel.parts and rel.parts[0] in skip_ui:
+                        continue
+                    if rels in skip_rel:
+                        continue
                 mod = '.'.join(py.relative_to(work).with_suffix('').parts)
                 exts.append(Extension(mod, [str(py)]))
 
@@ -61,7 +73,7 @@ def _write_setup_script(work: Path):
             ),
         )
         '''
-    ) % (sorted(APP_PYD_SKIP_DIRS),)
+    ) % (sorted(APP_PYD_SKIP_DIRS), sorted(APP_PYD_SKIP_REL))
     (work / 'setup_client_pyd.py').write_text(setup, encoding='utf-8')
 
 LAUNCH_UI = textwrap.dedent(
@@ -163,6 +175,19 @@ def _copy_app_ui_source(src_app: Path, dst_app: Path):
     shutil.copytree(ui_src, ui_dst)
 
 
+def _copy_pyd_skip_py(src_app: Path, dst_app: Path):
+    for rel in APP_PYD_SKIP_REL:
+        src = src_app / rel
+        if not src.is_file():
+            continue
+        dst = dst_app / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+        stem = dst.stem
+        for pyd in dst.parent.glob('%s*.pyd' % stem):
+            pyd.unlink(missing_ok=True)
+
+
 def _compile_ui_pyc(ui_dir: Path, python: str) -> int:
     ui_dir = Path(ui_dir)
     py_files = list(ui_dir.rglob('*.py'))
@@ -236,6 +261,7 @@ def build_client_pyd(out_dir: Path, python: str | None = None, ui_pyc: bool = Tr
                 raise RuntimeError('%s pyd count %s < expected %s' % (pkg, len(pyd_files), expected))
             shutil.copytree(built, out_dir / pkg)
         _copy_app_ui_source(src_app, out_app)
+        _copy_pyd_skip_py(src_app, out_app)
         ui_pyc_count = _compile_ui_pyc(out_app / 'ui', python) if ui_pyc else 0
         _write_launchers(out_scripts)
         _copy_scripts_extra(out_scripts)

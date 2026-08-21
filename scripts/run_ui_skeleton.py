@@ -517,6 +517,7 @@ def main():
                     lyrics.set_anchor_window(window)
                     if not getattr(lyrics, '_restored_geo', False):
                         lyrics.move(window.x() + 40, window.y() + 80)
+                    lyrics.show()
                 controller.set_lyrics_window(lyrics)
                 ctx['lyrics'] = lyrics
                 window._quit_lyrics = lyrics

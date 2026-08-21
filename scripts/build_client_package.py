@@ -96,12 +96,11 @@ def ship_desktop_lyrics(out_dir: Path) -> bool:
     bundled = bundled_w if bundled_w.is_file() else py_dir / 'python.exe'
     if bundled.is_file():
         shutil.copy2(bundled, dst)
-    elif (ROOT / '桌面歌词.exe').is_file():
-        if not py_dir.is_dir():
-            print('WARNING: 包内无 python/，无法生成 桌面歌词.exe')
-            return False
+    elif (ROOT / '桌面歌词.exe').is_file() and py_dir.is_dir():
         shutil.copy2(ROOT / '桌面歌词.exe', dst)
     else:
+        if not py_dir.is_dir():
+            return False
         print('')
         print('WARNING: 包内无 桌面歌词.exe。CondaPack 完成后可执行：')
         print('  python scripts/build_client_package.py --ship-desktop-lyrics "%s"' % out_dir)
@@ -112,8 +111,18 @@ def ship_desktop_lyrics(out_dir: Path) -> bool:
     if ico.is_file() and rcedit.is_file():
         import subprocess
         subprocess.run([str(rcedit), str(dst), '--set-icon', str(ico)], check=False)
-    print('  desktop lyrics: python/%s' % dst.name)
+    alias = py_dir / 'DesktopLyrics.exe'
+    shutil.copy2(dst, alias)
+    print('  desktop lyrics: python/%s (+ DesktopLyrics.exe)' % dst.name)
     return True
+
+
+def verify_desktop_lyrics(out_dir: Path) -> bool:
+    py = Path(out_dir) / 'python'
+    for name in ('桌面歌词.exe', 'DesktopLyrics.exe'):
+        if (py / name).is_file():
+            return True
+    return False
 
 
 def write_launcher(out_dir: Path, use_pyd: bool = False):
@@ -253,7 +262,8 @@ def build(version: str, output_root: Path, lite: bool, cuda_variant: str = '', u
 
     (out_dir / 'VERSION').write_text(ver + '\n', encoding='utf-8')
     write_launcher(out_dir, use_pyd)
-    ship_desktop_lyrics(out_dir)
+    if (out_dir / 'python' / 'python.exe').is_file():
+        ship_desktop_lyrics(out_dir)
     (out_dir / 'config' / 'client.json').parent.mkdir(parents=True, exist_ok=True)
     meta = {
         'product': manifest.get('product', 'RVC Client'),
@@ -285,10 +295,13 @@ def main():
     parser.add_argument('--cuda-variant', default='', choices=('', 'cu118', 'cu128'))
     parser.add_argument('--pyd', action='store_true', help='将 app/ + scripts/ 编译为 .pyd（需 Cython + MSVC）')
     parser.add_argument('--ship-desktop-lyrics', metavar='DIR', default='', help='仅生成包内 桌面歌词.exe（CondaPack 后补跑）')
+    parser.add_argument('--verify-desktop-lyrics', metavar='DIR', default='', help='检查 python/ 内桌面歌词 exe')
     args = parser.parse_args()
     if args.ship_desktop_lyrics:
         ok = ship_desktop_lyrics(Path(args.ship_desktop_lyrics))
         return 0 if ok else 1
+    if args.verify_desktop_lyrics:
+        return 0 if verify_desktop_lyrics(Path(args.verify_desktop_lyrics)) else 1
     manifest = load_manifest()
     ver = args.version or manifest.get('version', '0.1.0-demo')
     out_dir = build(ver, Path(args.output), args.lite, args.cuda_variant, use_pyd=args.pyd)

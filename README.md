@@ -3492,3 +3492,21 @@ ewrite；扩展 LyricWord 与字级 matcher
 - **完成的主要任务**: 在 `run_worker` 内补 `global PYMSS_INPROCESS_SINK`，修复嵌套函数赋值导致的作用域错误
 - **关键决策与解决方案**: 内层函数对模块变量赋值会被 Python 视为局部变量，读取前未绑定即崩溃
 - **修改的文件列表**: tools/pymss_webui.py、README.md
+
+---
+
+## 会话总结 - 2026-08-21（pyd 覆盖后桌面歌词不显示）
+
+- **会话主要目的**: compile_app_pyd 输出覆盖 dist 后桌面歌词不展示，其余功能正常
+- **完成的主要任务**: `lyrics_ipc.py`、`single_instance.py` 加入 pyd 编译跳过（含 PyQt6 信号槽）；编译后保留 .py 并删除同名 .pyd
+- **关键决策与解决方案**: 与 app/ui 相同，PyQt QObject 编译 pyd 后 IPC/歌词子进程失效；还需保留 `scripts/run_desktop_lyrics.py` 与 `python/桌面歌词.exe`
+- **修改的文件列表**: scripts/compile_app_pyd.py、README.md
+
+---
+
+## 会话总结 - 2026-08-21（cu128 打包桌面歌词 WARNING 误报）
+
+- **会话主要目的**: 打包菜单选 2（cu128）提示「包内无 python/，无法生成 桌面歌词.exe」，选 1 正常
+- **完成的主要任务**: 复制文件阶段不再提前生成桌面歌词（CondaPack 前无 python/ 属正常）；CondaPack 完成后 ps1 再 ship；消除误报 WARNING
+- **关键决策与解决方案**: cu118/cu128 流程相同；WARNING 因 build() 在 CondaPack 前调用 ship 且项目根有 桌面歌词.exe 触发；非 cu128 特有问题
+- **修改的文件列表**: scripts/build_client_package.py、scripts/build_client_package.ps1、build_demo_package_menu.bat、README.md

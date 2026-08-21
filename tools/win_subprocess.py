@@ -27,7 +27,8 @@ def patch_module():
     flag = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
     if not flag:
         return
-    _run, _popen = subprocess.run, subprocess.Popen
+    _run = subprocess.run
+    _OrigPopen = subprocess.Popen
     _si = spawn_kwargs().get('startupinfo')
 
     def _apply(kwargs):
@@ -42,10 +43,11 @@ def patch_module():
         _apply(kwargs)
         return _run(*args, **kwargs)
 
-    def popen(*args, **kwargs):
-        _apply(kwargs)
-        return _popen(*args, **kwargs)
+    class _NoConsolePopen(_OrigPopen):
+        def __init__(self, *args, **kwargs):
+            _apply(kwargs)
+            super().__init__(*args, **kwargs)
 
     subprocess.run = run
-    subprocess.Popen = popen
+    subprocess.Popen = _NoConsolePopen
     _PATCHED = True

@@ -36,6 +36,44 @@ function Invoke-CondaPack {
     if ($LASTEXITCODE -ne 0) { throw ("conda-pack failed (exit $LASTEXITCODE)") }
 }
 
+function Clear-TreeReadOnly {
+    param([string]$Path)
+    Get-ChildItem -LiteralPath $Path -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object {
+        if ($_.PSIsContainer) { return }
+        try {
+            if ($_.Attributes -band [IO.FileAttributes]::ReadOnly) {
+                $_.Attributes = $_.Attributes -band (-bnot [IO.FileAttributes]::ReadOnly)
+            }
+        } catch {}
+    }
+}
+
+function Invoke-CondaUnpack {
+    param([string]$UnpackExe, [string]$PyDir, [int]$Retries = 3)
+    Clear-TreeReadOnly $PyDir
+    $ortCapi = Join-Path $PyDir "Lib\site-packages\onnxruntime\capi"
+    for ($i = 1; $i -le $Retries; $i++) {
+        if ($i -gt 1) {
+            Write-Host "conda-unpack retry $i/$Retries ..."
+            Start-Sleep -Seconds 2
+            Clear-TreeReadOnly $PyDir
+            if (Test-Path $ortCapi) {
+                Get-ChildItem -LiteralPath $ortCapi -Filter *.dll -ErrorAction SilentlyContinue | ForEach-Object {
+                    try { $_.IsReadOnly = $false } catch {}
+                }
+            }
+        }
+        Write-Host "Running conda-unpack..."
+        & $UnpackExe
+        if ($LASTEXITCODE -eq 0) { return }
+    }
+    throw @"
+conda-unpack failed (often Permission denied on onnxruntime *.dll).
+Close all Python/RVC processes and retry. Add dist folder to antivirus exclusions.
+If still failing, run this build script as Administrator.
+"@
+}
+
 $CondaBase = $CondaBase.TrimEnd('\')
 $CondaExe = Join-Path $CondaBase "Scripts\conda.exe"
 $PackExe = Join-Path $CondaBase "python.exe"
@@ -95,9 +133,7 @@ if ($CondaPack) {
     $unpack = Join-Path $pyDir "Scripts\conda-unpack.exe"
     if (-not (Test-Path $unpack)) { $unpack = Join-Path $pyDir "conda-unpack.exe" }
     if (-not (Test-Path $unpack)) { throw "conda-unpack not found in $pyDir" }
-    Write-Host "Running conda-unpack..."
-    & $unpack
-    if ($LASTEXITCODE -ne 0) { throw "conda-unpack failed" }
+    Invoke-CondaUnpack $unpack $pyDir
     $bundledPy = Join-Path $pyDir "python.exe"
     if (-not (Test-Path $bundledPy)) { throw "python.exe not found: $bundledPy" }
     Write-Host "Repair torch/torchaudio..."
@@ -110,6 +146,9 @@ if ($CondaPack) {
     Write-Host "Ship desktop lyrics exe..."
     & $EnvPython (Join-Path $Root "scripts\build_client_package.py") --ship-desktop-lyrics $OutDir
     if ($LASTEXITCODE -ne 0) { throw "desktop lyrics exe ship failed" }
+    & $EnvPython (Join-Path $Root "scripts\build_client_package.py") --verify-desktop-lyrics $OutDir
+    if ($LASTEXITCODE -ne 0) { throw "desktop lyrics verify failed (python/DesktopLyrics.exe)" }
+    Write-Host "Desktop lyrics OK (python/DesktopLyrics.exe)"
     Write-Host "Python runtime OK: $bundledPy"
     $variantFile = Join-Path $OutDir "GPU_VARIANT.txt"
     @(
