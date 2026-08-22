@@ -187,6 +187,14 @@ def is_vm_vaio_playback_name(name: str) -> bool:
     return 'input' in lower and ('voicemeeter input' in lower or 'vaio' in lower)
 
 
+def is_vm_main_vaio_playback_name(name: str) -> bool:
+    """主 VAIO Input（VoiceMeeter Input），不含 Aux / VAIO3。抖音扬声器常用此设备。"""
+    lower = (name or '').lower()
+    if 'vaio3' in lower or 'aux' in lower:
+        return False
+    return is_vm_vaio_playback_name(name)
+
+
 def refresh_portaudio():
     """仅在没有打开音频流时调用；运行中 terminate 会导致四模式全部无声。"""
     try:
@@ -252,6 +260,48 @@ def is_vm_vaio_output_device(dev: AudioDeviceInfo | None) -> bool:
     return is_vm_vaio_playback_name(dev.name)
 
 
+def is_vm_main_vaio_output_device(dev: AudioDeviceInfo | None) -> bool:
+    if dev is None:
+        return False
+    if dev.voicemeeter_role == 'voicemeeter_vaio_in':
+        return True
+    if dev.voicemeeter_role == 'voicemeeter_vaio3_in':
+        return False
+    return is_vm_main_vaio_playback_name(dev.name)
+
+
+def is_vm_vaio3_output_device(dev: AudioDeviceInfo | None) -> bool:
+    if dev is None:
+        return False
+    if dev.voicemeeter_role == 'voicemeeter_vaio3_in':
+        return True
+    lower = (dev.name or '').lower()
+    return 'voicemeeter' in lower and 'vaio3' in lower and 'input' in lower
+
+
+def pick_vaio3_monitor(devices: list[AudioDeviceInfo] | None, stream_out_idx: int | None) -> int | None:
+    items = devices if devices is not None else list_devices()
+    for dev in items:
+        if (
+            dev.max_output_channels > 0
+            and dev.index != stream_out_idx
+            and (
+                dev.voicemeeter_role == 'voicemeeter_vaio3_in'
+                or ('vaio3' in dev.name.lower() and 'input' in dev.name.lower())
+            )
+        ):
+            return dev.index
+    return None
+
+
+def pick_main_vaio_monitor(devices: list[AudioDeviceInfo] | None, stream_out_idx: int | None) -> int | None:
+    items = devices if devices is not None else list_devices()
+    for dev in items:
+        if dev.max_output_channels > 0 and dev.index != stream_out_idx and is_vm_main_vaio_output_device(dev):
+            return dev.index
+    return None
+
+
 def vm_default_echo_risk(hostapi: str | None = None, refresh: bool = False) -> str | None:
     """Windows 默认播放为 VoiceMeeter VAIO 时，与客户端监听叠音易导致直播 B1 回响。"""
     name = windows_default_playback_name(hostapi, refresh=refresh)
@@ -310,25 +360,42 @@ def pick_direct_headphone_default(devices: list[AudioDeviceInfo] | None, stream_
 
 
 def pick_monitor_default(devices: list[AudioDeviceInfo] | None, stream_out_idx: int | None):
-    """直播输出为 Aux 时，监听默认走 VAIO Input（与 stream 分离）。"""
+    """直播为 Aux 时，耳机监听优先 VAIO3（只 A1：伴奏/AI，不含干声）；主 VAIO 留给抖音扬声器。"""
     if stream_out_idx is None:
         return None
     items = devices if devices is not None else list_devices()
     stream = next((d for d in items if d.index == stream_out_idx), None)
-    roles = ('voicemeeter_vaio_in', 'voicemeeter_vaio3_in')
     if stream and stream.voicemeeter_role == 'voicemeeter_aux_in':
-        roles = ('voicemeeter_vaio_in', 'voicemeeter_vaio3_in')
+        roles = ('voicemeeter_vaio3_in',)
+    elif stream and stream.voicemeeter_role == 'voicemeeter_vaio3_in':
+        roles = ('voicemeeter_vaio_in',)
     elif stream and stream.voicemeeter_role == 'voicemeeter_vaio_in':
-        roles = ('voicemeeter_aux_in', 'voicemeeter_vaio3_in')
+        roles = ('voicemeeter_vaio3_in',)
     else:
-        roles = ('voicemeeter_vaio_in', 'voicemeeter_aux_in', 'voicemeeter_vaio3_in')
+        roles = ('voicemeeter_vaio3_in',)
     for role in roles:
         for dev in items:
             if dev.max_output_channels > 0 and dev.voicemeeter_role == role and dev.index != stream_out_idx:
                 return dev.index
-    for dev in items:
-        if dev.max_output_channels > 0 and 'voicemeeter' in dev.tags and dev.index != stream_out_idx:
-            return dev.index
+    direct = pick_direct_headphone_default(items, stream_out_idx)
+    if direct is not None:
+        return direct
+    return pick_main_vaio_monitor(items, stream_out_idx)
+
+
+def _monitor_away_from_main_vaio(items: list[AudioDeviceInfo], stream_out_idx: int | None, idx: int | None) -> int | None:
+    """躲开主 VAIO（抖音扬声器 VoiceMeeter Input），改 VAIO3 或物理耳机。"""
+    if idx is None:
+        return None
+    mon = next((d for d in items if d.index == idx), None)
+    if not is_vm_main_vaio_output_device(mon):
+        return idx
+    alt = pick_vaio3_monitor(items, stream_out_idx)
+    if alt is not None:
+        return alt
+    alt = pick_direct_headphone_default(items, stream_out_idx)
+    if alt is not None:
+        return alt
     return None
 
 
@@ -338,22 +405,30 @@ def resolve_monitor_device(
     hostapi: str | None = None,
     devices: list[AudioDeviceInfo] | None = None,
     playback_mode: str = '',
+    avoid_vaio3: bool = False,
+    avoid_main_vaio: bool = True,
+    avoid_vm_speaker_bus: bool = False,
 ):
+    """双路监听：优先 VAIO3（耳机只要伴奏/AI）；avoid_main_vaio 躲开抖音扬声器总线。勿用 AUX→A1（会听到自己说话）。"""
     ref = str(monitor_ref or '').strip().lower()
     if ref in ('off', 'none', 'false', '0', 'disable', 'disabled'):
         return None
     items = devices if devices is not None else list_devices(hostapi=hostapi)
+    avoid_main = avoid_main_vaio or avoid_vm_speaker_bus or playback_mode in ('ai_sing', 'ai_follow')
     if not is_auto_device(monitor_ref):
         idx = resolve_device_index(monitor_ref, need_output=True, devices=items)
         if idx is not None and idx != stream_out_idx:
+            mon = next((d for d in items if d.index == idx), None)
+            if mon and mon.voicemeeter_role == 'voicemeeter_aux_in':
+                return _monitor_away_from_main_vaio(items, stream_out_idx, pick_vaio3_monitor(items, stream_out_idx))
+            if avoid_main:
+                idx = _monitor_away_from_main_vaio(items, stream_out_idx, idx)
             return idx
         return None
     vm = pick_monitor_default(items, stream_out_idx)
-    if vm is not None:
-        return vm
-    if playback_mode in ('ai_sing', 'ai_follow'):
-        return pick_direct_headphone_default(items, stream_out_idx)
-    return None
+    if avoid_main:
+        vm = _monitor_away_from_main_vaio(items, stream_out_idx, vm)
+    return vm
 
 
 def find_device_by_name(

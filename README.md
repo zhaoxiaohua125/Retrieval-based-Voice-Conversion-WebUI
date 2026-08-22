@@ -3510,3 +3510,59 @@ ewrite；扩展 LyricWord 与字级 matcher
 - **完成的主要任务**: 复制文件阶段不再提前生成桌面歌词（CondaPack 前无 python/ 属正常）；CondaPack 完成后 ps1 再 ship；消除误报 WARNING
 - **关键决策与解决方案**: cu118/cu128 流程相同；WARNING 因 build() 在 CondaPack 前调用 ship 且项目根有 桌面歌词.exe 触发；非 cu128 特有问题
 - **修改的文件列表**: scripts/build_client_package.py、scripts/build_client_package.ps1、build_demo_package_menu.bat、README.md
+
+---
+
+## 会话总结 - 2026-08-21（抖音 PK 与 VAIO 路由澄清）
+
+- **会话主要目的**: 用户确认 VM 条带 VAIO 仅 A1、AUX 仅 B1，纠正此前「VAIO→B1 叠音」误判；澄清 PK 必须走 VoiceMeeter Input 才能听见对手
+- **完成的主要任务**: 对齐路由诊断：正确分路下 PK 扬声器仍应选 VoiceMeeter Input（听耳机 A1）；观众端 PK 声通常由抖音云端混音，不必 VAIO 勾 B1；小回音改查声学/通信设备/侦听等
+- **关键决策与解决方案**: VAIO 只 A1 + AUX 只 B1 是推荐防回音路由，与「抖音扬声器=VoiceMeeter Input」不矛盾；若必须把 PK 灌进 B1 再用 VAIO3
+- **使用的技术栈**: Voicemeeter Potato、抖音直播伴侣、Windows 声音设备
+- **修改的文件列表**: README.md
+
+---
+
+## 会话总结 - 2026-08-21（回音是否程序问题）
+
+- **会话主要目的**: 用户怀疑配置已齐仍有回音/PK问题，是否客户端程序故障
+- **完成的主要任务**: 对照 client.json（auto/双路/block 200ms）与 pick_voicemeeter_defaults（优先 Aux Out/In）；给出程序 vs 路由 vs 声学 A/B 判定
+- **关键决策与解决方案**: PK 扬声器必须 VM Input 非程序 bug；VAIO 仅 A1+AUX 仅 B1 下程序不应双灌 B1；小回音优先声学/200ms 延迟链，用关客户端直送 B1 对比
+- **修改的文件列表**: README.md
+
+---
+
+## 会话总结 - 2026-08-22（伴奏+抖音扬声器 VAIO 回响）
+
+- **会话主要目的**: 普通说话小回音可接受；播放伴奏且抖音扬声器走 VoiceMeeter Input 时产生回响，需程序侧修改
+- **完成的主要任务**: 监听默认改优先 VAIO3；伴奏播放时避免主 VAIO（与抖音扬声器同设备）再灌伴奏；设置页/开发大纲同步路由说明
+- **关键决策与解决方案**: 根因是双路监听伴奏与抖音扬声器同抢主 VAIO→A1 叠延迟；分路为抖音→VAIO、客户端监听→VAIO3
+- **使用的技术栈**: sounddevice 双 OutputStream、Voicemeeter Potato VAIO3
+- **修改的文件列表**: app/audio/devices.py、app/audio/stream_manager.py、app/ui/settings_dialog.py、开发大纲.md、README.md
+
+---
+
+## 会话总结 - 2026-08-22（酷狗 VAIO3 与监听死循环）
+
+- **会话主要目的**: 用户 H1/VAIO/AUX/VAIO3 勾选冲突，酷狗需 VAIO3→B1 进直播，与客户端监听抢总线回响
+- **完成的主要任务**: 监听改回优先主 VAIO；VAIO3 专留给酷狗 A1+B1；纠正 H1 必须只 B2；更新设置说明与开发大纲
+- **关键决策与解决方案**: 三路分工——抖音扬声器+客户端耳机→VAIO(只A1)，酷狗→VAIO3(A1+B1)，客户端直播→AUX(只B1)；非死循环而是条带复用错误
+- **修改的文件列表**: app/audio/devices.py、app/audio/stream_manager.py、app/ui/settings_dialog.py、开发大纲.md、README.md
+
+---
+
+## 会话总结 - 2026-08-22（AI唱歌伴奏与抖音扬声器回响）
+
+- **会话主要目的**: 条带正确（H1=B2/VAIO=A1/AUX=B1/VAIO3=A1+B1）时，抖音扬声器 VoiceMeeter Input 下 AI 唱歌与伴奏仍回响
+- **完成的主要任务**: AI/伴奏监听 avoid_vm_speaker_bus，改物理耳机、禁止灌主 VAIO/VAIO3；无物理口时关第二路并提示 AUX 勾 A1+B1 同源听
+- **关键决策与解决方案**: 回响来自直播 Aux→B1 与监听主 VAIO→A1 同内容，再与抖音扬声器同条叠延迟；PK 可留主 VAIO，AI 监听必须离开该总线
+- **修改的文件列表**: app/audio/devices.py、app/audio/stream_manager.py、app/ui/settings_dialog.py、开发大纲.md、README.md
+
+---
+
+## 会话总结 - 2026-08-22（恢复双路：耳机只要伴奏/AI）
+
+- **会话主要目的**: 否决 AUX 勾 A1+B1（会听见自己说话）；恢复「耳机只要伴奏/AI」双路方案
+- **完成的主要任务**: 监听改回优先 VAIO3（只 A1）；主 VAIO 专给抖音扬声器；禁止用 AUX 听自己；酷狗进直播时再勾 VAIO3 的 B1
+- **关键决策与解决方案**: 说话干声只在 Aux→B1；耳机监听 VAIO3→A1 出伴奏/AI；与抖音扬声器分总线，避免再推翻双路需求
+- **修改的文件列表**: app/audio/devices.py、app/audio/stream_manager.py、app/ui/settings_dialog.py、README.md

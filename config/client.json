@@ -105,7 +105,7 @@
     "normal_talk": "F4"
   },
   "playback": {
-    "play_mode": "sequential",
+    "play_mode": "repeat_one",
     "smart_switch": false,
     "smart_switch_min_gap_sec": 1.0
   },
@@ -133,8 +133,8 @@
   },
   "ui": {
     "geometry": [
-      127,
-      212,
+      171,
+      292,
       1280,
       952
     ],
@@ -143,8 +143,8 @@
     "lyrics_window": {
       "orientation": "vertical",
       "geometry": [
-        1414,
-        181,
+        1458,
+        261,
         140,
         832
       ],
@@ -155,8 +155,8 @@
         166
       ],
       "geometry_v": [
-        1414,
-        181,
+        1458,
+        261,
         140,
         832
       ]

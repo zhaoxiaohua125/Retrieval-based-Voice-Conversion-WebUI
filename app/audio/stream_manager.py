@@ -136,6 +136,7 @@ class AudioStreamManager:
             stream_out_idx,
             hostapi=self.config.hostapi,
             playback_mode=mode,
+            avoid_main_vaio=True,
         )
 
     @property
@@ -198,6 +199,8 @@ class AudioStreamManager:
             self._inst_finished = False
             self._inst_path = str(Path(path).resolve())
             self._reset_clock_locked(self._inst_pos, active=self._running)
+        if self._running:
+            self._sync_monitor_stream()
 
     def load_ref_vocal(self, path: str):
         from app.audio.wav_cache import load_mono_resampled
@@ -218,6 +221,8 @@ class AudioStreamManager:
             self._inst_finished = False
             self._inst_path = ''
             self._reset_clock_locked(0, active=False)
+        if self._running:
+            self._sync_monitor_stream()
 
     def clear_ref_vocal(self):
         with self._lock:
@@ -243,7 +248,10 @@ class AudioStreamManager:
                 self._clock_active = False
             else:
                 self._reset_clock_locked(self._inst_pos, active=self._running)
-            return not self._inst_paused
+            playing = not self._inst_paused
+        if self._running:
+            self._sync_monitor_stream()
+        return playing
 
     def _read_song_frames(self, frames: int) -> tuple[np.ndarray, np.ndarray]:
         with self._lock:
@@ -415,6 +423,12 @@ class AudioStreamManager:
         if mode in ('ai_sing', 'ai_follow'):
             return True
         return bool(self.config.dual_monitor) and mode in ('normal_talk', 'reverb_talk')
+
+    def _monitor_on_main_vaio(self) -> bool:
+        from app.audio.devices import is_vm_main_vaio_output_device, list_devices
+
+        mon = next((d for d in list_devices(hostapi=self.config.hostapi) if d.index == self._monitor_dev), None)
+        return is_vm_main_vaio_output_device(mon)
 
     def _sync_monitor_stream(self):
         if not self._running:
@@ -611,7 +625,12 @@ class AudioStreamManager:
 
     def _mix_talk(self, boosted: np.ndarray, inst: np.ndarray, ig: float, for_monitor: bool) -> np.ndarray:
         if for_monitor and self.config.dual_monitor:
-            if self._inst_data is None or ig <= 0:
+            if self._inst_data is None or ig <= 0 or self._inst_paused:
+                return np.zeros_like(boosted, dtype=np.float32)
+            from app.audio.devices import is_vm_main_vaio_output_device, list_devices
+
+            mon = next((d for d in list_devices(hostapi=self.config.hostapi) if d.index == self._monitor_dev), None)
+            if is_vm_main_vaio_output_device(mon):
                 return np.zeros_like(boosted, dtype=np.float32)
             return np.clip(inst.reshape(-1, 1) * ig, -1.0, 1.0).astype(np.float32)
         voice = boosted
@@ -679,6 +698,8 @@ class AudioStreamManager:
             vg = _cfg_gain(self.config.ai_vocal_gain, 1.0)
             vocal = ref.reshape(-1, 1).astype(np.float32)
             if for_monitor:
+                if self._monitor_on_main_vaio():
+                    return np.zeros((frames, 1), dtype=np.float32)
                 return self._mix_ai_live(vocal * min(vg, 1.0), inst, ig)
             return self._mix_ai_live(self._ai_live_vocal(ref, vg), inst, ig, live_limit=True)
         if mode == 'ai_follow':
@@ -688,6 +709,8 @@ class AudioStreamManager:
             vg = _cfg_gain(self.config.ai_vocal_gain, 1.0)
             vocal = ref.reshape(-1, 1).astype(np.float32)
             if for_monitor:
+                if self._monitor_on_main_vaio():
+                    return np.zeros((frames, 1), dtype=np.float32)
                 vg = min(vg, 1.0)
                 boosted = vocal * vg * gate * mg + vocal * rg
                 return self._mix_ai_live(boosted, inst, ig)

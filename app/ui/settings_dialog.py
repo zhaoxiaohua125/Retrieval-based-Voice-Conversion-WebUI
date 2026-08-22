@@ -176,16 +176,17 @@ class SettingsDialog(QDialog):
             self.cmb_monitor = QComboBox()
             self.cmb_monitor.setMinimumWidth(420)
             self.cmb_monitor.setToolTip(
-                '双路输出：直播走「输出设备 Aux→B1」，耳机走「监听设备 VAIO→A1」。\n'
-                '普通/混响：耳机仅伴奏；AI 唱歌/跟唱：耳机为完整混音（>100% 时耳机音量封顶 100%）。\n'
-                'AUX 只勾 B1、VAIO 只勾 A1，AUX 勿勾 A1。\n'
-                'Windows 系统默认播放请设 Realtek 等物理声卡，勿设 VoiceMeeter Input。'
+                '双路目标：耳机只要「伴奏 / AI」，不要自己的说话声；直播走 Aux→只 B1。\n'
+                '监听自动优先 VAIO3→只勾 A1（勿勾 B1，否则和直播叠音）。\n'
+                '主 VAIO→只 A1：专给抖音扬声器/PK，客户端不往这里灌 AI/伴奏。\n'
+                '酷狗要进直播时：VAIO3 再勾 B1；此时请停客户端伴奏，或先关掉双路监听。\n'
+                '不要用 AUX 勾 A1（会听见自己说话）。'
             )
             form.addRow('监听设备（耳机）', self.cmb_monitor)
             self.chk_dual_monitor = QCheckBox('双路监听（普通/混响说话时耳机不含干声）')
             self.chk_dual_monitor.setToolTip(
-                '普通/混响：直播 Aux→B1（含人声），监听 VAIO→A1（仅伴奏）。\n'
-                'AI 唱歌/跟唱：直播 Aux→B1，监听 VAIO→A1（完整混音）；AUX 勿勾 A1。'
+                '开：说话时耳机只出伴奏（VAIO3→A1）；关：耳机不走第二路。\n'
+                'AI 唱歌/跟唱仍走 VAIO3 听 AI+伴奏，直播仍只 Aux→B1。'
             )
             form.addRow('', self.chk_dual_monitor)
             self.chk_dual_monitor.toggled.connect(lambda on: self.cmb_monitor.setEnabled(on))
@@ -279,7 +280,7 @@ class SettingsDialog(QDialog):
             self.slider_ai_vocal.setRange(0, 400)
             self.slider_ai_vocal.setToolTip(
                 '0%～400%，与普通说话同一刻度：400% 时直播人声目标电平一致。\n'
-                '超过 100% 时直播更响，耳机监听封顶 100%。AUX 只 B1、VAIO 只 A1。'
+                '超过 100% 时直播更响，耳机监听封顶 100%。AUX 只 B1；主 VAIO 只 A1（抖音扬声器）；监听 VAIO3 只 A1（酷狗进直播才再勾 B1）。'
             )
             self.lbl_ai_vocal = QLabel('')
             self.lbl_ai_vocal.setMinimumWidth(44)
@@ -771,7 +772,7 @@ class SettingsDialog(QDialog):
             out_idx = def_out
         self.cmb_monitor.blockSignals(True)
         self.cmb_monitor.clear()
-        self.cmb_monitor.addItem('自动（配对 VAIO / Aux）', 'auto')
+        self.cmb_monitor.addItem('自动（VAIO3 听伴奏/AI；主 VAIO 给抖音）', 'auto')
         self.cmb_monitor.addItem('关闭', 'off')
         sel_mon = 0 if is_auto_device(mon_ref) else 1 if str(mon_ref).lower() == 'off' else -1
         mon_idx = None
